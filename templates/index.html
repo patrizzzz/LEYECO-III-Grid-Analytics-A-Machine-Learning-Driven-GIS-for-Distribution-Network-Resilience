@@ -1,32 +1,15 @@
-{% extends "base.html" %}
-{% set active_page = "dashboard" %}
-
-{% block title %}Dashboard — Interactive Map{% endblock %}
-
-{% block head %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Electrical Post Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-{% endblock %}
-
-{% block content %}
-  <div class="page">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Dashboard</h1>
-        <p class="page-subtitle">Interactive post map (pins scale with zoom). Use layers to compare canonical posts vs raw lat/long.</p>
-      </div>
-    </div>
-
-    <section class="card map-card">
-      <div class="card-header">
-        <div class="card-title">Interactive map</div>
-        <div class="card-hint">Tip: zoom in to see larger pins</div>
-      </div>
-      <div class="map-frame">
-        <div id="map"></div>
-      </div>
-    </section>
-  </div>
-{% endblock %}
+  <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+  <h1>Interactive Electrical Post Map</h1>
+  <div id="map"></div>
 
 {% block scripts %}
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>

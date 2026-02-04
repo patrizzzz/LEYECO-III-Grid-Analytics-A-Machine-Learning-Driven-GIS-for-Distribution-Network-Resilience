@@ -1,43 +1,10 @@
 document.addEventListener('DOMContentLoaded', function() {
   // Default map centered on Philippines
-  const DEFAULT_CENTER = [12.8797, 121.7740];
-  const DEFAULT_ZOOM = 7;
-
-  // Auto-zoom behavior when we have markers:
-  // - avoid TOO ZOOMED OUT (min)
-  // - avoid TOO ZOOMED IN / too tight on coordinates (max)
-  const MIN_AUTO_ZOOM = 10;
-  const MAX_AUTO_ZOOM = 25;
-
-  // Remember last view (frontend-only UX improvement)
-  const VIEW_KEY = 'leyeco.mapView.v1';
-  function loadSavedView() {
-    try {
-      const raw = localStorage.getItem(VIEW_KEY);
-      if (!raw) return null;
-      const v = JSON.parse(raw);
-      if (!v || !Array.isArray(v.center) || typeof v.zoom !== 'number') return null;
-      if (typeof v.center[0] !== 'number' || typeof v.center[1] !== 'number') return null;
-      return v;
-    } catch {
-      return null;
-    }
-  }
-  function saveView(map) {
-    try {
-      const c = map.getCenter();
-      localStorage.setItem(VIEW_KEY, JSON.stringify({ center: [c.lat, c.lng], zoom: map.getZoom() }));
-    } catch {
-      // ignore (private mode / disabled storage)
-    }
-  }
-
-  const saved = loadSavedView();
-  const map = L.map('map').setView(saved?.center || DEFAULT_CENTER, saved?.zoom || DEFAULT_ZOOM);
+  const map = L.map('map').setView([12.8797, 121.7740], 6);
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    attribution: '© OpenStreetMap contributors'
+    attribution: '© OpenStreetMap contributors',
   }).addTo(map);
 
   // Rotation wrapper to allow visual rotation (tiles & overlays) without rotating controls
@@ -92,48 +59,11 @@ document.addEventListener('DOMContentLoaded', function() {
   L.control.layers(null, overlays, { collapsed: false }).addTo(map);
 
   // Helper to add markers to a layer
-  const STATUS_COLORS = {
-    // You can tweak these to match your branding
-    active: '#dc2626',       // red-600
-    maintenance: '#ef4444',  // red-500
-    inactive: '#991b1b',     // red-800
-  };
-
-  function normalizeStatus(status) {
-    const s = String(status || '').trim().toLowerCase();
-    if (s === 'active' || s === 'maintenance' || s === 'inactive') return s;
-    return 'inactive';
-  }
-
-  function createPostIcon(p) {
-    const s = normalizeStatus(p.status);
-    const color = STATUS_COLORS[s] || STATUS_COLORS.inactive;
-    const id = p.id ?? '';
-    return L.divIcon({
-      className: 'custom-pin',
-      html: `
-        <div class="pin-wrap">
-          <div class="pin-label">ID ${id}</div>
-          <svg class="pin-svg" viewBox="0 0 24 36" aria-hidden="true">
-            <!-- pin body -->
-            <path d="M12 35c7-10 10-15.2 10-20.2C22 7.7 17.5 3 12 3S2 7.7 2 14.8C2 19.8 5 25 12 35z" fill="${color}"></path>
-            <!-- white ring + center highlight -->
-            <circle class="pin-ring" cx="12" cy="14" r="6.2" fill="none"></circle>
-            <circle class="pin-center" cx="12" cy="14" r="2.1"></circle>
-          </svg>
-        </div>
-      `,
-      iconSize: [18, 28],
-      iconAnchor: [9, 28],     // bottom-center of pin
-      popupAnchor: [0, -24],
-    });
-  }
-
   function addPostMarker(layer, p) {
     const lat = parseFloat(p.lat);
     const lng = parseFloat(p.lng);
     if (Number.isNaN(lat) || Number.isNaN(lng)) return;
-    const marker = L.marker([lat, lng], { title: p.name || `Post ${p.id}`, icon: createPostIcon(p) })
+    const marker = L.marker([lat, lng], { title: p.name || `Post ${p.id}` })
       .bindPopup(`<strong>${p.name || 'Post ' + p.id}</strong><br>Status: ${p.status || 'N/A'}<br>Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>ID: ${p.id}`);
     marker.bindTooltip(`ID: ${p.id}`, { permanent: false, direction: 'top' });
     marker.addTo(layer);
@@ -145,8 +75,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const lat = parseFloat(r.lat);
     const lng = parseFloat(r.lng);
     if (Number.isNaN(lat) || Number.isNaN(lng)) return;
-    // Keep raw layer visually lighter than canonical posts
-    const circle = L.circleMarker([lat, lng], { radius: 5, color: '#0ea5e9', weight: 2, fillColor: '#0ea5e9', fillOpacity: 0.18 })
+    const circle = L.circleMarker([lat, lng], { radius: 6, color: '#007bff', fillColor: '#007bff', fillOpacity: 0.9 })
       .bindPopup(`<strong>Raw: ${r.post_id}</strong><br>Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
     circle.addTo(layer);
     bounds.extend([lat, lng]);
@@ -161,11 +90,8 @@ document.addEventListener('DOMContentLoaded', function() {
       // Add postsLayer to map by default
       postsLayer.addTo(map);
       // Fit map if we added markers
-      // Only auto-fit if the user doesn't have a saved view yet
-      if (!saved && !bounds.isEmpty()) {
-        // A bit more padding so it doesn't feel "too focused on coordinates"
-        map.fitBounds(bounds.pad(0.18), { maxZoom: MAX_AUTO_ZOOM });
-        if (map.getZoom() < MIN_AUTO_ZOOM) map.setZoom(MIN_AUTO_ZOOM);
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds.pad(0.12));
       }
     })
     .catch(err => console.error('Failed to load posts', err));
@@ -179,21 +105,5 @@ document.addEventListener('DOMContentLoaded', function() {
       // Do not add latlongLayer by default; user can toggle it on via control
     })
     .catch(err => console.error('Failed to load latlongdata', err));
-
-  // Scale pins based on zoom (small when zoomed out, bigger when zoomed in)
-  const mapElForScale = document.getElementById('map');
-  function updatePinScale() {
-    if (!mapElForScale) return;
-    const z = map.getZoom();
-    // Tuned for zoom 6..18. Clamp keeps it clean.
-    const scale = Math.max(0.55, Math.min(1.25, 0.55 + (z - 6) * 0.06));
-    mapElForScale.style.setProperty('--pin-scale', String(scale));
-  }
-  updatePinScale();
-  map.on('zoomend', updatePinScale);
-
-  // Persist view when user navigates/zooms (so next open matches what they last used)
-  map.on('moveend', () => saveView(map));
-  map.on('zoomend', () => saveView(map));
 
 });
