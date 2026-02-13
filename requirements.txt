@@ -4,3 +4,4 @@ python-dotenv>=0.21.0
 Flask-SQLAlchemy>=3.0
 Flask-Migrate>=4.0
 PyMySQL>=1.0
+openpyxl>=3.0

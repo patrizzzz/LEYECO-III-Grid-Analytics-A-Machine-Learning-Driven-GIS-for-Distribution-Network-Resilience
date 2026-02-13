@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block title %}Resources - Leyeco{% endblock %}
+
+{% block head %}
+  <link rel="stylesheet" href="/static/css/styles.css">
+{% endblock %}
+
+{% block content %}
+  <h1>Resources</h1>
+  <p style="color:var(--text-secondary); margin-top:-6px;">
+    Upload post + connection files and download processed outputs for verification and GIS.
+  </p>
+
+  <div class="dashboard-grid dashboard-grid--data">
+    <div class="dashboard-card">
+      <h2>⬆️ Upload</h2>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
+        <form id="upload-posts-form" style="padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
+          <div style="font-weight:700; margin-bottom: 8px;">Import Posts (CSV/Excel)</div>
+          <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 10px;">
+            Required columns: <code>Pole Number</code>, <code>Latitude</code>, <code>Longitude</code> (plus any infrastructure fields you have).
+          </div>
+          <input type="file" id="upload-posts-file" accept=".csv,.xlsx,.xls" style="width:100%; margin-bottom: 10px;">
+          <button type="submit" class="btn" id="upload-posts-btn">Upload</button>
+          <div id="upload-posts-status" style="margin-top:10px; font-size:0.95rem; color:var(--text-secondary);"></div>
+        </form>
+
+        <form id="upload-connections-form" style="padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
+          <div style="font-weight:700; margin-bottom: 8px;">Import Connections (CSV/Excel)</div>
+          <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 10px;">
+            Required columns: <code>From_ID</code>, <code>To_ID</code>, <code>Connection_Type</code>
+          </div>
+          <input type="file" id="upload-connections-file" accept=".csv,.xlsx,.xls" style="width:100%; margin-bottom: 10px;">
+          <button type="submit" class="btn" id="upload-connections-btn">Upload</button>
+          <div id="upload-connections-status" style="margin-top:10px; font-size:0.95rem; color:var(--text-secondary);"></div>
+        </form>
+      <div style="margin-top:12px;">
+        <form id="upload-transformers-form" style="padding: 12px; border: 1px solid var(--border); border-radius: 8px; max-width:640px;">
+          <div style="font-weight:700; margin-bottom: 8px;">Import Distribution Transformers (example2.csv)</div>
+          <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 10px;">Example file: <code>example2.csv</code>. Required: <code>Distribution Transformer ID</code> and <code>From Primary Bus ID</code>.</div>
+          <input type="file" id="upload-transformers-file" accept=".csv,.xlsx,.xls" style="width:100%; margin-bottom: 10px;">
+          <button type="submit" class="btn" id="upload-transformers-btn">Upload Transformer CSV</button>
+          <div id="upload-transformers-status" style="margin-top:10px; font-size:0.95rem; color:var(--text-secondary);"></div>
+        </form>
+      </div>
+    </div>
+
+    <div class="dashboard-card">
+      <h2>⬇️ Export</h2>
+      <div style="display:grid; gap: 10px;">
+        <div style="padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
+          <div style="font-weight:700; margin-bottom: 6px;">CSV exports</div>
+          <div style="display:flex; gap: 10px; flex-wrap: wrap;">
+            <a class="btn" href="/api/export/posts.csv">Download Posts CSV</a>
+            <a class="btn" href="/api/export/line-connections.csv">Download Line Connections CSV</a>
+          </div>
+        </div>
+
+        <div style="padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
+          <div style="font-weight:700; margin-bottom: 6px;">GeoJSON</div>
+          <div style="color:var(--text-secondary); font-size:0.95rem; margin-bottom: 10px;">
+            Map-renderable network geometry generated from DB topology + stored coordinates only.
+          </div>
+          <div style="display:flex; gap: 10px; flex-wrap: wrap;">
+            <a class="btn" href="/api/network-geometry.geojson">Download Network Geometry (GeoJSON)</a>
+            <a class="btn btn-secondary" href="/api/network-geometry" target="_blank" rel="noopener">View Network Geometry JSON</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dashboard-card">
+      <h2>🗑️ Data Management</h2>
+      <div style="padding: 12px; border: 1px solid #fee2e2; border-radius: 8px; background: #fef2f2;">
+        <div style="font-weight:700; margin-bottom: 6px; color: #991b1b;">Delete All Data</div>
+        <div style="font-size: 0.95rem; color: #7f1d1d; margin-bottom: 12px;">
+          Permanently delete all posts, connections, network lines, and raw data. IDs will reset to 1. <strong>This cannot be undone.</strong>
+        </div>
+        <button id="delete-all-btn" class="btn" style="background-color: #dc2626; border-color: #dc2626; color: white;">
+          🗑️ Delete All Data
+        </button>
+        <div id="delete-status" style="margin-top:10px; font-size:0.95rem; color:var(--text-secondary);"></div>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    function bindUpload(formId, fileId, btnId, statusId, url, onSuccess) {
+      const form = document.getElementById(formId);
+      const file = document.getElementById(fileId);
+      const btn = document.getElementById(btnId);
+      const status = document.getElementById(statusId);
+      if (!form || !file || !btn || !status) return;
+
+      form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        if (!file.files || !file.files.length) {
+          alert('Select a file first.');
+          return;
+        }
+
+        const fd = new FormData();
+        fd.append('file', file.files[0]);
+        btn.disabled = true;
+        status.textContent = 'Uploading...';
+
+        fetch(url, { method: 'POST', body: fd })
+          .then(r => r.json())
+          .then(j => {
+            btn.disabled = false;
+            if (j && j.error) {
+              status.textContent = 'Error: ' + j.error;
+              return;
+            }
+            status.textContent = j && j.message ? j.message : 'Upload complete.';
+            try { if (onSuccess) onSuccess(j); } catch (e) {}
+          })
+          .catch(err => {
+            btn.disabled = false;
+            status.textContent = 'Upload failed: ' + (err && err.message ? err.message : String(err));
+          });
+      });
+    }
+
+    bindUpload(
+      'upload-posts-form',
+      'upload-posts-file',
+      'upload-posts-btn',
+      'upload-posts-status',
+      '/api/posts/bulk-import',
+      function(result) {
+        // After successful import, reload map data
+        console.log('Posts imported:', result);
+        if (window.location.pathname === '/map' || window.location.pathname === '/') {
+          // If on map page, try to refresh the map
+          try {
+            if (typeof window.reloadMapData === 'function') {
+              window.reloadMapData();
+            }
+          } catch (e) {
+            console.warn('Could not reload map:', e);
+          }
+        } else {
+          // Show message and optionally redirect to map
+          setTimeout(function() {
+            alert('✅ Data imported successfully! Redirecting to map...');
+            window.location.href = '/';
+          }, 500);
+        }
+      }
+    );
+
+    bindUpload(
+      'upload-connections-form',
+      'upload-connections-file',
+      'upload-connections-btn',
+      'upload-connections-status',
+      '/api/connections/bulk-import'
+    );
+
+    bindUpload(
+      'upload-lines-form',
+      'upload-lines-file',
+      'upload-lines-btn',
+      'upload-lines-status',
+      '/api/distribution-lines/bulk-import',
+      function(result) {
+        console.log('Distribution lines imported:', result);
+        setTimeout(function() {
+          alert('✅ Distribution lines imported. Redirecting to dashboard...');
+          window.location.href = '/dashboard';
+        }, 400);
+      }
+    );
+
+    bindUpload(
+      'upload-transformers-form',
+      'upload-transformers-file',
+      'upload-transformers-btn',
+      'upload-transformers-status',
+      '/api/transformers/bulk-import',
+      function(result) {
+        console.log('Transformers imported:', result);
+        alert('✅ Transformer import complete: ' + (result.message || (result.created + ' created, ' + result.updated + ' updated')));
+      }
+    );
+
+    // Delete all data button handler
+    const deleteBtn = document.getElementById('delete-all-btn');
+    const deleteStatus = document.getElementById('delete-status');
+    if (deleteBtn && deleteStatus) {
+      deleteBtn.addEventListener('click', function() {
+        if (!confirm('⚠️ DELETE ALL DATA?\n\nThis will permanently delete:\n- All posts/poles\n- All connections\n- All network lines\n- All raw coordinates\n\nIDs will reset to 1. This cannot be undone!\n\nOK to confirm?')) {
+          return;
+        }
+        
+        deleteBtn.disabled = true;
+        deleteStatus.textContent = 'Processing...';
+        deleteStatus.style.color = 'var(--text-secondary)';
+
+        fetch('/api/data/delete-all', { 
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+          .then(r => {
+            if (!r.ok) {
+              return r.json().then(j => {
+                throw new Error(j.message || j.error || 'Server error');
+              });
+            }
+            return r.json();
+          })
+          .then(result => {
+            deleteBtn.disabled = false;
+            if (result.result === 'success') {
+              deleteStatus.textContent = '✅ ' + result.message;
+              deleteStatus.style.color = '#065f46';
+              console.log('Delete successful - ID reset status:', result.id_reset_status);
+              // Clear map if accessible
+              try {
+                if (window.clearAllMapLayers) window.clearAllMapLayers();
+              } catch (e) {}
+            } else {
+              deleteStatus.textContent = '❌ ' + (result.message || result.error || 'Unknown error');
+              deleteStatus.style.color = '#991b1b';
+            }
+          })
+          .catch(err => {
+            deleteBtn.disabled = false;
+            deleteStatus.textContent = '❌ ' + err.message;
+            deleteStatus.style.color = '#991b1b';
+            console.error('Delete error:', err);
+          });
+      });
+    }
+  });
+</script>
+{% endblock %}
+

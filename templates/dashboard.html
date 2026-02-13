@@ -1,0 +1,586 @@
+{% extends "base.html" %}
+
+{% block title %}Electrical Post Data - Leyeco{% endblock %}
+
+{% block head %}
+  <link rel="stylesheet" href="/static/css/styles.css">
+{% endblock %}
+
+{% block content %}
+  <h1>Electrical Post Data</h1>
+
+  <div class="dashboard-grid dashboard-grid--data">
+    <div class="dashboard-card posts-table">
+      <h2>📋 Electrical Post Data</h2>
+      <div style="margin-bottom: 12px;">
+        <input type="text" id="search-posts" placeholder="Search by ID, Name, or Status..." style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; box-sizing: border-box;">
+      </div>
+      <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Latitude</th>
+            <th>Longitude</th>
+            <th>Status</th>
+            <th>Connections</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="posts-tbody">
+          <tr>
+            <td colspan="7" style="text-align: center; padding: 20px; color: #999;">
+              Loading posts...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      
+      <!-- Pagination Controls -->
+      <div class="pagination-footer">
+        <div class="pagination-info">
+          <span id="pagination-text">Loading...</span>
+        </div>
+        <div class="pagination-nav">
+          <button id="pagination-prev" class="pagination-btn pagination-nav-btn" title="Previous page" aria-label="Previous page">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M15 19l-7-7 7-7"></path>
+            </svg>
+          </button>
+          <div id="pagination-pages" class="pagination-pages">
+            <!-- Page buttons will be inserted here -->
+          </div>
+          <button id="pagination-next" class="pagination-btn pagination-nav-btn" title="Next page" aria-label="Next page">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 5l7 7-7 7"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Distribution Line Segments Section -->
+  <div class="dashboard-grid dashboard-grid--data" style="margin-top: 24px;">
+    <div class="dashboard-card">
+      <h2>⚡ Distribution Line Segments</h2>
+      <div style="margin-bottom: 12px;">
+        <input type="text" id="search-lines" placeholder="Search by Segment ID, Bus IDs..." style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; box-sizing: border-box;">
+      </div>
+      <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Segment ID</th>
+            <th>From Bus</th>
+            <th>To Bus</th>
+            <th>Length (m)</th>
+            <th>Configuration</th>
+            <th>Phasing</th>
+            <th>Conductor</th>
+            <th>Details</th>
+          </tr>
+        </thead>
+        <tbody id="lines-tbody">
+          <tr>
+            <td colspan="8" style="text-align: center; padding: 20px; color: #999;">
+              Loading distribution line segments...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      // Pagination state
+      let currentPage = 1;
+      let perPage = 10;
+      let totalPages = 1;
+      let isAdmin = false;
+
+      function updateRowStatus(row, status) {
+        const s = (status || '').toLowerCase();
+        const btn = row.querySelector('.status-toggle');
+        const text = row.querySelector('.status-text');
+        btn.classList.toggle('is-active', s === 'active');
+        btn.classList.toggle('is-inactive', s === 'inactive');
+        btn.setAttribute('aria-pressed', s === 'active' ? 'true' : 'false');
+        if (text) text.textContent = status;
+      }
+
+      function attachRowHandlers(row) {
+        const id = row.dataset.postId;
+        const badge = row.querySelector('.conn-badge');
+        
+        // Fetch connections count
+        fetch(`/api/posts/${id}/connections`).then(r => r.json()).then(conns => {
+          const list = Array.isArray(conns) ? conns : (conns && conns.connections) ? conns.connections : [];
+          if (list.length > 0) {
+            badge.textContent = list.length;
+            badge.classList.add('has-count');
+            badge.style.display = 'inline-flex';
+            badge.title = `${list.length} connection${list.length > 1 ? 's' : ''}`;
+            badge.addEventListener('click', function (e) {
+              e.stopPropagation();
+              const lines = list.map(c => `#${c.id}${c.name ? ' — ' + c.name : ''}`).join('\n');
+              alert(lines || 'No connection details');
+            });
+          }
+        }).catch(() => {});
+
+        const btn = row.querySelector('.status-toggle');
+        
+        // Locator button - available to all users
+        const locateBtn = row.querySelector('.locate-post');
+        if (locateBtn) {
+          locateBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            const lat = this.dataset.lat;
+            const lng = this.dataset.lng;
+            const postId = this.dataset.postId;
+            window.location.href = `/map?id=${postId}&lat=${lat}&lng=${lng}`;
+          });
+        }
+        
+        if (!isAdmin) {
+          if (btn) btn.style.display = 'none';
+          row.querySelectorAll('.edit-post, .export-post, .delete-post').forEach(b => b.style.display = 'none');
+          return;
+        }
+        
+        // Show action buttons for admins
+        row.querySelectorAll('.edit-post, .export-post, .delete-post').forEach(b => b.style.display = 'inline-block');
+        
+        // Edit button
+        const editBtn = row.querySelector('.edit-post');
+        if (editBtn) {
+          editBtn.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            const post = { 
+              id: id, 
+              name: row.cells[1].textContent, 
+              lat: parseFloat(row.cells[2].textContent), 
+              lng: parseFloat(row.cells[3].textContent), 
+              status: row.querySelector('.status-text').textContent 
+            };
+            openEditPostModal(post);
+          });
+        }
+        
+        // Export button
+        const expBtn = row.querySelector('.export-post');
+        if (expBtn) {
+          expBtn.addEventListener('click', function (e) { 
+            e.preventDefault(); 
+            window.location = '/api/export/post/' + id; 
+          });
+        }
+        
+        // Delete button
+        const delBtn = row.querySelector('.delete-post');
+        if (delBtn) {
+          delBtn.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            if (!confirm(`Delete post #${id}? This cannot be undone.`)) return;
+            fetch(`/api/posts/${id}`, { method: 'DELETE' })
+              .then(r => r.json()).then(json => {
+                if (json && json.success) {
+                  row.style.opacity = '0.5';
+                  row.style.pointerEvents = 'none';
+                  setTimeout(() => row.remove(), 300);
+                  loadPosts(currentPage);
+                } else {
+                  alert('Failed to delete post: ' + (json.error || 'Unknown error'));
+                }
+              }).catch(err => alert('Delete failed: ' + err));
+          });
+        }
+        
+        // Status toggle
+        if (btn) {
+          btn.addEventListener('click', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            btn.disabled = true;
+            fetch(`/api/posts/${id}/status`, { 
+              method: 'POST', 
+              headers: { 'Content-Type': 'application/json' }, 
+              body: JSON.stringify({ action: 'toggle' }) 
+            })
+              .then(r => r.json()).then(json => {
+                if (json && json.status) updateRowStatus(row, json.status);
+              }).catch(err => console.error(err))
+              .finally(() => btn.disabled = false);
+          });
+        }
+      }
+
+      function renderPosts(posts) {
+        const tbody = document.getElementById('posts-tbody');
+        tbody.innerHTML = '';
+        
+        if (!posts || posts.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: #999;">No posts available.</td></tr>';
+          return;
+        }
+        
+        posts.forEach(p => {
+          const row = document.createElement('tr');
+          row.className = 'post-row';
+          row.dataset.postId = p.id;
+          row.innerHTML = `
+            <td>#${p.id}</td>
+            <td>${p.name}</td>
+            <td>${(parseFloat(p.lat) || 0).toFixed(4)}</td>
+            <td>${(parseFloat(p.lng) || 0).toFixed(4)}</td>
+            <td>
+              <div class="status-cell">
+                <button class="status-toggle ${(p.status || '').toLowerCase() === 'active' ? 'is-active' : (p.status || '').toLowerCase() === 'inactive' ? 'is-inactive' : ''}" 
+                        aria-pressed="${(p.status || '').toLowerCase() === 'active' ? 'true' : 'false'}" 
+                        data-post-id="${p.id}" title="Toggle status" style="display:none;">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="currentColor" />
+                  </svg>
+                </button>
+                <span class="status-text">${p.status || 'N/A'}</span>
+              </div>
+            </td>
+            <td>
+              <button class="conn-badge" data-post-id="${p.id}" title="Connections" style="display:none;"></button>
+            </td>
+            <td>
+              <div class="action-buttons">
+                <button class="btn-icon locate-post" data-post-id="${p.id}" data-lat="${p.lat}" data-lng="${p.lng}" title="View on map">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M324-111.5Q251-143 197-197t-85.5-127Q80-397 80-480t31.5-156Q143-709 197-763t127-85.5Q397-880 480-880t156 31.5Q709-817 763-763t85.5 127Q880-563 880-480t-31.5 156Q817-251 763-197t-127 85.5Q563-80 480-80t-156-31.5ZM480-260q45-45 80-93 30-41 55-90t25-97q0-66-47-113t-113-47q-66 0-113 47t-47 113q0 48 25 97t55 90q35 48 80 93Zm-42.5-237.5Q420-515 420-540t17.5-42.5Q455-600 480-600t42.5 17.5Q540-565 540-540t-17.5 42.5Q505-480 480-480t-42.5-17.5Z"/></svg>
+                </button>
+                <button class="btn-icon edit-post" data-post-id="${p.id}" title="Edit post" style="display:none;">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h357l-80 80H200v560h560v-278l80-80v358q0 33-23.5 56.5T760-120H200Zm280-360ZM360-360v-170l367-367q12-12 27-18t30-6q16 0 30.5 6t26.5 18l56 57q11 12 17 26.5t6 29.5q0 15-5.5 29.5T897-728L530-360H360Zm481-424-56-56 56 56ZM440-440h56l232-232-28-28-29-28-231 231v57Zm260-260-29-28 29 28 28 28-28-28Z"/></svg>
+                </button>
+                <button class="btn-icon export-post" data-post-id="${p.id}" title="Export post data" style="display:none;">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>
+                </button>
+                <button class="btn-icon delete-post" data-post-id="${p.id}" title="Delete post" style="display:none;">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>
+                </button>
+              </div>
+            </td>
+          `;
+          tbody.appendChild(row);
+          attachRowHandlers(row);
+        });
+      }
+
+      function updatePaginationControls() {
+        const infoEl = document.querySelector('.pagination-info span');
+        const prevBtn = document.getElementById('pagination-prev');
+        const nextBtn = document.getElementById('pagination-next');
+        const pagesDiv = document.getElementById('pagination-pages');
+        
+        // Update pagination info text
+        infoEl.textContent = `Showing page ${currentPage} of ${totalPages}`;
+        
+        // Update nav buttons
+        prevBtn.disabled = currentPage <= 1;
+        nextBtn.disabled = currentPage >= totalPages;
+        
+        // Clear page numbers
+        pagesDiv.innerHTML = '';
+        
+        // Calculate which pages to show
+        const startPage = Math.max(1, currentPage - 2);
+        const endPage = Math.min(totalPages, currentPage + 2);
+        
+        // Show first page if not in range
+        if (startPage > 1) {
+          const btn = document.createElement('button');
+          btn.className = 'pagination-btn';
+          btn.textContent = '1';
+          btn.addEventListener('click', () => goToPage(1));
+          pagesDiv.appendChild(btn);
+          
+          // Show ellipsis if there's a gap
+          if (startPage > 2) {
+            const ellipsis = document.createElement('span');
+            ellipsis.className = 'pagination-ellipsis';
+            ellipsis.textContent = '…';
+            ellipsis.style.padding = '0 4px';
+            ellipsis.style.color = 'var(--text-secondary)';
+            pagesDiv.appendChild(ellipsis);
+          }
+        }
+        
+        // Show page range
+        for (let i = startPage; i <= endPage; i++) {
+          const btn = document.createElement('button');
+          btn.className = 'pagination-btn';
+          if (i === currentPage) {
+            btn.classList.add('active');
+          }
+          btn.textContent = i;
+          btn.addEventListener('click', () => goToPage(i));
+          pagesDiv.appendChild(btn);
+        }
+        
+        // Show last page if not in range
+        if (endPage < totalPages) {
+          // Show ellipsis if there's a gap
+          if (endPage < totalPages - 1) {
+            const ellipsis = document.createElement('span');
+            ellipsis.className = 'pagination-ellipsis';
+            ellipsis.textContent = '…';
+            ellipsis.style.padding = '0 4px';
+            ellipsis.style.color = 'var(--text-secondary)';
+            pagesDiv.appendChild(ellipsis);
+          }
+          
+          const btn = document.createElement('button');
+          btn.className = 'pagination-btn';
+          btn.textContent = totalPages;
+          btn.addEventListener('click', () => goToPage(totalPages));
+          pagesDiv.appendChild(btn);
+        }
+      }
+
+      function loadPosts(page = 1) {
+        currentPage = page;
+        fetch(`/api/posts?page=${page}&per_page=${perPage}`)
+          .then(r => r.json())
+          .then(response => {
+            if (response.pagination) {
+              totalPages = response.pagination.total_pages;
+              renderPosts(response.data);
+              updatePaginationControls();
+            }
+          })
+          .catch(err => {
+            console.error('Failed to load posts:', err);
+            document.getElementById('posts-tbody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: #c00;">Failed to load posts.</td></tr>';
+          });
+      }
+
+      function loadDistributionLines() {
+        fetch('/api/distribution-lines')
+          .then(r => r.json())
+          .then(lines => {
+            renderDistributionLines(lines);
+          })
+          .catch(err => {
+            console.error('Failed to load distribution lines:', err);
+            document.getElementById('lines-tbody').innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #c00;">Failed to load distribution line segments.</td></tr>';
+          });
+      }
+
+      function renderDistributionLines(lines) {
+        const tbody = document.getElementById('lines-tbody');
+        tbody.innerHTML = '';
+        
+        if (!lines || lines.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #999;">No distribution line segments available.</td></tr>';
+          return;
+        }
+        
+        lines.forEach(line => {
+          const row = document.createElement('tr');
+          row.className = 'line-row';
+          row.innerHTML = `
+            <td><strong>${line.segment_id}</strong></td>
+            <td>${line.from_bus_id}</td>
+            <td>${line.to_bus_id}</td>
+            <td>${(line.length_meters || 0).toFixed(2)}</td>
+            <td>${line.configuration || '-'}</td>
+            <td>${line.phasing || '-'}</td>
+            <td>${line.conductor_type} ${line.conductor_size ? line.conductor_size : ''}</td>
+            <td>
+              <button class="btn btn-small" style="font-size:12px;padding:4px 8px;" onclick="showLineDetails(${line.id}, '${line.segment_id}')">View</button>
+            </td>
+          `;
+          tbody.appendChild(row);
+        });
+        
+        // Add search functionality for lines
+        const searchInput = document.getElementById('search-lines');
+        if (searchInput) {
+          searchInput.addEventListener('keyup', function() {
+            const query = this.value.toLowerCase();
+            const rows = document.querySelectorAll('.line-row');
+            
+            rows.forEach(row => {
+              const segmentId = row.querySelector('td:nth-child(1)')?.textContent || '';
+              const fromBus = row.querySelector('td:nth-child(2)')?.textContent || '';
+              const toBus = row.querySelector('td:nth-child(3)')?.textContent || '';
+              
+              const match = segmentId.toLowerCase().includes(query) || 
+                           fromBus.toLowerCase().includes(query) || 
+                           toBus.toLowerCase().includes(query);
+              
+              row.style.display = match ? '' : 'none';
+            });
+          });
+        }
+      }
+
+      function showLineDetails(lineId, segmentId) {
+        alert(`Distribution Line Segment: ${segmentId}\n\nID: ${lineId}\n\nUse the Resources page to view/edit all technical specifications.`);
+      }
+
+      function goToPage(page) {
+        if (page >= 1 && page <= totalPages) {
+          loadPosts(page);
+        }
+      }
+
+      // Pagination button handlers
+      document.getElementById('pagination-prev').addEventListener('click', () => {
+        if (currentPage > 1) goToPage(currentPage - 1);
+      });
+      document.getElementById('pagination-next').addEventListener('click', () => {
+        if (currentPage < totalPages) goToPage(currentPage + 1);
+      });
+
+      // Determine current user role first
+      fetch('/auth/whoami').then(r => r.json()).then(info => {
+        isAdmin = info && info.authenticated && info.user && info.user.role === 'admin';
+        // Load initial posts and distribution lines
+        loadPosts(1);
+        loadDistributionLines();
+      }).catch(() => {
+        // Proceed without auth info
+        loadPosts(1);
+        loadDistributionLines();
+      });
+      
+      // Create edit modal
+      let editModal = null;
+      function createEditModal() {
+        if (editModal) return editModal;
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay edit-post-modal-overlay';
+        overlay.style.display = 'none';
+        overlay.innerHTML = `
+          <div class="modal edit-post-modal">
+            <div class="modal-header">
+              <h3><span id="edit-post-name-title">Edit Post</span></h3>
+              <button class="modal-close edit-close" aria-label="Close">✕</button>
+            </div>
+            <div class="modal-body">
+              <input id="edit-post-id" type="hidden">
+              <div class="modal-row">
+                <div style="display:flex;flex-direction:column;gap:4px;">
+                  <div id="edit-post-name-display" style="font-size:18px;font-weight:700;color:var(--text-primary);"></div>
+                  <div id="edit-post-id-small" style="font-size:12px;color:var(--text-secondary);"></div>
+                </div>
+              </div>
+              <div class="modal-row">
+                <label for="edit-post-lat">Latitude <span style="color:#e74c3c">*</span></label>
+                <input id="edit-post-lat" type="text" placeholder="e.g. 11.239800" inputmode="decimal" style="border:2px solid #e8e8e8;padding:10px;border-radius:6px;font-size:14px;">
+              </div>
+              <div class="modal-row">
+                <label for="edit-post-lng">Longitude <span style="color:#e74c3c">*</span></label>
+                <input id="edit-post-lng" type="text" placeholder="e.g. 124.757000" inputmode="decimal" style="border:2px solid #e8e8e8;padding:10px;border-radius:6px;font-size:14px;">
+              </div>
+              <div class="modal-row">
+                <label for="edit-post-status">Status</label>
+                <select id="edit-post-status" style="border:2px solid #e8e8e8;padding:10px;border-radius:6px;font-size:14px;background:#fff;cursor:pointer;">
+                  <option value="">-- Select --</option>
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                  <option value="Building/Ongoing">Building/Ongoing</option>
+                </select>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn edit-save" style="background:var(--primary);color:#fff;padding:10px 24px;border-radius:6px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;">Save Changes</button>
+              <button class="btn btn-secondary edit-cancel" style="background:#e8e8e8;color:#333;padding:10px 24px;border-radius:6px;font-weight:600;border:none;cursor:pointer;transition:all 0.2s;">Cancel</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(overlay);
+        
+        overlay.querySelector('.modal-close').addEventListener('click', () => closeEditModal());
+        overlay.querySelector('.edit-cancel').addEventListener('click', () => closeEditModal());
+        overlay.querySelector('.edit-save').addEventListener('click', saveEdit);
+        overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeEditModal(); });
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) closeEditModal(); });
+        
+        editModal = overlay;
+        return editModal;
+      }
+      
+      function closeEditModal() {
+        if (editModal) editModal.style.display = 'none';
+      }
+      
+      function saveEdit() {
+        const m = editModal;
+        const id = (m.querySelector('#edit-post-id').value || '').toString();
+        const lat = (m.querySelector('#edit-post-lat').value || '').trim();
+        const lng = (m.querySelector('#edit-post-lng').value || '').trim();
+        const status = (m.querySelector('#edit-post-status').value || '').trim();
+        
+        if (!lat || !lng) {
+          alert('Please enter both latitude and longitude.');
+          return;
+        }
+        
+        const latNum = parseFloat(lat);
+        const lngNum = parseFloat(lng);
+        if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+          alert('Latitude and longitude must be valid numbers.');
+          return;
+        }
+        
+        fetch(`/api/posts/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: latNum, lng: lngNum, status: status || undefined })
+        }).then(r => r.json()).then(json => {
+          if (json && json.success) {
+            closeEditModal();
+            loadPosts(currentPage);
+          } else {
+            alert('Update failed: ' + (json.error || 'Unknown error'));
+          }
+        }).catch(err => alert('Update failed: ' + err));
+      }
+      
+      window.openEditPostModal = function(post) {
+        const m = createEditModal();
+        m.querySelector('#edit-post-id').value = post.id;
+        m.querySelector('#edit-post-name-display').textContent = post.name;
+        m.querySelector('#edit-post-id-small').textContent = '#'+post.id;
+        m.querySelector('#edit-post-lat').value = post.lat.toFixed(6);
+        m.querySelector('#edit-post-lng').value = post.lng.toFixed(6);
+        m.querySelector('#edit-post-status').value = post.status || '';
+        m.style.display = 'flex';
+        m.querySelector('#edit-post-lat').focus();
+      };
+
+      // Search functionality
+      const searchInput = document.getElementById('search-posts');
+      if (searchInput) {
+        searchInput.addEventListener('keyup', function() {
+          const query = this.value.toLowerCase();
+          const rows = document.querySelectorAll('.post-row');
+          
+          rows.forEach(row => {
+            const id = row.querySelector('td:nth-child(1)')?.textContent || '';
+            const name = row.querySelector('td:nth-child(2)')?.textContent || '';
+            const status = row.querySelector('td:nth-child(5)')?.textContent || '';
+            
+            const match = id.toLowerCase().includes(query) || 
+                         name.toLowerCase().includes(query) || 
+                         status.toLowerCase().includes(query);
+            
+            row.style.display = match ? '' : 'none';
+          });
+        });
+      }
+    });
+  </script>
+{% endblock %}

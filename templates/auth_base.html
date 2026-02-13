@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Leyeco III Sign In{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  {% block head %}{% endblock %}
+  <link rel="stylesheet" href="/static/css/styles.css">
+  <style>
+    /* Minimalist internal-company auth design */
+    .auth-shell { 
+      min-height: 100vh; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      background: var(--background); 
+      padding: 16px;
+    }
+    
+    .auth-card { 
+      background: var(--surface); 
+      padding: 40px 36px; 
+      border-radius: 8px; 
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
+      border: 1px solid var(--border);
+      max-width: 400px; 
+      width: 100%;
+      animation: fadeIn 0.3s ease-out;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .auth-header { 
+      margin-bottom: 32px; 
+      text-align: center;
+    }
+    
+    .auth-header-title {
+      font-weight: 700; 
+      font-size: 1.1rem; 
+      color: var(--text-primary);
+      margin: 0 0 4px 0;
+    }
+    
+    .auth-header-subtitle {
+      color: var(--text-secondary); 
+      font-size: 0.9rem; 
+      margin: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="auth-shell">
+    <div class="auth-card">
+      <div class="auth-header">
+        <h1 class="auth-header-title">Leyeco III</h1>
+        <p class="auth-header-subtitle">Power Network Dashboard</p>
+      </div>
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+  <!-- Theme Toggle (from base.html logic) -->
+  <script>
+    (function(){
+      try {
+        const saved = localStorage.getItem('leyeco-theme');
+        const apply = (t) => {
+          if (t === 'dark') document.body.classList.add('dark-theme'); 
+          else document.body.classList.remove('dark-theme');
+        };
+        apply(saved === 'dark' ? 'dark' : 'light');
+      } catch (e) { console.warn('theme load failed', e); }
+    })();
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

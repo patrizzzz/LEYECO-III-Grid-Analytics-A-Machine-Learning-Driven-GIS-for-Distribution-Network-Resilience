@@ -1,18 +1,92 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Electrical Post Map</title>
+{% extends "base.html" %}
+
+{% block title %}Electrical Post Map{% endblock %}
+
+{% block head %}
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-  <link rel="stylesheet" href="/static/css/styles.css">
-</head>
-<body>
-  <h1>Interactive Electrical Post Map</h1>
-  <div id="map"></div>
+  <style>
+    .map-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .map-header h1 {
+      margin: 0;
+    }
+    #delete-data-btn {
+      background-color: #dc2626;
+      border-color: #dc2626;
+      color: white;
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: 1px solid #dc2626;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    #delete-data-btn:hover {
+      background-color: #b91c1c;
+      border-color: #b91c1c;
+    }
+    #delete-data-btn:disabled {
+      background-color: #fecaca;
+      border-color: #fecaca;
+      cursor: not-allowed;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  <div class="map-header">
+    <h1>🗺️ Interactive Electrical Post Map</h1>
+  </div>
+  <div id="map" style="min-height: 420px; height: calc(100vh - 240px); width: 100%; background: #e4e8ec;"></div>
+{% endblock %}
 
 {% block scripts %}
   <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script>
+    // Extract URL parameters for post location navigation
+    const params = new URLSearchParams(window.location.search);
+    window._targetPostId = params.get('id');
+    window._targetLat = parseFloat(params.get('lat'));
+    window._targetLng = parseFloat(params.get('lng'));
+  </script>
   <script src="/static/js/main.js"></script>
+  <script>
+    // Delete button handler - runs after main.js loads
+    setTimeout(function() {
+      const deleteBtn = document.getElementById('delete-data-btn');
+      if (deleteBtn && typeof deleteAllData === 'function') {
+        deleteBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          deleteBtn.disabled = true;
+          deleteAllData()
+            .then(result => {
+              deleteBtn.disabled = false;
+              if (result && result.success) {
+                alert('✅ ' + result.message);
+                console.log('✅ Delete successful');
+              } else if (result) {
+                alert('❌ ' + result.message);
+                console.error('Delete failed:', result.message);
+              } else {
+                alert('❌ Unexpected response from delete');
+              }
+            })
+            .catch(err => {
+              deleteBtn.disabled = false;
+              const errMsg = err && err.message ? err.message : String(err);
+              alert('❌ Error: ' + errMsg);
+              console.error('Delete error:', err);
+            });
+        });
+      } else if (deleteBtn) {
+        deleteBtn.style.opacity = '0.5';
+        deleteBtn.disabled = true;
+        deleteBtn.title = 'Function not available - please refresh the page';
+      }
+    }, 100);
+  </script>
 {% endblock %}
-

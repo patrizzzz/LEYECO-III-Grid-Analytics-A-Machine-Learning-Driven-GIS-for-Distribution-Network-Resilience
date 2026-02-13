@@ -1,13 +1,1088 @@
-html, body { height: 100%; margin: 0; font-family: Arial, sans-serif; }
-h1 { text-align: center; margin: 0.5rem 0; }
-#map { height: calc(100vh - 4rem); width: 100%; }
+:root {
+  --primary: #3b82f6;
+  --primary-dark: #1d4ed8;
+  --primary-light: #dbeafe;
+  --secondary: #10b981;
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --border: #e2e8f0;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
 
-/* Rotation wrapper holds the map pane and gets rotated visually */
-.rotate-wrapper { position: absolute; inset: 0; transform-origin: 50% 50%; }
+html, body { 
+  height: 100%; 
+  margin: 0; 
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+  background: var(--background); 
+  color: var(--text-primary);
+  line-height: 1.6;
+}
 
-/* Rotation control styling */
-.rotate-control { display:flex; align-items:center; gap:6px; padding:4px; border-radius:4px; background: rgba(255,255,255,0.95); box-shadow: 0 1px 3px rgba(0,0,0,0.18); }
-.rotate-control button { background: transparent; border: 1px solid #ccc; padding:4px 6px; border-radius:3px; cursor:pointer; font-weight:600; }
-.rotate-control button:hover { background:#f0f0f0; }
-.rotate-control input[type=range] { width: 84px; }
+/* App shell layout */
+.app-shell { 
+  display: grid; 
+  grid-template-columns: 260px 1fr; 
+  grid-template-rows: 64px 1fr; 
+  min-height: 100vh; 
+}
 
+.topbar { 
+  grid-column: 1 / -1; 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  padding: 0 2rem; 
+  height: 64px; 
+  border-bottom: 1px solid var(--border); 
+  background: var(--surface); 
+  box-shadow: var(--shadow-sm);
+  z-index: 100;
+  gap: 2rem;
+}
+
+.topbar-left {
+  flex-shrink: 0;
+}
+
+.topbar-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+
+.topbar-right {
+  flex-shrink: 0;
+}
+
+.topbar .brand { 
+  display: flex; 
+  align-items: center; 
+  gap: 1rem; 
+}
+
+.brand-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  display: block;
+}
+
+.brand-mark { 
+  width: 40px; 
+  height: 40px; 
+  background: linear-gradient(135deg, var(--primary), #06b6d4); 
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+}
+
+.brand-name { 
+  font-weight: 700; 
+  font-size: 1.25rem;
+  background: linear-gradient(135deg, var(--primary), #06b6d4);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.brand-sub { 
+  font-size: 0.8rem; 
+  color: var(--text-secondary); 
+  font-weight: 500;
+}
+
+.topbar-pill { 
+  background: linear-gradient(135deg, var(--primary-light), #cffafe); 
+  padding: 8px 16px; 
+  border-radius: 999px; 
+  color: var(--primary-dark); 
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.sidebar { 
+  padding: 2rem 1rem; 
+  background: var(--surface); 
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.nav-title { 
+  font-size: 0.75rem; 
+  color: var(--primary); 
+  margin-bottom: 1rem; 
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.nav-item { 
+  display: flex;
+  align-items: center;
+  padding: 10px 12px; 
+  border-radius: var(--radius-lg); 
+  color: var(--text-secondary); 
+  text-decoration: none; 
+  margin-bottom: 8px;
+  transition: all 0.2s ease;
+  font-weight: 500;
+}
+
+.nav-item:hover { 
+  background: var(--background); 
+  color: var(--primary);
+}
+
+.nav-item.is-active { 
+  background: var(--primary-light); 
+  color: var(--primary-dark);
+  font-weight: 600;
+}
+
+.nav-dot { 
+  width: 8px; 
+  height: 8px; 
+  background: var(--primary); 
+  border-radius: 50%; 
+  display: inline-block; 
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.nav-item.is-active .nav-dot {
+  background: var(--primary-dark);
+}
+
+.content { 
+  padding: 2rem; 
+  overflow: hidden;
+  min-height: 0; /* allow grid child to shrink and let #map height work */
+}
+
+.content-inner { 
+  max-width: 1400px; 
+  margin: 0 auto;
+  min-height: 0;
+}
+
+/* Typography */
+h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 2rem 0;
+}
+
+h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 1rem 0;
+}
+
+/* Map - must have explicit height for Leaflet to render tiles */
+#map { 
+  position: relative;
+  height: calc(100vh - 180px);
+  min-height: 400px;
+  width: 100%; 
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  background: #e4e8eb; /* visible until tiles load */
+}
+
+/* Ensure Leaflet's internal container fills the parent so tiles are visible */
+#map .leaflet-container {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Buttons */
+.btn { 
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px; 
+  border-radius: var(--radius-md); 
+  background: var(--primary); 
+  color: #fff; 
+  border: none; 
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn:hover {
+  background: var(--primary-dark);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn-secondary { 
+  background: #6c757d;
+}
+
+.btn-secondary:hover {
+  background: #5a6268;
+}
+.btn-danger {
+  background: #dc2626;
+  color: #fff;
+}
+.btn-danger:hover {
+  background: #b91c1c;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Dashboard */
+.dashboard-grid { 
+  display: grid; 
+  grid-template-columns: 320px 1fr; 
+  gap: 2rem; 
+  align-items: start; 
+}
+.dashboard-grid--data {
+  grid-template-columns: 1fr;
+}
+
+.dashboard-card { 
+  background: var(--surface); 
+  border-radius: var(--radius-lg); 
+  padding: 1.5rem; 
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border);
+}
+
+.dashboard-card h2 { 
+  margin-top: 0; 
+  font-size: 1.1rem;
+  color: var(--text-primary);
+}
+
+.stats-row { 
+  display: flex; 
+  flex-direction: column;
+  gap: 1rem; 
+  margin-top: 1rem; 
+}
+
+.stat { 
+  background: linear-gradient(135deg, var(--primary-light), #f0f9ff);
+  padding: 1.25rem; 
+  border-radius: var(--radius-lg); 
+  text-align: center; 
+  border-left: 4px solid var(--primary);
+  transition: all 0.2s ease;
+}
+
+.stat:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md);
+}
+
+.stat-value { 
+  font-weight: 700; 
+  font-size: 2rem;
+  color: var(--primary-dark);
+}
+
+.stat-label { 
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin-top: 0.5rem;
+}
+
+.dashboard-actions { 
+  margin-top: 1.5rem; 
+  display: flex; 
+  flex-direction: column;
+  gap: 10px; 
+}
+
+.dashboard-actions .btn {
+  width: 100%;
+}
+
+.dashboard-map { 
+  width: 100%; 
+  height: 100%; 
+  min-height: 400px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.posts-table { 
+  grid-column: 1 / -1;
+}
+
+/* Scrollable table container */
+.posts-table .table-scroll {
+  max-height: calc(100vh - 350px);
+  overflow-y: auto;
+}
+
+.posts-table table { 
+  width: 100%; 
+  border-collapse: collapse; 
+  font-size: 0.95rem;
+}
+
+/* Sticky header while scrolling */
+.posts-table .table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.posts-table th { 
+  padding: 12px; 
+  border-bottom: 2px solid var(--border); 
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--background);
+}
+
+.posts-table td { 
+  padding: 12px; 
+  border-bottom: 1px solid var(--border); 
+  text-align: left;
+  color: var(--text-secondary);
+}
+
+.posts-table tbody tr {
+  transition: background-color 0.2s ease;
+}
+
+/* Disable whole-row hover visuals; hover will be per-icon only */
+.posts-table tbody tr:hover {
+  background-color: transparent;
+}
+
+.posts-table tbody tr:hover td {
+  color: var(--text-secondary);
+}
+
+
+.btn-icon img,
+.btn-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  margin: 0 auto;
+  opacity: 1;
+  filter: none !important;
+}
+
+/* Ensure icons don't get changed by row hover; only the button's own :hover applies */
+.btn-icon img,
+.btn-icon svg {
+  filter: none !important;
+  opacity: 1 !important;
+}
+
+/* Button icon hover - make icon white on hover (except delete). Use !important to override other filters. */
+.btn-icon:not(.delete-post):hover img,
+.btn-icon:not(.delete-post):hover svg,
+.btn-icon:hover svg,
+.btn-icon:focus svg,
+.btn-icon:active svg {
+  color: #fff !important;
+  fill: currentColor !important;
+}
+
+.btn-icon:hover,
+.btn-icon:focus {
+  color: #fff;
+}
+
+/* Icon buttons: visual hover only on the button itself */
+.btn-icon {
+  padding: 6px;
+  border-radius: 6px;
+  background: transparent;
+  transition: background 0.12s ease, color 0.12s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-icon:hover {
+  background: #000;
+  color: #fff;
+}
+
+.btn-icon.delete-post:hover {
+  background: var(--btn-danger, #dc2626);
+  color: #fff;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .dashboard-grid { 
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+  
+  .app-shell { 
+    grid-template-columns: 1fr; 
+    grid-template-rows: 64px 1fr; 
+  }
+  
+  .sidebar { 
+    display: none; 
+  }
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    padding: 0 1rem;
+  }
+  
+  .content {
+    padding: 1rem;
+  }
+  
+  h1 {
+    font-size: 1.5rem;
+  }
+  
+  .stats-row {
+    flex-direction: row;
+  }
+  
+  .posts-table th,
+  .posts-table td {
+    padding: 8px;
+    font-size: 0.85rem;
+  }
+}
+
+/* Pole icon styling: drop shadow and subtle scale on hover to make poles more identifiable */
+.leaflet-marker-icon.pole-icon { 
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.25)); 
+  transition: transform 0.12s ease, filter 0.12s ease; 
+  transform-origin: center bottom; 
+}
+
+.leaflet-marker-icon.pole-icon:hover { 
+  transform: scale(1.18); 
+  z-index: 650;
+  filter: drop-shadow(0 4px 8px rgba(59, 130, 246, 0.4));
+}
+
+.leaflet-marker-icon.pole-icon.active { 
+  transform: scale(1.25) !important; 
+  z-index: 9999 !important; 
+  filter: drop-shadow(0 6px 10px rgba(59, 130, 246, 0.5));
+}
+
+/* Connection control */
+
+/* Auth / Login improvements */
+.auth-form .form-row { display:flex; flex-direction:column; margin-bottom:12px; }
+.auth-form label { font-weight:600; margin-bottom:6px; color:var(--text-secondary); }
+.auth-form input[type="text"], .auth-form input[type="password"] { padding:10px 12px; border:1px solid var(--border); border-radius:6px; font-size:0.95rem; width:100%; box-sizing:border-box; min-height:44px; }
+/* Stronger selector to avoid specificity / caching issues */
+.auth-form .input-with-button { display:flex !important; flex-direction:row !important; align-items:center !important; gap:8px !important; }
+.auth-form .input-with-button > div { flex:1; display:flex; flex-direction:column; }
+.auth-form .input-with-button input { width:100%; }
+/* Ensure hidden rows are actually hidden even with `!important` layout rules above */
+.auth-form [hidden] { display: none !important; }
+.auth-form .password-toggle {
+  display:inline-flex !important;
+  align-items:center;
+  justify-content:center;
+  height:44px;
+  padding:0 10px;
+  border:1px solid var(--border);
+  background:transparent;
+  cursor:pointer;
+  color:var(--text-secondary);
+  border-radius:6px;
+}
+.auth-form .password-toggle:focus {
+  outline:2px solid rgba(59,130,246,0.2);
+  outline-offset:2px;
+}
+.role-toggle { display:flex; gap:12px; margin-bottom:12px; }
+.role-toggle input { margin-right:6px; }
+.auth-error { background:#fee2e2; color:#b91c1c; padding:8px 10px; border-radius:6px; margin-bottom:12px; }
+.auth-hint { color:var(--text-secondary); font-size:0.9rem; margin-top:8px; }
+
+/* Add post control (map click to place new post) */
+.add-post-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: var(--radius-md);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.add-post-control-row { display: flex; align-items: center; }
+.add-post-btn {
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  background: var(--secondary, #10b981);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+/* icon variant */
+.add-post-btn.add-post-icon { width:36px; height:36px; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; }
+.add-post-btn.add-post-icon svg { width:18px; height:18px; color:#fff; display:block; }
+.add-post-btn:hover { filter: brightness(1.05); }
+.add-post-btn.active {
+  background: var(--primary-dark, #1d4ed8);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.08);
+}
+.add-post-modal .modal-row label { min-width: 90px; }
+.add-post-modal input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.add-post-modal #add-post-lat,
+.add-post-modal #add-post-lng {
+  font-variant-numeric: tabular-nums;
+}
+
+.conn-hint { 
+  font-size: 0.85rem; 
+  color: #0b74ff; 
+  background: #dbeafe; 
+  padding: 8px 10px; 
+  border-radius: var(--radius-md); 
+  border-left: 3px solid var(--primary);
+  margin-top: 2px;
+}
+
+.popup-connect-actions { 
+  margin-top: 10px; 
+  display: flex; 
+  flex-direction: column; 
+  gap: 8px; 
+}
+
+.popup-connect-actions .btn { 
+  width: 100%; 
+  text-align: center; 
+}
+
+.btn-primary { 
+  background: var(--primary);
+}
+
+/* Connection endpoints (exact coords) */
+.leaflet-container .connection-endpoint { 
+  stroke: var(--primary); 
+  stroke-width: 2px; 
+}
+
+/* Click buffer makes polyline easier to click */
+.leaflet-interactive.click-buffer { 
+  cursor: pointer; 
+}
+
+/* Modals */
+.modal-overlay { 
+  display: none; 
+  position: fixed; 
+  inset: 0; 
+  background: rgba(0, 0, 0, 0.5); 
+  align-items: center; 
+  justify-content: center; 
+  z-index: 10000;
+  backdrop-filter: blur(4px);
+}
+
+.modal { 
+  background: var(--surface); 
+  border-radius: var(--radius-lg); 
+  width: 520px; 
+  max-width: calc(100% - 32px); 
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  padding: 16px 20px; 
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-body { 
+  padding: 16px 20px; 
+}
+
+.modal-footer { 
+  padding: 12px 20px; 
+  display: flex; 
+  gap: 8px; 
+  justify-content: flex-end; 
+  border-top: 1px solid var(--border);
+}
+
+.modal .modal-row { 
+  margin-bottom: 12px; 
+  display: flex; 
+  gap: 8px; 
+  align-items: center; 
+}
+
+.modal .conn-points-list { 
+  margin: 8px 0 0 0; 
+  padding-left: 18px; 
+}
+
+.modal .modal-close { 
+  background: transparent; 
+  border: none; 
+  font-size: 20px; 
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: color 0.2s ease;
+}
+
+.modal .modal-close:hover {
+  color: var(--text-primary);
+}
+
+.modal-hint { 
+  margin-top: 8px; 
+  font-size: 0.9rem; 
+  color: #856404; 
+  background: #fff3cd; 
+  padding: 10px 12px; 
+  border-radius: var(--radius-md);
+  border-left: 3px solid #ffc107;
+}
+
+/* Result / success modal (after connecting) */
+.result-modal-overlay { 
+  align-items: center; 
+  justify-content: center; 
+}
+
+.result-modal-overlay .modal { 
+  min-width: 320px; 
+}
+
+/* Compact confirm/notice modals */
+.confirm-modal-overlay .modal,
+.notice-modal-overlay .modal {
+  width: auto;
+  min-width: 260px;
+  max-width: 420px;
+}
+.confirm-modal-overlay .modal .modal-header,
+.notice-modal-overlay .modal .modal-header {
+  padding: 10px 14px;
+}
+.confirm-modal-overlay .modal .modal-body,
+.notice-modal-overlay .modal .modal-body {
+  padding: 10px 14px;
+}
+.confirm-modal-overlay .modal .modal-footer,
+.notice-modal-overlay .modal .modal-footer {
+  padding: 8px 12px;
+}
+
+/* Make confirm buttons a bit smaller */
+.confirm-ok, .confirm-cancel, .notice-ok { padding: 6px 10px; font-size: 0.9rem; }
+
+
+.result-modal-title { 
+  margin: 0; 
+  font-size: 1.1rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.result-modal-message { 
+  margin: 0 0 12px 0; 
+  color: var(--text-secondary);
+}
+
+.result-modal-details { 
+  margin: 0; 
+  display: grid; 
+  grid-template-columns: auto 1fr; 
+  gap: 6px 16px; 
+}
+
+.result-modal-details dt { 
+  font-weight: 600; 
+  color: var(--text-primary);
+}
+
+.result-modal-details dd { 
+  margin: 0; 
+  color: var(--text-secondary);
+}
+
+.result-modal-header-error { 
+  background: #fee2e2; 
+  border-bottom-color: #fca5a5; 
+}
+
+.result-modal-header-error .result-modal-title { 
+  color: #b91c1c; 
+}
+
+/* Additional Professional Enhancements */
+
+/* Leaflet popup styling */
+.leaflet-popup-content-wrapper {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+}
+
+.leaflet-popup-content {
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.leaflet-popup-content strong {
+  color: var(--primary);
+}
+
+/* Post popup: keep connections info inside the modal content */
+.popup-post-content {
+  min-width: 260px;
+}
+.popup-post-details {
+  margin-bottom: 0.75rem;
+}
+.popup-connections-inner {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.post-connections-section {
+  margin: 0;
+}
+.post-connections-section strong {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+.post-connections-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+.post-connections-list li {
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+.post-connections-list li .btn-danger {
+  margin-left: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.leaflet-popup-tip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+/* Leaflet control styling */
+.leaflet-control {
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.leaflet-control-layers {
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.leaflet-control-layers-toggle {
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30"><path fill="%233b82f6" d="M5 5h20v2H5V5m0 8h20v2H5v-2m0 8h20v2H5v-2"/></svg>');
+}
+
+/* Loading state */
+.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Dark theme (scoped) — toggled by adding `dark-theme` class to the <body> element */
+body.dark-theme {
+  --background: #333333;
+  --surface: #2b2b2b;
+  --text-primary: #f2f2f2;
+  --text-secondary: #d1d5db;
+  --border: #3a3a3a;
+  --primary: #00AEEF;
+  --primary-dark: #008fcf;
+}
+
+/* Small component overrides that don't directly use variables */
+body.dark-theme #map { background: #222; }
+body.dark-theme .btn-icon { background: transparent; border: 1px solid rgba(255,255,255,0.06); color: var(--text-primary); box-shadow: 0 1px 3px rgba(0,0,0,0.6); }
+body.dark-theme .btn-icon:hover { background: var(--primary); color: #fff; transform: scale(1.06); }
+body.dark-theme .posts-table tbody td { color: #e6e7e8; }
+body.dark-theme .posts-table th { color: var(--text-primary); background: transparent; border-bottom-color: var(--border); }
+body.dark-theme .topbar, body.dark-theme .sidebar, body.dark-theme .dashboard-card, body.dark-theme .modal, body.dark-theme .add-post-control, body.dark-theme .leaflet-popup-content-wrapper, body.dark-theme .leaflet-control-layers { background: var(--surface); border-color: var(--border); color: var(--text-primary); }
+
+/* Smooth transitions */
+* {
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+a {
+  color: var(--primary);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+a:hover {
+  color: var(--primary-dark);
+}
+
+/* Focus states for accessibility */
+button:focus,
+input:focus,
+a:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Print styles */
+@media print {
+  .topbar,
+  .sidebar,
+  .dashboard-actions,
+  .leaflet-control-layers {
+    display: none !important;
+  }
+  
+  .dashboard-map {
+    height: 600px;
+  }
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideDown {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.content-inner {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Status badge styling for better visibility */
+.status-active {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-inactive {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.status-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* Dashboard: status cell (icon toggle + connection badge) */
+.status-cell { display:flex; align-items:center; gap:0.5rem; }
+.status-toggle { display:flex; align-items:center; justify-content:center; width:36px; height:36px; border-radius:8px; border:none; background:transparent; color:var(--text-secondary); cursor:pointer; transition:transform .12s ease, color .12s ease; }
+.status-toggle svg { width:18px; height:18px; color: #9ca3af; display:block; }
+.status-toggle.is-active { color: var(--secondary); transform: scale(1.02); }
+.status-toggle.is-inactive { color: #ef4444; transform: scale(1.0); }
+.status-text { font-weight:600; font-size:0.9rem; color:var(--text-secondary); }
+.conn-badge { display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:20px; padding:0 6px; border-radius:999px; background:var(--primary); color:#fff; font-size:0.75rem; cursor:pointer; border:none; }
+.conn-badge.has-count { background:var(--primary-dark); }
+/* Dashboard: action buttons */
+.action-buttons { display:flex; gap:6px; align-items:center; }
+.action-buttons { justify-content: center; }
+.btn-sm { padding:6px 12px; font-size:0.85rem; font-weight:600; border-radius:6px; border:none; cursor:pointer; transition:all 0.2s ease; }
+.btn-sm.btn { background:var(--primary); color:#fff; }
+.btn-sm.btn:hover { background:var(--primary-dark); }
+.btn-sm.btn-danger { background:#ef4444; color:#fff; }
+.btn-sm.btn-danger:hover { background:#dc2626; }
+
+/* Icon buttons for table actions */
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+}
+
+.btn-icon:hover {
+  background: var(--primary);
+  color: #fff;
+  transform: none;
+  border-color: var(--primary);
+}
+
+/* Center the actions column content */
+.posts-table th:last-child,
+.posts-table td:last-child {
+  text-align: center;
+  width: 160px;
+}
+
+/* When hovering a row, keep action buttons neutral unless the button itself is hovered */
+.posts-table tbody tr:hover .btn-icon:not(:hover) {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+
+body.dark-theme .btn-icon {
+  background: transparent;
+  border-color: rgba(255,255,255,0.06);
+  color: var(--text-secondary);
+}
+
+body.dark-theme .btn-icon:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.btn-icon.delete-post:hover {
+  /* Make delete button behave like other action buttons on hover (blue background, white icon) */
+  background: var(--primary) !important;
+  color: #fff !important;
+  border-color: var(--primary) !important;
+}
+
+/* Ensure delete icon turns white on hover as well */
+.btn-icon.delete-post:hover svg,
+.btn-icon.delete-post:hover svg *,
+.btn-icon.delete-post:hover img {
+  fill: #fff !important;
+  color: #fff !important;
+  filter: brightness(0) invert(1) !important;
+}
+
+/* Ensure inline SVG icons also turn white on hover (except delete) */
+.btn-icon:not(.delete-post):hover svg,
+.btn-icon:not(.delete-post):hover svg * {
+  fill: #fff !important;
+  color: #fff !important;
+}
+
+/* Force <img> icons to become white on hover (robust across colors)
+   Use brightness(0) to make black then invert to white; apply !important to override earlier rules. */
+.btn-icon:not(.delete-post):hover img,
+.btn-icon:hover img {
+  filter: brightness(0) invert(1) !important;
+}
+
+/* Dark theme: also ensure hover turns images white */
+body.dark-theme .btn-icon:not(.delete-post):hover img {
+  filter: brightness(0) invert(1) !important;
+}
+
+.btn-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* Admin hint - lighter for visibility */
+.admin-hint {
+  color: var(--primary);
+  background: var(--primary-light);
+  padding: 10px 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--primary);
+  font-weight: 500;
+}
