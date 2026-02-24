@@ -3,74 +3,134 @@
 {% block title %}Electrical Post Data - Leyeco{% endblock %}
 
 {% block head %}
-  <link rel="stylesheet" href="/static/css/styles.css">
+<link rel="stylesheet" href="/static/css/styles.css">
+{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <ol class="breadcrumbs__list">
+    <li class="breadcrumbs__item">
+      <a href="/" class="breadcrumbs__link">Home</a>
+    </li>
+    <li class="breadcrumbs__item breadcrumbs__item--active" aria-current="page">Post Data</li>
+  </ol>
+</nav>
 {% endblock %}
 
 {% block content %}
-  <h1>Electrical Post Data</h1>
+<h1 id="overview">Electrical Post Data</h1>
 
-  <div class="dashboard-grid dashboard-grid--data">
-    <div class="dashboard-card posts-table">
-      <h2>📋 Electrical Post Data</h2>
-      <div style="margin-bottom: 12px;">
-        <input type="text" id="search-posts" placeholder="Search by ID, Name, or Status..." style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; box-sizing: border-box;">
-      </div>
-      <div class="table-scroll">
-      <table>
+<!-- Modern Stats Grid -->
+<div class="stats-row" style="margin-bottom: 32px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;">
+  <!-- Posts Stat -->
+  <div class="stat-card">
+    <div class="stat-icon-wrapper" style="background: rgba(59, 130, 246, 0.1); color: var(--primary);">
+      <svg xmlns="http://www.w3.org/2000/svg" height="28" viewBox="0 -960 960 960" width="28" fill="currentColor">
+        <path
+          d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54-54 85.5-127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-120 160-160-56-56-104 104v-248h-80v248L296-496l-56 56 160 160Z" />
+      </svg>
+    </div>
+    <div class="stat-content">
+      <div class="stat-value" id="total-posts">-</div>
+      <div class="stat-label">Total Posts</div>
+    </div>
+  </div>
+
+  <!-- Customers Stat -->
+  <div class="stat-card">
+    <div class="stat-icon-wrapper" style="background: rgba(16, 185, 129, 0.1); color: var(--secondary);">
+      <svg xmlns="http://www.w3.org/2000/svg" height="28" viewBox="0 -960 960 960" width="28" fill="currentColor">
+        <path
+          d="M480-480q-66 0-113-47t-47-113q0-66 47-113t113-47q66 0 113 47t47 113q0 66-47 113t-113 47ZM160-160v-32q0-34 17.5-62.5T224-304q65-33 129.5-49.5T480-370q62 0 126.5 16.5T736-304q29 15 46.5 43.5T800-192v32H160Zm80-80h480v-32q0-11-5.5-20T700-306q-54-27-109-40.5T480-360q-56 0-111 13.5T260-306q-9 5-14.5 14t-5.5 20v32Zm240-320q33 0 56.5-23.5T560-640q0-33-23.5-56.5T480-720q-33 0-56.5 23.5T400-640q0 33 23.5 56.5T480-560Zm0-80Zm0 400Z" />
+      </svg>
+    </div>
+    <div class="stat-content">
+      <div class="stat-value" id="total-customers">-</div>
+      <div class="stat-label">Total Customers</div>
+    </div>
+  </div>
+
+  <!-- Lines Stat -->
+  <div class="stat-card">
+    <div class="stat-icon-wrapper" style="background: rgba(245, 158, 11, 0.1); color: #f59e0b;">
+      <svg xmlns="http://www.w3.org/2000/svg" height="28" viewBox="0 -960 960 960" width="28" fill="currentColor">
+        <path
+          d="M280-160v-80h400v80H280Zm0-160v-80h400v80H280Zm0-160v-80h400v80H280Zm-80 480q-33 0-56.5-23.5T120-80v-800q0-33 23.5-56.5T200-960h560q33 0 56.5 23.5T840-880v800q0 33-23.5 56.5T760-0H200Zm0-80h560v-800H200v800Zm0 0v-800 800Z" />
+      </svg>
+    </div>
+    <div class="stat-content">
+      <div class="stat-value" id="total-lines">-</div>
+      <div class="stat-label">Distribution Segments</div>
+    </div>
+  </div>
+</div>
+
+<div class="dashboard-grid dashboard-grid--data">
+  <div id="post-data" class="dashboard-card posts-table">
+    <h2>📋 Electrical Post Data</h2>
+    <div style="margin-bottom: 12px;">
+      <input type="text" id="search-posts" placeholder="Search by ID, Name, or Feeder..."
+        style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; box-sizing: border-box;">
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
         <thead>
           <tr>
             <th>ID</th>
             <th>Name</th>
-            <th>Latitude</th>
-            <th>Longitude</th>
-            <th>Status</th>
-            <th>Connections</th>
+            <th>Customers Connected</th>
+            <th>Feeder</th>
+            <th>Network Links</th>
             <th>Actions</th>
           </tr>
         </thead>
         <tbody id="posts-tbody">
           <tr>
-            <td colspan="7" style="text-align: center; padding: 20px; color: #999;">
+            <td colspan="6" style="text-align: center; padding: 20px; color: #999;">
               Loading posts...
             </td>
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Pagination Controls -->
+    <div class="pagination-footer">
+      <div class="pagination-info">
+        <span id="pagination-text">Loading...</span>
       </div>
-      
-      <!-- Pagination Controls -->
-      <div class="pagination-footer">
-        <div class="pagination-info">
-          <span id="pagination-text">Loading...</span>
+      <div class="pagination-nav">
+        <button id="pagination-prev" class="pagination-btn pagination-nav-btn" title="Previous page"
+          aria-label="Previous page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 19l-7-7 7-7"></path>
+          </svg>
+        </button>
+        <div id="pagination-pages" class="pagination-pages">
+          <!-- Page buttons will be inserted here -->
         </div>
-        <div class="pagination-nav">
-          <button id="pagination-prev" class="pagination-btn pagination-nav-btn" title="Previous page" aria-label="Previous page">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M15 19l-7-7 7-7"></path>
-            </svg>
-          </button>
-          <div id="pagination-pages" class="pagination-pages">
-            <!-- Page buttons will be inserted here -->
-          </div>
-          <button id="pagination-next" class="pagination-btn pagination-nav-btn" title="Next page" aria-label="Next page">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M9 5l7 7-7 7"></path>
-            </svg>
-          </button>
-        </div>
+        <button id="pagination-next" class="pagination-btn pagination-nav-btn" title="Next page" aria-label="Next page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 5l7 7-7 7"></path>
+          </svg>
+        </button>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Distribution Line Segments Section -->
-  <div class="dashboard-grid dashboard-grid--data" style="margin-top: 24px;">
-    <div class="dashboard-card">
-      <h2>⚡ Distribution Line Segments</h2>
-      <div style="margin-bottom: 12px;">
-        <input type="text" id="search-lines" placeholder="Search by Segment ID, Bus IDs..." style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; box-sizing: border-box;">
-      </div>
-      <div class="table-scroll">
-      <table>
+<!-- Distribution Line Segments Section -->
+<div class="dashboard-grid dashboard-grid--data" style="margin-top: 24px;">
+  <div id="line-data" class="dashboard-card">
+    <h2>⚡ Distribution Line Segments</h2>
+    <div style="margin-bottom: 12px;">
+      <input type="text" id="search-lines" placeholder="Search by Segment ID, Bus IDs..."
+        style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; box-sizing: border-box;">
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
         <thead>
           <tr>
             <th>Segment ID</th>
@@ -80,7 +140,7 @@
             <th>Configuration</th>
             <th>Phasing</th>
             <th>Conductor</th>
-            <th>Details</th>
+            <th style="text-align:center;">Details</th>
           </tr>
         </thead>
         <tbody id="lines-tbody">
@@ -91,378 +151,850 @@
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- Pagination Controls for Lines -->
+    <div class="pagination-footer">
+      <div class="pagination-info">
+        <span id="lines-pagination-text">Loading...</span>
+      </div>
+      <div class="pagination-nav">
+        <button id="lines-pagination-prev" class="pagination-btn pagination-nav-btn" title="Previous page"
+          aria-label="Previous page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 19l-7-7 7-7"></path>
+          </svg>
+        </button>
+        <div id="lines-pagination-pages" class="pagination-pages">
+          <!-- Page buttons will be inserted here -->
+        </div>
+        <button id="lines-pagination-next" class="pagination-btn pagination-nav-btn" title="Next page"
+          aria-label="Next page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 5l7 7-7 7"></path>
+          </svg>
+        </button>
       </div>
     </div>
   </div>
+</div>
+
+<!-- Customer Data Section -->
+<div class="dashboard-grid dashboard-grid--data" style="margin-top: 24px;">
+  <div id="customer-data" class="dashboard-card">
+    <h2>👥 Customer Data</h2>
+    <div style="margin-bottom: 12px;">
+      <input type="text" id="search-customers" placeholder="Search by Customer ID or Name..."
+        style="width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; box-sizing: border-box;">
+    </div>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Customer ID</th>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Service Voltage</th>
+            <th>Phase</th>
+            <th style="text-align:center;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="customers-tbody">
+          <tr>
+            <td colspan="6" style="text-align: center; padding: 20px; color: #999;">
+              Loading customer data...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination Controls for Customers -->
+    <div class="pagination-footer">
+      <div class="pagination-info">
+        <span id="customers-pagination-text">Loading...</span>
+      </div>
+      <div class="pagination-nav">
+        <button id="customers-pagination-prev" class="pagination-btn pagination-nav-btn" title="Previous page"
+          aria-label="Previous page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M15 19l-7-7 7-7"></path>
+          </svg>
+        </button>
+        <div id="customers-pagination-pages" class="pagination-pages">
+          <!-- Page buttons will be inserted here -->
+        </div>
+        <button id="customers-pagination-next" class="pagination-btn pagination-nav-btn" title="Next page"
+          aria-label="Next page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 5l7 7-7 7"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
-  <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      // Pagination state
-      let currentPage = 1;
-      let perPage = 10;
-      let totalPages = 1;
-      let isAdmin = false;
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    // Pagination state
+    let currentPage = 1;
+    let perPage = 10;
+    let totalPages = 1;
+    let isAdmin = false;
 
-      function updateRowStatus(row, status) {
-        const s = (status || '').toLowerCase();
-        const btn = row.querySelector('.status-toggle');
-        const text = row.querySelector('.status-text');
-        btn.classList.toggle('is-active', s === 'active');
-        btn.classList.toggle('is-inactive', s === 'inactive');
-        btn.setAttribute('aria-pressed', s === 'active' ? 'true' : 'false');
-        if (text) text.textContent = status;
+    function updateRowStatus(row, status) {
+      const s = (status || '').toLowerCase();
+      const btn = row.querySelector('.status-toggle');
+      const text = row.querySelector('.status-text');
+      btn.classList.toggle('is-active', s === 'active');
+      btn.classList.toggle('is-inactive', s === 'inactive');
+      btn.setAttribute('aria-pressed', s === 'active' ? 'true' : 'false');
+      if (text) text.textContent = status;
+    }
+
+    function attachRowHandlers(row) {
+      const id = row.dataset.postId;
+      const badge = row.querySelector('.conn-badge');
+
+      // Fetch connections count
+      fetch(`/api/posts/${id}/connections`).then(r => r.json()).then(conns => {
+        const list = Array.isArray(conns) ? conns : (conns && conns.connections) ? conns.connections : [];
+        if (list.length > 0) {
+          badge.textContent = list.length;
+          badge.classList.add('has-count');
+          badge.style.display = 'inline-flex';
+          badge.title = `${list.length} connection${list.length > 1 ? 's' : ''}`;
+          badge.addEventListener('click', function (e) {
+            e.stopPropagation();
+            const lines = list.map(c => `<li><strong>#${c.id}</strong> ${c.name ? '— ' + c.name : ''}</li>`).join('');
+            showInfoModal(`Connections for Post #${id}`, `<ul style="padding-left: 20px; list-style-type: disc;">${lines || '<li>No connection details</li>'}</ul>`);
+          });
+        }
+      }).catch(() => { });
+
+      const btn = row.querySelector('.status-toggle');
+
+      // Locator button - available to all users
+      const locateBtn = row.querySelector('.locate-post');
+      if (locateBtn) {
+        locateBtn.addEventListener('click', function (e) {
+          e.preventDefault();
+          const lat = this.dataset.lat;
+          const lng = this.dataset.lng;
+          const postId = this.dataset.postId;
+          window.location.href = `/map?id=${postId}&lat=${lat}&lng=${lng}`;
+        });
       }
 
-      function attachRowHandlers(row) {
-        const id = row.dataset.postId;
-        const badge = row.querySelector('.conn-badge');
-        
-        // Fetch connections count
-        fetch(`/api/posts/${id}/connections`).then(r => r.json()).then(conns => {
-          const list = Array.isArray(conns) ? conns : (conns && conns.connections) ? conns.connections : [];
-          if (list.length > 0) {
-            badge.textContent = list.length;
-            badge.classList.add('has-count');
-            badge.style.display = 'inline-flex';
-            badge.title = `${list.length} connection${list.length > 1 ? 's' : ''}`;
-            badge.addEventListener('click', function (e) {
-              e.stopPropagation();
-              const lines = list.map(c => `#${c.id}${c.name ? ' — ' + c.name : ''}`).join('\n');
-              alert(lines || 'No connection details');
-            });
-          }
-        }).catch(() => {});
-
-        const btn = row.querySelector('.status-toggle');
-        
-        // Locator button - available to all users
-        const locateBtn = row.querySelector('.locate-post');
-        if (locateBtn) {
-          locateBtn.addEventListener('click', function (e) {
-            e.preventDefault();
-            const lat = this.dataset.lat;
-            const lng = this.dataset.lng;
-            const postId = this.dataset.postId;
-            window.location.href = `/map?id=${postId}&lat=${lat}&lng=${lng}`;
-          });
-        }
-        
-        if (!isAdmin) {
-          if (btn) btn.style.display = 'none';
-          row.querySelectorAll('.edit-post, .export-post, .delete-post').forEach(b => b.style.display = 'none');
-          return;
-        }
-        
-        // Show action buttons for admins
-        row.querySelectorAll('.edit-post, .export-post, .delete-post').forEach(b => b.style.display = 'inline-block');
-        
-        // Edit button
-        const editBtn = row.querySelector('.edit-post');
-        if (editBtn) {
-          editBtn.addEventListener('click', function (e) {
-            e.preventDefault(); e.stopPropagation();
-            const post = { 
-              id: id, 
-              name: row.cells[1].textContent, 
-              lat: parseFloat(row.cells[2].textContent), 
-              lng: parseFloat(row.cells[3].textContent), 
-              status: row.querySelector('.status-text').textContent 
-            };
-            openEditPostModal(post);
-          });
-        }
-        
-        // Export button
-        const expBtn = row.querySelector('.export-post');
-        if (expBtn) {
-          expBtn.addEventListener('click', function (e) { 
-            e.preventDefault(); 
-            window.location = '/api/export/post/' + id; 
-          });
-        }
-        
-        // Delete button
-        const delBtn = row.querySelector('.delete-post');
-        if (delBtn) {
-          delBtn.addEventListener('click', function (e) {
-            e.preventDefault(); e.stopPropagation();
-            if (!confirm(`Delete post #${id}? This cannot be undone.`)) return;
-            fetch(`/api/posts/${id}`, { method: 'DELETE' })
-              .then(r => r.json()).then(json => {
-                if (json && json.success) {
-                  row.style.opacity = '0.5';
-                  row.style.pointerEvents = 'none';
-                  setTimeout(() => row.remove(), 300);
-                  loadPosts(currentPage);
-                } else {
-                  alert('Failed to delete post: ' + (json.error || 'Unknown error'));
-                }
-              }).catch(err => alert('Delete failed: ' + err));
-          });
-        }
-        
-        // Status toggle
-        if (btn) {
-          btn.addEventListener('click', function (e) {
-            e.preventDefault(); e.stopPropagation();
-            btn.disabled = true;
-            fetch(`/api/posts/${id}/status`, { 
-              method: 'POST', 
-              headers: { 'Content-Type': 'application/json' }, 
-              body: JSON.stringify({ action: 'toggle' }) 
-            })
-              .then(r => r.json()).then(json => {
-                if (json && json.status) updateRowStatus(row, json.status);
-              }).catch(err => console.error(err))
-              .finally(() => btn.disabled = false);
-          });
-        }
+      if (!isAdmin) {
+        if (btn) btn.style.display = 'none';
+        row.querySelectorAll('.edit-post, .export-post, .delete-post').forEach(b => b.style.display = 'none');
+        return;
       }
 
-      function renderPosts(posts) {
-        const tbody = document.getElementById('posts-tbody');
-        tbody.innerHTML = '';
-        
-        if (!posts || posts.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: #999;">No posts available.</td></tr>';
-          return;
-        }
-        
-        posts.forEach(p => {
-          const row = document.createElement('tr');
-          row.className = 'post-row';
-          row.dataset.postId = p.id;
-          row.innerHTML = `
-            <td>#${p.id}</td>
-            <td>${p.name}</td>
-            <td>${(parseFloat(p.lat) || 0).toFixed(4)}</td>
-            <td>${(parseFloat(p.lng) || 0).toFixed(4)}</td>
+      // Show action buttons for admins
+      row.querySelectorAll('.edit-post, .export-post, .delete-post').forEach(b => b.style.display = 'inline-block');
+
+      // Edit button
+      const editBtn = row.querySelector('.edit-post');
+      if (editBtn) {
+        editBtn.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          const post = {
+            id: id,
+            name: row.cells[1].textContent,
+            status: 'Active'
+          };
+          openEditPostModal(post);
+        });
+      }
+
+      // Export button
+      const expBtn = row.querySelector('.export-post');
+      if (expBtn) {
+        expBtn.addEventListener('click', function (e) {
+          e.preventDefault();
+          window.location = '/api/export/post/' + id;
+        });
+      }
+
+      // Delete button
+      const delBtn = row.querySelector('.delete-post');
+      if (delBtn) {
+        delBtn.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          if (!confirm(`Delete post #${id}? This cannot be undone.`)) return;
+          fetch(`/api/posts/${id}`, { method: 'DELETE' })
+            .then(r => r.json()).then(json => {
+              if (json && json.success) {
+                row.style.opacity = '0.5';
+                row.style.pointerEvents = 'none';
+                setTimeout(() => row.remove(), 300);
+                loadPosts(currentPage);
+              } else {
+                alert('Failed to delete post: ' + (json.error || 'Unknown error'));
+              }
+            }).catch(err => alert('Delete failed: ' + err));
+        });
+      }
+
+      // Status toggle
+      if (btn) {
+        btn.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          btn.disabled = true;
+          fetch(`/api/posts/${id}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'toggle' })
+          })
+            .then(r => r.json()).then(json => {
+              if (json && json.status) updateRowStatus(row, json.status);
+            }).catch(err => console.error(err))
+            .finally(() => btn.disabled = false);
+        });
+      }
+    }
+
+    function renderPosts(posts) {
+      const tbody = document.getElementById('posts-tbody');
+      tbody.innerHTML = '';
+
+      if (!posts || posts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #999;">No posts available.</td></tr>';
+        return;
+      }
+
+      posts.forEach(p => {
+        const row = document.createElement('tr');
+        row.className = 'post-row';
+        row.dataset.postId = p.id;
+
+        // Determine status class
+        let statusClass = 'inactive';
+        const s = (p.status || '').toLowerCase();
+        if (s === 'active') statusClass = 'active';
+        else if (s.includes('building') || s.includes('ongoing')) statusClass = 'building';
+
+        row.innerHTML = `
+            <td><span style="font-family:monospace;color:var(--text-secondary);">#${p.id}</span></td>
+            <td><strong>${p.name}</strong></td>
             <td>
-              <div class="status-cell">
-                <button class="status-toggle ${(p.status || '').toLowerCase() === 'active' ? 'is-active' : (p.status || '').toLowerCase() === 'inactive' ? 'is-inactive' : ''}" 
-                        aria-pressed="${(p.status || '').toLowerCase() === 'active' ? 'true' : 'false'}" 
-                        data-post-id="${p.id}" title="Toggle status" style="display:none;">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-                    <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="currentColor" />
-                  </svg>
-                </button>
-                <span class="status-text">${p.status || 'N/A'}</span>
+              <div class="cust-cell-wrapper" style="min-height:24px;">
+                 <span class="skeleton-loader" style="width:20px;height:20px;display:inline-block;background:#f1f5f9;border-radius:4px;"></span>
               </div>
             </td>
             <td>
-              <button class="conn-badge" data-post-id="${p.id}" title="Connections" style="display:none;"></button>
+              <div class="feeder-cell-wrapper" style="min-height:24px;">
+                 <span class="skeleton-loader" style="width:40px;height:20px;display:inline-block;background:#f1f5f9;border-radius:4px;"></span>
+              </div>
+            </td>
+            <td>
+              <div class="conn-cell-wrapper" style="min-height:24px;">
+                 <span class="skeleton-loader" style="width:20px;height:20px;display:inline-block;background:#f1f5f9;border-radius:4px;"></span>
+              </div>
             </td>
             <td>
               <div class="action-buttons">
                 <button class="btn-icon locate-post" data-post-id="${p.id}" data-lat="${p.lat}" data-lng="${p.lng}" title="View on map">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M324-111.5Q251-143 197-197t-85.5-127Q80-397 80-480t31.5-156Q143-709 197-763t127-85.5Q397-880 480-880t156 31.5Q709-817 763-763t85.5 127Q880-563 880-480t-31.5 156Q817-251 763-197t-127 85.5Q563-80 480-80t-156-31.5ZM480-260q45-45 80-93 30-41 55-90t25-97q0-66-47-113t-113-47q-66 0-113 47t-47 113q0 48 25 97t55 90q35 48 80 93Zm-42.5-237.5Q420-515 420-540t17.5-42.5Q455-600 480-600t42.5 17.5Q540-565 540-540t-17.5 42.5Q505-480 480-480t-42.5-17.5Z"/></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M480-480q33 0 56.5-23.5T560-560q0-33-23.5-56.5T480-640q-33 0-56.5 23.5T400-560q0 33 23.5 56.5T480-480Zm0 294q122-112 181-203.5T720-552q0-109-69.5-178.5T480-800q-101 0-170.5 69.5T240-552q0 71 59 162.5T480-186Zm0 106Q319-217 239.5-334.5T160-552q0-150 96.5-239T480-880q127 0 223.5 89T800-552q0 100-79.5 217.5T480-80Zm0-480Z"/></svg>
                 </button>
-                <button class="btn-icon edit-post" data-post-id="${p.id}" title="Edit post" style="display:none;">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M200-120q-33 0-56.5-23.5T120-200v-560q0-33 23.5-56.5T200-840h357l-80 80H200v560h560v-278l80-80v358q0 33-23.5 56.5T760-120H200Zm280-360ZM360-360v-170l367-367q12-12 27-18t30-6q16 0 30.5 6t26.5 18l56 57q11 12 17 26.5t6 29.5q0 15-5.5 29.5T897-728L530-360H360Zm481-424-56-56 56 56ZM440-440h56l232-232-28-28-29-28-231 231v57Zm260-260-29-28 29 28 28 28-28-28Z"/></svg>
-                </button>
-                <button class="btn-icon export-post" data-post-id="${p.id}" title="Export post data" style="display:none;">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M480-320 280-520l56-58 104 104v-326h80v326l104-104 56 58-200 200ZM240-160q-33 0-56.5-23.5T160-240v-120h80v120h480v-120h80v120q0 33-23.5 56.5T720-160H240Z"/></svg>
-                </button>
-                <button class="btn-icon delete-post" data-post-id="${p.id}" title="Delete post" style="display:none;">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>
-                </button>
+                <div class="admin-actions" style="display:none; gap:4px;">
+                  <button class="btn-icon edit-post" data-post-id="${p.id}" title="Edit post">
+                    <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M200-200h57l391-391-57-57-391 391v57Zm-80 80v-170l528-527q12-11 26.5-17t30.5-6q16 0 31 6t26 17l55 56q12 11 17.5 26t5.5 30q0 16-5.5 30.5T817-647L290-120H120Zm640-584-56-56 56 56Zm-141 85-28-29 57 57-29-28Z"/></svg>
+                  </button>
+                  <button class="btn-icon delete-post" data-post-id="${p.id}" title="Delete post">
+                     <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M280-120q-33 0-56.5-23.5T200-200v-520h-40v-80h200v-40h240v40h200v80h-40v520q0 33-23.5 56.5T680-120H280Zm400-600H280v520h400v-520ZM360-280h80v-360h-80v360Zm160 0h80v-360h-80v360ZM280-720v520-520Z"/></svg>
+                  </button>
+                </div>
               </div>
             </td>
           `;
-          tbody.appendChild(row);
-          attachRowHandlers(row);
+        tbody.appendChild(row);
+        attachRowHandlers(row);
+      });
+    }
+
+    function attachRowHandlers(row) {
+      const id = row.dataset.postId;
+      const connWrapper = row.querySelector('.conn-cell-wrapper');
+
+      // Fetch connections count
+      fetch(`/api/posts/${id}/connections`).then(r => r.json()).then(conns => {
+        const list = Array.isArray(conns) ? conns : (conns && conns.connections) ? conns.connections : [];
+        connWrapper.innerHTML = ''; // Clear skeleton
+
+        if (list.length > 0) {
+          const badge = document.createElement('div');
+          badge.className = 'conn-count-badge';
+          badge.textContent = `${list.length} Connection${list.length > 1 ? 's' : ''}`;
+          badge.title = 'Click to view details';
+          badge.onclick = (e) => {
+            e.stopPropagation();
+            const lines = list.map(c => `<li><strong>${c.to_bus || c.from_bus}</strong> (${c.phase || 'Unknown Phase'})</li>`).join('');
+            showInfoModal(`Connections for Post #${id}`, `<ul style="padding-left: 20px; list-style-type: disc;">${lines}</ul>`);
+          };
+          connWrapper.appendChild(badge);
+        } else {
+          const empty = document.createElement('span');
+          empty.className = 'conn-count-badge empty';
+          empty.textContent = 'None';
+          connWrapper.appendChild(empty);
+        }
+      }).catch(() => {
+        connWrapper.innerHTML = '<span style="color:#ef4444;font-size:0.8rem;">Error</span>';
+      });
+
+      const custWrapper = row.querySelector('.cust-cell-wrapper');
+      const feederWrapper = row.querySelector('.feeder-cell-wrapper');
+
+      // Fetch expanded post details for feeder
+      fetch(`/api/posts/${id}`).then(r => r.json()).then(detail => {
+        const feeder = detail.feeder || '<span style="color:#cbd5e1;">—</span>';
+        feederWrapper.innerHTML = `<span>${feeder}</span>`;
+      }).catch(() => {
+        feederWrapper.innerHTML = '<span style="color:#ef4444;font-size:0.8rem;">Error</span>';
+      });
+
+      // Fetch accurate service drops count (Customers Connected)
+      fetch(`/api/posts/${id}/service-drops`).then(r => r.json()).then(result => {
+        const count = result.count || 0;
+        custWrapper.innerHTML = `<strong>${count}</strong>`;
+      }).catch(() => {
+        custWrapper.innerHTML = '<span style="color:#ef4444;font-size:0.8rem;">Error</span>';
+      });
+
+      // Locator button
+      const locateBtn = row.querySelector('.locate-post');
+      if (locateBtn) {
+        locateBtn.addEventListener('click', function (e) {
+          e.preventDefault();
+          const lat = this.dataset.lat;
+          const lng = this.dataset.lng;
+          const postId = this.dataset.postId;
+          window.location.href = `/map?id=${postId}&lat=${lat}&lng=${lng}`;
         });
       }
 
-      function updatePaginationControls() {
-        const infoEl = document.querySelector('.pagination-info span');
-        const prevBtn = document.getElementById('pagination-prev');
-        const nextBtn = document.getElementById('pagination-next');
-        const pagesDiv = document.getElementById('pagination-pages');
-        
-        // Update pagination info text
-        infoEl.textContent = `Showing page ${currentPage} of ${totalPages}`;
-        
-        // Update nav buttons
-        prevBtn.disabled = currentPage <= 1;
-        nextBtn.disabled = currentPage >= totalPages;
-        
-        // Clear page numbers
-        pagesDiv.innerHTML = '';
-        
-        // Calculate which pages to show
-        const startPage = Math.max(1, currentPage - 2);
-        const endPage = Math.min(totalPages, currentPage + 2);
-        
-        // Show first page if not in range
-        if (startPage > 1) {
-          const btn = document.createElement('button');
-          btn.className = 'pagination-btn';
-          btn.textContent = '1';
-          btn.addEventListener('click', () => goToPage(1));
-          pagesDiv.appendChild(btn);
-          
-          // Show ellipsis if there's a gap
-          if (startPage > 2) {
-            const ellipsis = document.createElement('span');
-            ellipsis.className = 'pagination-ellipsis';
-            ellipsis.textContent = '…';
-            ellipsis.style.padding = '0 4px';
-            ellipsis.style.color = 'var(--text-secondary)';
-            pagesDiv.appendChild(ellipsis);
-          }
-        }
-        
-        // Show page range
-        for (let i = startPage; i <= endPage; i++) {
-          const btn = document.createElement('button');
-          btn.className = 'pagination-btn';
-          if (i === currentPage) {
-            btn.classList.add('active');
-          }
-          btn.textContent = i;
-          btn.addEventListener('click', () => goToPage(i));
-          pagesDiv.appendChild(btn);
-        }
-        
-        // Show last page if not in range
-        if (endPage < totalPages) {
-          // Show ellipsis if there's a gap
-          if (endPage < totalPages - 1) {
-            const ellipsis = document.createElement('span');
-            ellipsis.className = 'pagination-ellipsis';
-            ellipsis.textContent = '…';
-            ellipsis.style.padding = '0 4px';
-            ellipsis.style.color = 'var(--text-secondary)';
-            pagesDiv.appendChild(ellipsis);
-          }
-          
-          const btn = document.createElement('button');
-          btn.className = 'pagination-btn';
-          btn.textContent = totalPages;
-          btn.addEventListener('click', () => goToPage(totalPages));
-          pagesDiv.appendChild(btn);
+      if (!isAdmin) return;
+
+      const adminActions = row.querySelector('.admin-actions');
+      if (adminActions) adminActions.style.display = 'contents';
+
+      // Edit button
+      const editBtn = row.querySelector('.edit-post');
+      if (editBtn) {
+        editBtn.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          const post = {
+            id: id,
+            name: row.cells[1].textContent,
+            status: 'Active' // Status no longer visible in UI directly in the row
+          };
+          openEditPostModal(post);
+        });
+      }
+
+      // Delete button
+      const delBtn = row.querySelector('.delete-post');
+      if (delBtn) {
+        delBtn.addEventListener('click', function (e) {
+          e.preventDefault(); e.stopPropagation();
+          if (!confirm(`Delete post #${id}? This cannot be undone.`)) return;
+          fetch(`/api/posts/${id}`, { method: 'DELETE' })
+            .then(r => r.json()).then(json => {
+              if (json && json.success) {
+                row.style.opacity = '0.5';
+                row.style.pointerEvents = 'none';
+                setTimeout(() => row.remove(), 300);
+                loadPosts(currentPage);
+              } else {
+                alert('Failed to delete post: ' + (json.error || 'Unknown error'));
+              }
+            }).catch(err => alert('Delete failed: ' + err));
+        });
+      }
+    }
+
+    function updatePaginationControls() {
+      const infoEl = document.querySelector('.pagination-info span');
+      const prevBtn = document.getElementById('pagination-prev');
+      const nextBtn = document.getElementById('pagination-next');
+      const pagesDiv = document.getElementById('pagination-pages');
+
+      if (!infoEl || !prevBtn || !nextBtn || !pagesDiv) return;
+
+      // Update pagination info text
+      infoEl.textContent = `Showing page ${currentPage} of ${totalPages}`;
+
+      // Update nav buttons
+      prevBtn.disabled = currentPage <= 1;
+      nextBtn.disabled = currentPage >= totalPages;
+
+      // Clear page numbers
+      pagesDiv.innerHTML = '';
+
+      // Calculate which pages to show
+      const startPage = Math.max(1, currentPage - 2);
+      const endPage = Math.min(totalPages, currentPage + 2);
+
+      // Show first page if not in range
+      if (startPage > 1) {
+        const btn = document.createElement('button');
+        btn.className = 'pagination-btn';
+        btn.textContent = '1';
+        btn.addEventListener('click', () => goToPage(1));
+        pagesDiv.appendChild(btn);
+
+        // Show ellipsis if there's a gap
+        if (startPage > 2) {
+          const ellipsis = document.createElement('span');
+          ellipsis.className = 'pagination-ellipsis';
+          ellipsis.textContent = '…';
+          ellipsis.style.padding = '0 4px';
+          ellipsis.style.color = 'var(--text-secondary)';
+          pagesDiv.appendChild(ellipsis);
         }
       }
 
-      function loadPosts(page = 1) {
-        currentPage = page;
-        fetch(`/api/posts?page=${page}&per_page=${perPage}`)
-          .then(r => r.json())
-          .then(response => {
-            if (response.pagination) {
-              totalPages = response.pagination.total_pages;
-              renderPosts(response.data);
-              updatePaginationControls();
-            }
-          })
-          .catch(err => {
-            console.error('Failed to load posts:', err);
-            document.getElementById('posts-tbody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: #c00;">Failed to load posts.</td></tr>';
-          });
-      }
-
-      function loadDistributionLines() {
-        fetch('/api/distribution-lines')
-          .then(r => r.json())
-          .then(lines => {
-            renderDistributionLines(lines);
-          })
-          .catch(err => {
-            console.error('Failed to load distribution lines:', err);
-            document.getElementById('lines-tbody').innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #c00;">Failed to load distribution line segments.</td></tr>';
-          });
-      }
-
-      function renderDistributionLines(lines) {
-        const tbody = document.getElementById('lines-tbody');
-        tbody.innerHTML = '';
-        
-        if (!lines || lines.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #999;">No distribution line segments available.</td></tr>';
-          return;
+      // Show page range
+      for (let i = startPage; i <= endPage; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'pagination-btn';
+        if (i === currentPage) {
+          btn.classList.add('active');
         }
-        
-        lines.forEach(line => {
-          const row = document.createElement('tr');
-          row.className = 'line-row';
-          row.innerHTML = `
-            <td><strong>${line.segment_id}</strong></td>
-            <td>${line.from_bus_id}</td>
-            <td>${line.to_bus_id}</td>
-            <td>${(line.length_meters || 0).toFixed(2)}</td>
-            <td>${line.configuration || '-'}</td>
-            <td>${line.phasing || '-'}</td>
+        btn.textContent = i;
+        btn.addEventListener('click', () => goToPage(i));
+        pagesDiv.appendChild(btn);
+      }
+
+      // Show last page if not in range
+      if (endPage < totalPages) {
+        // Show ellipsis if there's a gap
+        if (endPage < totalPages - 1) {
+          const ellipsis = document.createElement('span');
+          ellipsis.className = 'pagination-ellipsis';
+          ellipsis.textContent = '…';
+          ellipsis.style.padding = '0 4px';
+          ellipsis.style.color = 'var(--text-secondary)';
+          pagesDiv.appendChild(ellipsis);
+        }
+
+        const btn = document.createElement('button');
+        btn.className = 'pagination-btn';
+        btn.textContent = totalPages;
+        btn.addEventListener('click', () => goToPage(totalPages));
+        pagesDiv.appendChild(btn);
+      }
+    }
+
+    function loadPosts(page = 1) {
+      currentPage = page;
+      fetch(`/api/posts?page=${page}&per_page=${perPage}`)
+        .then(r => r.json())
+        .then(response => {
+          if (response.pagination) {
+            totalPages = response.pagination.total_pages;
+            renderPosts(response.data);
+            updatePaginationControls();
+            document.getElementById('total-posts').textContent = response.pagination.total;
+          }
+        })
+        .catch(err => {
+          console.error('Failed to load posts:', err);
+          document.getElementById('posts-tbody').innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 20px; color: #c00;">Failed to load posts.</td></tr>';
+        });
+    }
+
+    function loadDistributionLines() {
+      fetch('/api/distribution-lines')
+        .then(r => r.json())
+        .then(lines => {
+          renderDistributionLines(lines);
+        })
+        .catch(err => {
+          console.error('Failed to load distribution lines:', err);
+          document.getElementById('lines-tbody').innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #c00;">Failed to load distribution line segments.</td></tr>';
+        });
+    }
+
+
+    // Distribution Lines Pagination State
+    let currentLinePage = 1;
+    let totalLinePages = 1;
+
+    function renderDistributionLines(lines) {
+      const tbody = document.getElementById('lines-tbody');
+      tbody.innerHTML = '';
+
+      if (!lines || lines.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #999;">No distribution line segments available.</td></tr>';
+        return;
+      }
+
+      lines.forEach(line => {
+        const row = document.createElement('tr');
+        row.className = 'line-row';
+
+        // Phasing Badge Logic
+        let phaseBadge = '';
+        const phase = (line.phasing || '').trim().toUpperCase();
+        if (phase) {
+          let color = '#64748b'; // default grey
+          let bg = '#e2e8f0';
+          if (phase === 'A' || phase === 'AN') { color = '#dc2626'; bg = '#fee2e2'; } // Red
+          else if (phase === 'B' || phase === 'BN') { color = '#d97706'; bg = '#fef3c7'; } // Yellow/Orange
+          else if (phase === 'C' || phase === 'CN') { color = '#2563eb'; bg = '#dbeafe'; } // Blue
+          else if (phase.length > 1) { color = '#7e22ce'; bg = '#f3e8ff'; } // Purple for Multi-phase
+
+          phaseBadge = `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-weight:700;color:${color};background:${bg};border:1px solid ${color}20;">${phase}</span>`;
+        } else {
+          phaseBadge = '<span style="color:#cbd5e1;">—</span>';
+        }
+
+        row.innerHTML = `
+            <td><strong style="font-family:monospace;color:var(--text-primary);">${line.segment_id}</strong></td>
+            <td><span style="font-family:monospace;font-size:0.85rem;color:var(--text-secondary);">${line.from_bus_id}</span></td>
+            <td><span style="font-family:monospace;font-size:0.85rem;color:var(--text-secondary);">${line.to_bus_id}</span></td>
+            <td style="text-align:right;font-family:monospace;">${(line.length_meters || 0).toFixed(2)}</td>
+            <td>${line.configuration || '<span style="color:#cbd5e1;">—</span>'}</td>
+            <td>${phaseBadge}</td>
             <td>${line.conductor_type} ${line.conductor_size ? line.conductor_size : ''}</td>
-            <td>
-              <button class="btn btn-small" style="font-size:12px;padding:4px 8px;" onclick="showLineDetails(${line.id}, '${line.segment_id}')">View</button>
+            <td style="text-align:center;">
+              <button class="btn-icon" onclick="showLineDetails(${line.id}, '${line.segment_id}')" title="View Details">
+                <svg xmlns="http://www.w3.org/2000/svg" height="18" viewBox="0 -960 960 960" width="18" fill="currentColor"><path d="M480-320q75 0 127.5-52.5T660-500q0-75-52.5-127.5T480-680q-75 0-127.5 52.5T300-500q0 75 52.5 127.5T480-320Zm0-72q-45 0-76.5-31.5T372-500q0-45 31.5-76.5T480-608q45 0 76.5 31.5T588-500q0 45-31.5 76.5T480-392Zm0 192q-146 0-266-81.5T40-500q54-137 174-218.5T480-800q146 0 266 81.5T920-500q-54 137-174 218.5T480-200Zm0-300Zm0 220q113 0 207.5-59.5T832-500q-50-101-144.5-160.5T480-720q-113 0-207.5 59.5T128-500q50 101 144.5 160.5T480-280Z"/></svg>
+              </button>
             </td>
           `;
-          tbody.appendChild(row);
-        });
-        
-        // Add search functionality for lines
-        const searchInput = document.getElementById('search-lines');
-        if (searchInput) {
-          searchInput.addEventListener('keyup', function() {
-            const query = this.value.toLowerCase();
-            const rows = document.querySelectorAll('.line-row');
-            
-            rows.forEach(row => {
-              const segmentId = row.querySelector('td:nth-child(1)')?.textContent || '';
-              const fromBus = row.querySelector('td:nth-child(2)')?.textContent || '';
-              const toBus = row.querySelector('td:nth-child(3)')?.textContent || '';
-              
-              const match = segmentId.toLowerCase().includes(query) || 
-                           fromBus.toLowerCase().includes(query) || 
-                           toBus.toLowerCase().includes(query);
-              
-              row.style.display = match ? '' : 'none';
-            });
+        tbody.appendChild(row);
+      });
+
+      // Remove old search listener if it exists to prevent duplicates (logic simplified here)
+      // Search functionality for lines (client-side search on CURRENT page only)
+      const searchInput = document.getElementById('search-lines');
+      if (searchInput) {
+        // Clone to remove old listeners
+        const newInput = searchInput.cloneNode(true);
+        searchInput.parentNode.replaceChild(newInput, searchInput);
+
+        newInput.addEventListener('keyup', function () {
+          const query = this.value.toLowerCase();
+          const rows = document.querySelectorAll('.line-row');
+
+          rows.forEach(row => {
+            const segmentId = row.querySelector('td:nth-child(1)')?.textContent || '';
+            const fromBus = row.querySelector('td:nth-child(2)')?.textContent || '';
+            const toBus = row.querySelector('td:nth-child(3)')?.textContent || '';
+
+            const match = segmentId.toLowerCase().includes(query) ||
+              fromBus.toLowerCase().includes(query) ||
+              toBus.toLowerCase().includes(query);
+
+            row.style.display = match ? '' : 'none';
           });
+        });
+      }
+    }
+
+    function updateLinePaginationControls() {
+      const infoEl = document.querySelector('#lines-pagination-text');
+      const prevBtn = document.getElementById('lines-pagination-prev');
+      const nextBtn = document.getElementById('lines-pagination-next');
+      const pagesDiv = document.getElementById('lines-pagination-pages');
+
+      if (!infoEl || !prevBtn || !nextBtn || !pagesDiv) return;
+
+      // Update pagination info text
+      infoEl.textContent = `Showing page ${currentLinePage} of ${totalLinePages}`;
+
+      // Update nav buttons
+      prevBtn.disabled = currentLinePage <= 1;
+      nextBtn.disabled = currentLinePage >= totalLinePages;
+
+      // Clear page numbers
+      pagesDiv.innerHTML = '';
+
+      // Calculate which pages to show
+      const startPage = Math.max(1, currentLinePage - 2);
+      const endPage = Math.min(totalLinePages, currentLinePage + 2);
+
+      // Show first page if not in range
+      if (startPage > 1) {
+        const btn = document.createElement('button');
+        btn.className = 'pagination-btn';
+        btn.textContent = '1';
+        btn.addEventListener('click', () => loadDistributionLines(1));
+        pagesDiv.appendChild(btn);
+        if (startPage > 2) {
+          const ellipsis = document.createElement('span');
+          ellipsis.className = 'pagination-ellipsis';
+          ellipsis.textContent = '…';
+          pagesDiv.appendChild(ellipsis);
         }
       }
 
-      function showLineDetails(lineId, segmentId) {
-        alert(`Distribution Line Segment: ${segmentId}\n\nID: ${lineId}\n\nUse the Resources page to view/edit all technical specifications.`);
+      for (let i = startPage; i <= endPage; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'pagination-btn';
+        if (i === currentLinePage) btn.classList.add('active');
+        btn.textContent = i;
+        btn.addEventListener('click', () => loadDistributionLines(i));
+        pagesDiv.appendChild(btn);
       }
 
-      function goToPage(page) {
-        if (page >= 1 && page <= totalPages) {
-          loadPosts(page);
+      if (endPage < totalLinePages) {
+        if (endPage < totalLinePages - 1) {
+          const ellipsis = document.createElement('span');
+          ellipsis.className = 'pagination-ellipsis';
+          ellipsis.textContent = '…';
+          pagesDiv.appendChild(ellipsis);
         }
+        const btn = document.createElement('button');
+        btn.className = 'pagination-btn';
+        btn.textContent = totalLinePages;
+        btn.addEventListener('click', () => loadDistributionLines(totalLinePages));
+        pagesDiv.appendChild(btn);
       }
 
-      // Pagination button handlers
-      document.getElementById('pagination-prev').addEventListener('click', () => {
-        if (currentPage > 1) goToPage(currentPage - 1);
-      });
-      document.getElementById('pagination-next').addEventListener('click', () => {
-        if (currentPage < totalPages) goToPage(currentPage + 1);
-      });
+      // Button handlers (re-attach to ensure fresh state/avoid leaks, though straightforward here)
+      prevBtn.onclick = () => { if (currentLinePage > 1) loadDistributionLines(currentLinePage - 1); };
+      nextBtn.onclick = () => { if (currentLinePage < totalLinePages) loadDistributionLines(currentLinePage + 1); };
+    }
 
-      // Determine current user role first
-      fetch('/auth/whoami').then(r => r.json()).then(info => {
-        isAdmin = info && info.authenticated && info.user && info.user.role === 'admin';
-        // Load initial posts and distribution lines
-        loadPosts(1);
-        loadDistributionLines();
-      }).catch(() => {
-        // Proceed without auth info
-        loadPosts(1);
-        loadDistributionLines();
+    function loadDistributionLines(page = 1) {
+      currentLinePage = page;
+      // Use pagination API
+      fetch(`/api/distribution-lines?page=${page}&per_page=10`)
+        .then(r => r.json())
+        .then(response => {
+          // Handle both old array format (fallback, if API update delayed) and new object format
+          if (Array.isArray(response)) {
+            // Fallback for old API if needed
+            renderDistributionLines(response);
+          } else if (response.pagination) {
+            totalLinePages = response.pagination.total_pages;
+            renderDistributionLines(response.data);
+            updateLinePaginationControls();
+            document.getElementById('total-lines').textContent = response.pagination.total;
+          } else if (response.data) {
+            renderDistributionLines(response.data);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to load distribution lines:', err);
+          document.getElementById('lines-tbody').innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: #c00;">Failed to load distribution line segments.</td></tr>';
+        });
+    }
+
+    function showLineDetails(lineId, segmentId) {
+      showInfoModal(
+        `Distribution Line Segment: ${segmentId}`,
+        `<div style="display:flex;flex-direction:column;gap:8px;">
+           <div><strong>ID:</strong> ${lineId}</div>
+           <div style="color:var(--text-secondary);font-size:0.9rem;">
+             Use the <a href="/resources" style="color:var(--primary);text-decoration:underline;">Resources</a> page to view/edit all technical specifications.
+           </div>
+         </div>`
+      );
+    }
+
+    function goToPage(page) {
+      if (page >= 1 && page <= totalPages) {
+        loadPosts(page);
+      }
+    }
+
+    // Pagination button handlers
+    document.getElementById('pagination-prev').addEventListener('click', () => {
+      if (currentPage > 1) goToPage(currentPage - 1);
+    });
+    document.getElementById('pagination-next').addEventListener('click', () => {
+      if (currentPage < totalPages) goToPage(currentPage + 1);
+    });
+
+    // Determine current user role first
+    fetch('/auth/whoami').then(r => r.json()).then(info => {
+      isAdmin = info && info.authenticated && info.user && info.user.role === 'admin';
+      // Load initial posts and distribution lines
+      loadPosts(1);
+      loadDistributionLines();
+      loadCustomers(1);
+    }).catch(() => {
+      // Proceed without auth info
+      loadPosts(1);
+      loadDistributionLines();
+      loadCustomers(1);
+    });
+
+    // --- Customer Data Logic ---
+    let currentCustomerPage = 1;
+    let totalCustomerPages = 1;
+
+    function renderCustomers(customers) {
+      const tbody = document.getElementById('customers-tbody');
+      tbody.innerHTML = '';
+
+      if (!customers || customers.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #999;">No customers found.</td></tr>';
+        return;
+      }
+
+      customers.forEach(c => {
+        let locateBtn;
+        if (c.connected_post) {
+          locateBtn = `<button class="btn-icon" onclick="locateCustomerPost(${c.connected_post.lat}, ${c.connected_post.lng}, ${c.connected_post.id})" title="Locate Post">
+              <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor"><path d="M480-480q33 0 56.5-23.5T560-560q0-33-23.5-56.5T480-640q-33 0-56.5 23.5T400-560q0 33 23.5 56.5T480-480Zm0 294q122-112 181-203.5T720-552q0-109-69.5-178.5T480-800q-101 0-170.5 69.5T240-552q0 71 59 162.5T480-186Zm0 106Q319-217 239.5-334.5T160-552q0-150 96.5-239T480-880q127 0 223.5 89T800-552q0 100-79.5 217.5T480-80Zm0-480Z"/></svg>
+            </button>`;
+        } else {
+          locateBtn = `<button class="btn-icon" disabled style="opacity:0.3;cursor:not-allowed;" title="No location data">
+              <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor"><path d="M480-480q33 0 56.5-23.5T560-560q0-33-23.5-56.5T480-640q-33 0-56.5 23.5T400-560q0 33 23.5 56.5T480-480Zm0 294q122-112 181-203.5T720-552q0-109-69.5-178.5T480-800q-101 0-170.5 69.5T240-552q0 71 59 162.5T480-186Zm0 106Q319-217 239.5-334.5T160-552q0-150 96.5-239T480-880q127 0 223.5 89T800-552q0 100-79.5 217.5T480-80Zm0-480Z"/></svg>
+            </button>`;
+        }
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td><strong style="font-family:monospace;color:var(--text-primary);">${c.customer_id}</strong></td>
+            <td>${c.name || '<span style="color:#ccc">N/A</span>'}</td>
+            <td>${c.customer_type || '<span style="color:#ccc">N/A</span>'}</td>
+            <td>${c.service_voltage || '<span style="color:#ccc">N/A</span>'}</td>
+            <td>${c.phase || '<span style="color:#ccc">N/A</span>'}</td>
+            <td style="text-align:center; display:flex; justify-content:center; gap:8px;">
+               ${locateBtn}
+               <button class="btn-icon" onclick="showCustomerDetails('${c.customer_id}', '${c.name || ''}')" title="View Consumption">
+                 <svg xmlns="http://www.w3.org/2000/svg" height="20" viewBox="0 -960 960 960" width="20" fill="currentColor"><path d="M320-240h320v-80H320v80Zm0-160h320v-80H320v80ZM240-80q-33 0-56.5-23.5T160-160v-640q0-33 23.5-56.5T240-880h320l240 240v480q0 33-23.5 56.5T720-80H240Zm280-520v-200H240v640h480v-440H520ZM240-800v200-200 640-640Z"/></svg>
+               </button>
+            </td>
+        `;
+        tbody.appendChild(row);
       });
-      
-      // Create edit modal
-      let editModal = null;
-      function createEditModal() {
-        if (editModal) return editModal;
-        const overlay = document.createElement('div');
-        overlay.className = 'modal-overlay edit-post-modal-overlay';
-        overlay.style.display = 'none';
-        overlay.innerHTML = `
+    }
+
+    window.locateCustomerPost = function (lat, lng, postId) {
+      if (!lat || !lng) return;
+      window.location.href = `/map?id=${postId}&lat=${lat}&lng=${lng}`;
+    };
+
+    function updateCustomerPaginationControls() {
+      const infoEl = document.querySelector('#customers-pagination-text');
+      const prevBtn = document.getElementById('customers-pagination-prev');
+      const nextBtn = document.getElementById('customers-pagination-next');
+      const pagesDiv = document.getElementById('customers-pagination-pages');
+
+      if (!infoEl) return;
+
+      infoEl.textContent = `Showing page ${currentCustomerPage} of ${totalCustomerPages}`;
+      prevBtn.disabled = currentCustomerPage <= 1;
+      nextBtn.disabled = currentCustomerPage >= totalCustomerPages;
+
+      pagesDiv.innerHTML = '';
+      const startPage = Math.max(1, currentCustomerPage - 2);
+      const endPage = Math.min(totalCustomerPages, currentCustomerPage + 2);
+
+      if (startPage > 1) {
+        const btn = document.createElement('button');
+        btn.className = 'pagination-btn';
+        btn.textContent = '1';
+        btn.onclick = () => loadCustomers(1);
+        pagesDiv.appendChild(btn);
+        if (startPage > 2) pagesDiv.appendChild(document.createTextNode('...'));
+      }
+
+      for (let i = startPage; i <= endPage; i++) {
+        const btn = document.createElement('button');
+        btn.className = 'pagination-btn' + (i === currentCustomerPage ? ' active' : '');
+        btn.textContent = i;
+        btn.onclick = () => loadCustomers(i);
+        pagesDiv.appendChild(btn);
+      }
+
+      if (endPage < totalCustomerPages) {
+        if (endPage < totalCustomerPages - 1) pagesDiv.appendChild(document.createTextNode('...'));
+        const btn = document.createElement('button');
+        btn.className = 'pagination-btn';
+        btn.textContent = totalCustomerPages;
+        btn.onclick = () => loadCustomers(totalCustomerPages);
+        pagesDiv.appendChild(btn);
+      }
+
+      prevBtn.onclick = () => { if (currentCustomerPage > 1) loadCustomers(currentCustomerPage - 1); };
+      nextBtn.onclick = () => { if (currentCustomerPage < totalCustomerPages) loadCustomers(currentCustomerPage + 1); };
+    }
+
+    function loadCustomers(page = 1, query = '') {
+      currentCustomerPage = page;
+      let url = `/api/customers?page=${page}&per_page=10`;
+      if (query) url += `&q=${encodeURIComponent(query)}`;
+
+      fetch(url)
+        .then(r => r.json())
+        .then(response => {
+          if (response.pagination) {
+            totalCustomerPages = response.pagination.total_pages;
+            renderCustomers(response.data);
+            updateCustomerPaginationControls();
+            document.getElementById('total-customers').textContent = response.pagination.total;
+          } else {
+            renderCustomers([]);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to load customers:', err);
+          document.getElementById('customers-tbody').innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #c00;">Failed to load data.</td></tr>';
+        });
+    }
+
+    // Search handler for customers
+    const custSearch = document.getElementById('search-customers');
+    if (custSearch) {
+      let debounceTimer;
+      custSearch.addEventListener('input', function () {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          loadCustomers(1, this.value);
+        }, 300);
+      });
+    }
+
+    // Make detail function global
+    window.showCustomerDetails = function (custId, name) {
+      fetch(`/api/customers/${encodeURIComponent(custId)}/consumption`)
+        .then(r => r.json())
+        .then(data => {
+          let html = '';
+          if (data.items && data.items.length > 0) {
+            html = '<table class="data-table" style="font-size:0.9rem;"><thead><tr><th>Billing Period</th><th>kWh</th><th>Power Factor</th></tr></thead><tbody>';
+            data.items.forEach(item => {
+              html += `<tr>
+                            <td>${item.billing_period || '-'}</td>
+                            <td>${item.kwh_consumed}</td>
+                            <td>${item.power_factor || '-'}</td>
+                        </tr>`;
+            });
+            html += '</tbody></table>';
+          } else {
+            html = '<p>No consumption records found.</p>';
+          }
+          showInfoModal(`Customer: ${name} (${custId})`, html);
+        })
+        .catch(err => showInfoModal('Error', 'Failed to load consumption history.'));
+    };
+
+    // Create edit modal
+    let editModal = null;
+    function createEditModal() {
+      if (editModal) return editModal;
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay edit-post-modal-overlay';
+      overlay.style.display = 'none';
+      overlay.innerHTML = `
           <div class="modal edit-post-modal">
             <div class="modal-header">
               <h3><span id="edit-post-name-title">Edit Post</span></h3>
@@ -500,87 +1032,128 @@
             </div>
           </div>
         `;
-        document.body.appendChild(overlay);
-        
-        overlay.querySelector('.modal-close').addEventListener('click', () => closeEditModal());
-        overlay.querySelector('.edit-cancel').addEventListener('click', () => closeEditModal());
-        overlay.querySelector('.edit-save').addEventListener('click', saveEdit);
-        overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeEditModal(); });
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) closeEditModal(); });
-        
-        editModal = overlay;
-        return editModal;
-      }
-      
-      function closeEditModal() {
-        if (editModal) editModal.style.display = 'none';
-      }
-      
-      function saveEdit() {
-        const m = editModal;
-        const id = (m.querySelector('#edit-post-id').value || '').toString();
-        const lat = (m.querySelector('#edit-post-lat').value || '').trim();
-        const lng = (m.querySelector('#edit-post-lng').value || '').trim();
-        const status = (m.querySelector('#edit-post-status').value || '').trim();
-        
-        if (!lat || !lng) {
-          alert('Please enter both latitude and longitude.');
-          return;
-        }
-        
-        const latNum = parseFloat(lat);
-        const lngNum = parseFloat(lng);
-        if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
-          alert('Latitude and longitude must be valid numbers.');
-          return;
-        }
-        
-        fetch(`/api/posts/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lat: latNum, lng: lngNum, status: status || undefined })
-        }).then(r => r.json()).then(json => {
-          if (json && json.success) {
-            closeEditModal();
-            loadPosts(currentPage);
-          } else {
-            alert('Update failed: ' + (json.error || 'Unknown error'));
-          }
-        }).catch(err => alert('Update failed: ' + err));
-      }
-      
-      window.openEditPostModal = function(post) {
-        const m = createEditModal();
-        m.querySelector('#edit-post-id').value = post.id;
-        m.querySelector('#edit-post-name-display').textContent = post.name;
-        m.querySelector('#edit-post-id-small').textContent = '#'+post.id;
-        m.querySelector('#edit-post-lat').value = post.lat.toFixed(6);
-        m.querySelector('#edit-post-lng').value = post.lng.toFixed(6);
-        m.querySelector('#edit-post-status').value = post.status || '';
-        m.style.display = 'flex';
-        m.querySelector('#edit-post-lat').focus();
-      };
+      document.body.appendChild(overlay);
 
-      // Search functionality
-      const searchInput = document.getElementById('search-posts');
-      if (searchInput) {
-        searchInput.addEventListener('keyup', function() {
-          const query = this.value.toLowerCase();
-          const rows = document.querySelectorAll('.post-row');
-          
-          rows.forEach(row => {
-            const id = row.querySelector('td:nth-child(1)')?.textContent || '';
-            const name = row.querySelector('td:nth-child(2)')?.textContent || '';
-            const status = row.querySelector('td:nth-child(5)')?.textContent || '';
-            
-            const match = id.toLowerCase().includes(query) || 
-                         name.toLowerCase().includes(query) || 
-                         status.toLowerCase().includes(query);
-            
-            row.style.display = match ? '' : 'none';
-          });
-        });
+      overlay.querySelector('.modal-close').addEventListener('click', () => closeEditModal());
+      overlay.querySelector('.edit-cancel').addEventListener('click', () => closeEditModal());
+      overlay.querySelector('.edit-save').addEventListener('click', saveEdit);
+      overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeEditModal(); });
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) closeEditModal(); });
+
+      editModal = overlay;
+      return editModal;
+    }
+
+    function closeEditModal() {
+      if (editModal) editModal.style.display = 'none';
+    }
+
+    function saveEdit() {
+      const m = editModal;
+      const id = (m.querySelector('#edit-post-id').value || '').toString();
+      const lat = (m.querySelector('#edit-post-lat').value || '').trim();
+      const lng = (m.querySelector('#edit-post-lng').value || '').trim();
+      const status = (m.querySelector('#edit-post-status').value || '').trim();
+
+      if (!lat || !lng) {
+        alert('Please enter both latitude and longitude.');
+        return;
       }
-    });
-  </script>
+
+      const latNum = parseFloat(lat);
+      const lngNum = parseFloat(lng);
+      if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+        alert('Latitude and longitude must be valid numbers.');
+        return;
+      }
+
+      fetch(`/api/posts/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lat: latNum, lng: lngNum, status: status || undefined })
+      }).then(r => r.json()).then(json => {
+        if (json && json.success) {
+          closeEditModal();
+          loadPosts(currentPage);
+        } else {
+          alert('Update failed: ' + (json.error || 'Unknown error'));
+        }
+      }).catch(err => alert('Update failed: ' + err));
+    }
+
+    window.openEditPostModal = function (post) {
+      const m = createEditModal();
+      m.querySelector('#edit-post-id').value = post.id;
+      m.querySelector('#edit-post-name-display').textContent = post.name;
+      m.querySelector('#edit-post-id-small').textContent = '#' + post.id;
+      m.querySelector('#edit-post-lat').value = post.lat.toFixed(6);
+      m.querySelector('#edit-post-lng').value = post.lng.toFixed(6);
+      m.querySelector('#edit-post-status').value = post.status || '';
+      m.style.display = 'flex';
+      m.querySelector('#edit-post-lat').focus();
+    };
+
+    // --- Reuseable Info Modal ---
+    let infoModal = null;
+    function createInfoModal() {
+      if (infoModal) return infoModal;
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay info-modal-overlay';
+      overlay.style.display = 'none';
+      overlay.innerHTML = `
+          <div class="modal info-modal" style="max-width: 500px;">
+            <div class="modal-header">
+              <h3><span id="info-modal-title">Info</span></h3>
+              <button class="modal-close info-close" aria-label="Close">✕</button>
+            </div>
+            <div class="modal-body" id="info-modal-content" style="padding: 20px; font-size: 1rem; color: var(--text-primary);">
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary info-close-btn" style="background:#e8e8e8;color:#333;padding:8px 20px;border-radius:6px;font-weight:600;border:none;cursor:pointer;">Close</button>
+            </div>
+          </div>
+        `;
+      document.body.appendChild(overlay);
+
+      const closeFunc = () => { overlay.style.display = 'none'; };
+      overlay.querySelector('.info-close').addEventListener('click', closeFunc);
+      overlay.querySelector('.info-close-btn').addEventListener('click', closeFunc);
+      overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeFunc(); });
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) closeFunc(); });
+
+      infoModal = overlay;
+      return infoModal;
+    }
+
+    function showInfoModal(title, htmlContent) {
+      const m = createInfoModal();
+      m.querySelector('#info-modal-title').textContent = title;
+      m.querySelector('#info-modal-content').innerHTML = htmlContent;
+      m.style.display = 'flex';
+      // focus close button for accessibility
+      setTimeout(() => m.querySelector('.info-close-btn').focus(), 50);
+    }
+
+    // Search functionality
+    const searchInput = document.getElementById('search-posts');
+    if (searchInput) {
+      searchInput.addEventListener('keyup', function () {
+        const query = this.value.toLowerCase();
+        const rows = document.querySelectorAll('.post-row');
+
+        rows.forEach(row => {
+          const id = row.querySelector('td:nth-child(1)')?.textContent || '';
+          const name = row.querySelector('td:nth-child(2)')?.textContent || '';
+          const status = row.querySelector('td:nth-child(5)')?.textContent || '';
+
+          const match = id.toLowerCase().includes(query) ||
+            name.toLowerCase().includes(query) ||
+            status.toLowerCase().includes(query);
+
+          row.style.display = match ? '' : 'none';
+        });
+      });
+    }
+  });
+</script>
 {% endblock %}

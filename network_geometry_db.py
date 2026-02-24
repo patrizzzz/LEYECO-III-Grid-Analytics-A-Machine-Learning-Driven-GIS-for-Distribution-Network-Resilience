@@ -274,6 +274,7 @@ def lines_to_geojson(lines, nodes):
             "to_pole": line.get("to_pole"),
             "feeder": line.get("feeder"),
             "circuit": line.get("circuit"),
+            "phasing": line.get("phasing"),
         }
         if length_m is not None:
             props["length_meters"] = round(length_m, 2)
@@ -288,106 +289,194 @@ def lines_to_geojson(lines, nodes):
     return {"type": "FeatureCollection", "features": features}
 
 
+def _add_edge(lines, bus_to_coord, from_bus, to_bus, connection_type, feeder=None, circuit=None, phasing=None, processed_edges=None):
+    """Append one line to `lines` if both bus IDs resolve to coordinates. Uses bus_to_coord for lookup."""
+    from_bus = (from_bus or "").strip()
+    to_bus = (to_bus or "").strip()
+    if not from_bus or not to_bus:
+        return
+
+    # Deduplication check
+    if processed_edges is not None:
+        # Sort bus IDs to treat A->B and B->A as the same connection
+        edge_key = tuple(sorted([from_bus, to_bus]))
+        if edge_key in processed_edges:
+            return # Skip duplicate
+        processed_edges.add(edge_key)
+
+    a = bus_to_coord.get(from_bus)
+    b = bus_to_coord.get(to_bus)
+    if not a or not b:
+        return
+    lines.append({
+        "lat1": a["lat"],
+        "lng1": a["lng"],
+        "lat2": b["lat"],
+        "lng2": b["lng"],
+        "from_pole": a.get("pole_number"),
+        "to_pole": b.get("pole_number"),
+        "from_bus": from_bus,
+        "to_bus": to_bus,
+        "feeder": (feeder or "").strip() or a.get("feeder") or b.get("feeder"),
+        "circuit": (circuit or "").strip() or a.get("circuit") or b.get("circuit"),
+        "phasing": (phasing or "").strip() or None,
+        "connection_type": connection_type,
+    })
+
+
 def get_network_geometry(app):
     """
-    Entry point: build line geometry and GeoJSON from the database.
+    Build network line geometry only from explicit from/to data in the database.
+    No inferred structure (no feeder/circuit ordering or post-based segments).
 
-    It combines:
-    - Post-based edges (primary segments, primary→transformer, transformer→secondary)
-      built purely from the `post` table using stored coordinates.
-    - Bus-based edges derived from `distribution_transformer` where we have
-      explicit engineering links From Primary Bus ID → To Secondary Bus ID.
+    Lines are drawn only from:
+    - DistributionLineSegment (from_bus_id → to_bus_id)
+    - DistributionTransformer (from_primary_bus_id → to_secondary_bus_id)
+    - SecondaryLineSegment (from_bus_id → to_bus_id)
+    - LineConnection (from_bus → to_bus)
 
-    Returns dict with:
-    - geojson: GeoJSON FeatureCollection
-    - lines: list of { lat1, lng1, lat2, lng2, connection_type, feeder, circuit, ... }
-    - nodes: list of node dicts
-    - stats: { nodes, edges, by_type }
+    Bus IDs are resolved to coordinates using posts. Each post can provide coordinates for:
+    - primary_bus_id, sec_bus_id, transformer_bus_id, and pole_number.
+    So From/To like P0000000100-72M and P0000000100-72Q resolve when they match any of those
+    on a post with valid lat/lng, and the line is drawn from one coordinates to the other.
+    Returns dict with: geojson, lines, nodes, stats, optional error.
     """
+    empty_result = {
+        "geojson": {"type": "FeatureCollection", "features": []},
+        "lines": [],
+        "nodes": [],
+        "stats": {"nodes": 0, "edges": 0, "total_length_meters": 0, "by_type": {}},
+    }
     with app.app_context():
-        from models import Post, DistributionTransformer
-        from extensions import db
+        try:
+            from models import Post
+            from extensions import db
 
-        # Base edges and nodes from posts
-        lines, nodes = build_all_edges(db.session, Post)
-
-        # Build a bus → coordinate lookup from posts so we can draw
-        # explicit transformer links from primary bus → secondary bus.
-        bus_to_coord = {}
-        posts = db.session.query(Post).all()
-        for p in posts:
-            if not _valid_coord(p.lat, p.lng):
-                continue
-            coord = {
-                "lat": float(p.lat),
-                "lng": float(p.lng),
-                "feeder": (p.feeder or "").strip() or None,
-                "circuit": (p.circuit or "").strip() or None,
-                "pole_number": (p.pole_number or "").strip() if p.pole_number else None,
-            }
-            if p.primary_bus_id:
-                bus_to_coord[str(p.primary_bus_id).strip()] = coord
-            if getattr(p, "sec_bus_id", None):
-                bus_to_coord[str(p.sec_bus_id).strip()] = coord
-
-        # Add explicit Primary → Secondary edges from DistributionTransformer
-        extra_edges = []
-        transformers = db.session.query(DistributionTransformer).all()
-        for t in transformers:
-            from_bus = (t.from_primary_bus_id or "").strip()
-            to_bus = (t.to_secondary_bus_id or "").strip()
-            if not from_bus or not to_bus:
-                continue
-
-            a = bus_to_coord.get(from_bus)
-            b = bus_to_coord.get(to_bus)
-            if not a or not b:
-                continue
-
-            extra_edges.append(
-                {
-                    "lat1": a["lat"],
-                    "lng1": a["lng"],
-                    "lat2": b["lat"],
-                    "lng2": b["lng"],
-                    "from_pole": a.get("pole_number"),
-                    "to_pole": b.get("pole_number"),
-                    "from_bus": from_bus,
-                    "to_bus": to_bus,
-                    "feeder": a.get("feeder") or b.get("feeder"),
-                    "circuit": a.get("circuit") or b.get("circuit"),
-                    "connection_type": "Primary_to_Secondary",
+            # Build bus → coordinate lookup from posts so every From/To resolves to (lat, lng).
+            # Register primary_bus_id, sec_bus_id, transformer_bus_id, and pole_number so
+            # lines like "P0000000100-72M → P0000000100-72Q" connect one coordinates to another.
+            bus_to_coord = {}
+            nodes = []
+            seen_node = set()
+            posts = db.session.query(Post).all()
+            for p in posts:
+                if not _valid_coord(p.lat, p.lng):
+                    continue
+                coord = {
+                    "lat": float(p.lat),
+                    "lng": float(p.lng),
+                    "feeder": (p.feeder or "").strip() or None,
+                    "circuit": (p.circuit or "").strip() or None,
+                    "pole_number": (p.pole_number or "").strip() if p.pole_number else None,
                 }
-            )
+                for bus_attr in ("primary_bus_id", "sec_bus_id", "transformer_bus_id", "pole_number"):
+                    bus_val = getattr(p, bus_attr, None)
+                    if bus_val and str(bus_val).strip():
+                        bus_to_coord[str(bus_val).strip()] = coord
+                key = (coord["lat"], coord["lng"], coord.get("pole_number"))
+                if key not in seen_node:
+                    seen_node.add(key)
+                    nodes.append({
+                        "id": p.id,
+                        "pole_number": coord.get("pole_number"),
+                        "lat": coord["lat"],
+                        "lng": coord["lng"],
+                        "feeder": coord.get("feeder"),
+                        "circuit": coord.get("circuit"),
+                        "primary_bus_id": (p.primary_bus_id or "").strip() or None,
+                        "transformer_bus_id": (getattr(p, "transformer_bus_id", None) or "").strip() or None,
+                        "sec_bus_id": (getattr(p, "sec_bus_id", None) or "").strip() or None,
+                    })
 
-        if extra_edges:
-            lines = lines + extra_edges
+            # All lines come only from explicit from/to data (no inferred structure)
+            lines = []
+            processed_edges = set() # Track added edges to prevent duplicates (e.g. LineConnection overwriting DistributionLineSegment)
 
-        # Compute length (meters) for each line and total
-        total_length_m = 0.0
-        for line in lines:
-            m = _haversine_meters(
-                line.get("lat1"), line.get("lng1"),
-                line.get("lat2"), line.get("lng2"),
-            )
-            line["length_meters"] = round(m, 2) if m is not None else None
-            if line["length_meters"] is not None:
-                total_length_m += line["length_meters"]
+            # 0. Augment bus_to_coord with transformer secondary buses that might not be on the post record directly
+            # If a transformer is at PrimaryBus X (Which has coords), then SecondaryBus Y is typically at the same location.
+            try:
+                from models import DistributionTransformer
+                transformers = db.session.query(DistributionTransformer).all()
+                for t in transformers:
+                    prim_id = (t.from_primary_bus_id or "").strip()
+                    sec_id = (t.to_secondary_bus_id or "").strip()
+                    
+                    if prim_id and sec_id and prim_id in bus_to_coord and sec_id not in bus_to_coord:
+                        # Inherit coordinates from primary side
+                        bus_to_coord[sec_id] = bus_to_coord[prim_id].copy()
+                        # Optimization: Add a virtual node? Or just let it be a coordinate for lines.
+                        
+            except Exception as e:
+                app.logger.warning("Augmenting transformer coords failed: %s", e)
 
-        geojson = lines_to_geojson(lines, nodes)
+            # 1. Distribution line segments (from_bus_id → to_bus_id)
+            try:
+                from models import DistributionLineSegment
+                for seg in db.session.query(DistributionLineSegment).all():
+                    _add_edge(lines, bus_to_coord, seg.from_bus_id, seg.to_bus_id, "Distribution_Line", phasing=seg.phasing, processed_edges=processed_edges)
+            except Exception as e:
+                app.logger.warning("DistributionLineSegment in network geometry: %s", e)
 
-        by_type = defaultdict(int)
-        for line in lines:
-            by_type[line.get("connection_type", "unknown")] += 1
+            # 2. Distribution transformers (from_primary_bus_id → to_secondary_bus_id)
+            try:
+                from models import DistributionTransformer
+                for t in db.session.query(DistributionTransformer).all():
+                    _add_edge(lines, bus_to_coord, t.from_primary_bus_id, t.to_secondary_bus_id, "Primary_to_Secondary", phasing=t.primary_phasing, processed_edges=processed_edges)
+            except Exception as e:
+                app.logger.warning("DistributionTransformer in network geometry: %s", e)
 
-        return {
-            "geojson": geojson,
-            "lines": lines,
-            "nodes": nodes,
-            "stats": {
-                "nodes": len(nodes),
-                "edges": len(lines),
-                "total_length_meters": round(total_length_m, 2),
-                "by_type": dict(by_type),
-            },
-        }
+            # 3. Secondary line segments (from_bus_id → to_bus_id)
+            try:
+                from models import SecondaryLineSegment
+                for sl in db.session.query(SecondaryLineSegment).all():
+                    _add_edge(
+                        lines, bus_to_coord, sl.from_bus_id, sl.to_bus_id, "Secondary_Line",
+                        feeder=sl.feeder, circuit=sl.circuit, phasing=sl.phasing, processed_edges=processed_edges
+                    )
+            except Exception as e:
+                app.logger.warning("SecondaryLineSegment in network geometry: %s", e)
+
+            # 4. Line connections (from_bus → to_bus)
+            try:
+                from models import LineConnection
+                for conn in db.session.query(LineConnection).all():
+                    _add_edge(
+                        lines, bus_to_coord, conn.from_bus, conn.to_bus,
+                        conn.connection_type or "Line_Connection",
+                        feeder=conn.feeder, circuit=conn.circuit, processed_edges=processed_edges
+                    )
+            except Exception as e:
+                app.logger.warning("LineConnection in network geometry: %s", e)
+
+            # Compute length (meters) for each line and total
+            total_length_m = 0.0
+            for line in lines:
+                m = _haversine_meters(
+                    line.get("lat1"), line.get("lng1"),
+                    line.get("lat2"), line.get("lng2"),
+                )
+                line["length_meters"] = round(m, 2) if m is not None else None
+                if line["length_meters"] is not None:
+                    total_length_m += line["length_meters"]
+
+            geojson = lines_to_geojson(lines, nodes)
+
+            by_type = defaultdict(int)
+            for line in lines:
+                by_type[line.get("connection_type", "unknown")] += 1
+
+            return {
+                "geojson": geojson,
+                "lines": lines,
+                "nodes": nodes,
+                "stats": {
+                    "nodes": len(nodes),
+                    "edges": len(lines),
+                    "total_length_meters": round(total_length_m, 2),
+                    "by_type": dict(by_type),
+                },
+            }
+        except Exception as e:
+            app.logger.exception("get_network_geometry failed: %s", e)
+            empty_result["error"] = str(e)
+            return empty_result

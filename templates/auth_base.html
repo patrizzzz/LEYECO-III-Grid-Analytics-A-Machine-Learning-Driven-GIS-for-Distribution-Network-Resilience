@@ -1,64 +1,118 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}Leyeco III Sign In{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
   {% block head %}{% endblock %}
   <link rel="stylesheet" href="/static/css/styles.css">
   <style>
-    /* Minimalist internal-company auth design */
-    .auth-shell { 
-      min-height: 100vh; 
-      display: flex; 
-      align-items: center; 
-      justify-content: center; 
-      background: var(--background); 
+    /* Premium auth design with animated gradient bg */
+    .auth-shell {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
       padding: 16px;
+      position: relative;
+      overflow: hidden;
     }
-    
-    .auth-card { 
-      background: var(--surface); 
-      padding: 40px 36px; 
-      border-radius: 8px; 
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1); 
-      border: 1px solid var(--border);
-      max-width: 400px; 
+
+    .auth-shell::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      left: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(ellipse at 30% 20%, rgba(37, 99, 235, 0.15) 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 80%, rgba(5, 150, 105, 0.1) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, rgba(245, 158, 11, 0.05) 0%, transparent 60%);
+      animation: bgShift 20s ease-in-out infinite alternate;
+    }
+
+    @keyframes bgShift {
+      0% {
+        transform: translate(0, 0) rotate(0deg);
+      }
+
+      100% {
+        transform: translate(-2%, -2%) rotate(3deg);
+      }
+    }
+
+    .auth-card {
+      background: rgba(255, 255, 255, 0.97);
+      padding: 44px 40px;
+      border-radius: 16px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      max-width: 420px;
       width: 100%;
-      animation: fadeIn 0.3s ease-out;
+      animation: cardEntrance 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+      z-index: 1;
     }
-    
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
+
+    body.dark-theme .auth-card {
+      background: rgba(30, 41, 59, 0.95);
+      border-color: rgba(59, 130, 246, 0.1);
     }
-    
-    .auth-header { 
-      margin-bottom: 32px; 
+
+    @keyframes cardEntrance {
+      from {
+        opacity: 0;
+        transform: translateY(24px) scale(0.96);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .auth-header {
+      margin-bottom: 32px;
       text-align: center;
     }
-    
-    .auth-header-title {
-      font-weight: 700; 
-      font-size: 1.1rem; 
-      color: var(--text-primary);
-      margin: 0 0 4px 0;
+
+    .auth-logo {
+      width: 56px;
+      height: 56px;
+      object-fit: contain;
+      margin: 0 auto 16px;
+      display: block;
+      filter: drop-shadow(0 2px 8px rgba(37, 99, 235, 0.2));
     }
-    
+
+    .auth-header-title {
+      font-weight: 700;
+      font-size: 1.35rem;
+      color: var(--text-primary);
+      margin: 0 0 6px 0;
+      letter-spacing: -0.01em;
+    }
+
     .auth-header-subtitle {
-      color: var(--text-secondary); 
-      font-size: 0.9rem; 
+      color: var(--text-secondary);
+      font-size: 0.9rem;
       margin: 0;
+      font-weight: 500;
     }
   </style>
 </head>
+
 <body>
   <div class="auth-shell">
     <div class="auth-card">
       <div class="auth-header">
+        <img src="/static/img/leyeco3logo.png" alt="Leyeco III" class="auth-logo">
         <h1 class="auth-header-title">Leyeco III</h1>
         <p class="auth-header-subtitle">Power Network Dashboard</p>
       </div>
@@ -68,11 +122,11 @@
 
   <!-- Theme Toggle (from base.html logic) -->
   <script>
-    (function(){
+    (function () {
       try {
         const saved = localStorage.getItem('leyeco-theme');
         const apply = (t) => {
-          if (t === 'dark') document.body.classList.add('dark-theme'); 
+          if (t === 'dark') document.body.classList.add('dark-theme');
           else document.body.classList.remove('dark-theme');
         };
         apply(saved === 'dark' ? 'dark' : 'light');
@@ -82,4 +136,5 @@
 
   {% block scripts %}{% endblock %}
 </body>
+
 </html>

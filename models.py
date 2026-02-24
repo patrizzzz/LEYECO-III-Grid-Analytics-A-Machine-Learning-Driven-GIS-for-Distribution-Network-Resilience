@@ -245,6 +245,26 @@ class DistributionLineSegment(db.Model):
     def __repr__(self):
         return f"<DistributionLineSegment {self.segment_id!r} ({self.from_bus_id} → {self.to_bus_id})>"
 
+    @property
+    def wire_colors(self):
+        """
+        Determines wire colors based on Philippine IEC standard.
+        A=Brown, B=Black, C=Gray, N=Blue.
+        """
+        if not self.phasing:
+            return []
+        
+        p = self.phasing.upper().strip()
+        colors = []
+        
+        # Check presence of each phase/neutral in standard order
+        if 'A' in p: colors.append('Brown (Phase A)')
+        if 'B' in p: colors.append('Black (Phase B)')
+        if 'C' in p: colors.append('Gray (Phase C)')
+        if 'N' in p: colors.append('Blue (Neutral)')
+        
+        return colors
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -252,6 +272,7 @@ class DistributionLineSegment(db.Model):
             'from_bus_id': self.from_bus_id,
             'to_bus_id': self.to_bus_id,
             'phasing': self.phasing,
+            'wire_colors': self.wire_colors, # Added field
             'configuration': self.configuration,
             'system_grounding_type': self.system_grounding_type,
             'length_meters': self.length_meters,
@@ -319,6 +340,54 @@ class LineConnection(db.Model):
         }
 
 
+# --- Secondary Line Segments: from transformer secondary to post primary bus ---
+class SecondaryLineSegment(db.Model):
+    """
+    Secondary circuit line segment. Connects:
+    - from_bus_id: transformer's to_secondary_bus_id (line starts at transformer secondary)
+    - to_bus_id: post's primary_bus_id (line ends at primary bus of a post/segment)
+
+    Same linkage idea as distribution transformer: secondary line from_bus_id is connected
+    to a transformer's to_secondary_bus_id; secondary line to_bus_id is connected to
+    primary_bus_id of a post (or primary segment).
+    """
+    __tablename__ = 'secondary_line_segment'
+
+    id = db.Column(db.Integer, primary_key=True)
+    segment_id = db.Column(db.String(128), index=True)  # Optional segment identifier
+    from_bus_id = db.Column(db.String(64), nullable=False, index=True)  # Transformer's to_secondary_bus_id
+    to_bus_id = db.Column(db.String(64), nullable=False, index=True)    # Post's primary_bus_id
+    feeder = db.Column(db.String(64), index=True)
+    circuit = db.Column(db.String(64))
+    phasing = db.Column(db.String(32))
+    length_meters = db.Column(db.Float)
+    installation_type = db.Column(db.String(64))   # e.g. Pole-mounted, Aerial
+    conductor_type = db.Column(db.String(32))      # Conductor Type
+    conductor_size = db.Column(db.String(32))      # Conductor Size
+    conductor_unit = db.Column(db.String(32))      # Unit (C) e.g. AWG, MCM
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<SecondaryLineSegment {self.from_bus_id} → {self.to_bus_id}>"
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'segment_id': self.segment_id,
+            'from_bus_id': self.from_bus_id,
+            'to_bus_id': self.to_bus_id,
+            'feeder': self.feeder,
+            'circuit': self.circuit,
+            'phasing': self.phasing,
+            'length_meters': self.length_meters,
+            'installation_type': self.installation_type,
+            'conductor_type': self.conductor_type,
+            'conductor_size': self.conductor_size,
+            'conductor_unit': self.conductor_unit,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 # --- Distribution Transformers: linked to posts by From Primary Bus ID ---
 class DistributionTransformer(db.Model):
     """
@@ -370,5 +439,192 @@ class DistributionTransformer(db.Model):
             'xr_ratio': self.xr_ratio,
             'no_load_loss_kw': self.no_load_loss_kw,
             'exciting_current_pct': self.exciting_current_pct,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+# --- Secondary Service Drops: linked to Secondary Lines or Posts ---
+class SecondaryServiceDrop(db.Model):
+    """
+    Secondary Service Drop data (exampleSLD.csv).
+    Linked via 'From Bus ID' which technically connects to a Post or Secondary Line content.
+    """
+    __tablename__ = 'secondary_service_drop'
+
+    id = db.Column(db.Integer, primary_key=True)
+    service_drop_id = db.Column(db.String(128), index=True) # Secondary Customer Service Drop ID
+    from_bus_id = db.Column(db.String(64), index=True)      # From Bus ID
+    to_customer_id = db.Column(db.String(64))               # To Customer ID
+    phasing = db.Column(db.String(10))
+    installation_type = db.Column(db.String(64))
+    length_meters_1 = db.Column(db.Float)                   # Length-1 (meters)
+    length_meters_2 = db.Column(db.Float)                   # Length-2 (meters)
+    conductor_type = db.Column(db.String(32))
+    conductor_size = db.Column(db.String(32))
+    conductor_unit = db.Column(db.String(16))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<SecondaryServiceDrop {self.service_drop_id} (Cust: {self.to_customer_id})>"
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'service_drop_id': self.service_drop_id,
+            'from_bus_id': self.from_bus_id,
+            'to_customer_id': self.to_customer_id,
+            'phasing': self.phasing,
+            'installation_type': self.installation_type,
+            'length_meters_1': self.length_meters_1,
+            'length_meters_2': self.length_meters_2,
+            'conductor_type': self.conductor_type,
+            'conductor_size': self.conductor_size,
+            'conductor_unit': self.conductor_unit,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+class UploadHistory(db.Model):
+    """
+    Log of uploaded files to track what data is currently loaded.
+    """
+    __tablename__ = 'upload_history'
+
+    id = db.Column(db.Integer, primary_key=True)
+    file_type = db.Column(db.String(50))   # 'posts', 'transformers', 'secondary_lines', 'service_drops'
+    filename = db.Column(db.String(255))
+    upload_date = db.Column(db.DateTime, default=datetime.utcnow)
+    record_count = db.Column(db.Integer, default=0) # Number of records processed/added
+    status = db.Column(db.String(20), default='success')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'file_type': self.file_type,
+            'filename': self.filename,
+            'upload_date': self.upload_date.isoformat(),
+            'record_count': self.record_count,
+            'status': self.status
+        }
+class VoltageRegulator(db.Model):
+    __tablename__ = 'voltage_regulator'
+    id = db.Column(db.Integer, primary_key=True)
+    regulator_id = db.Column(db.String(64), index=True)
+    from_bus_id = db.Column(db.String(64))
+    to_bus_id = db.Column(db.String(64))
+    regulated_bus_id = db.Column(db.String(64))
+    phase_type = db.Column(db.String(32))
+    phasing = db.Column(db.String(32))
+    phase_sense = db.Column(db.String(32))
+    kva_rating = db.Column(db.Float)
+    kv_rating = db.Column(db.Float)
+    target_voltage = db.Column(db.Float) # 120V base
+    bandwidth = db.Column(db.Float)      # 120V base
+    r_setting_a = db.Column(db.Float)
+    r_setting_b = db.Column(db.Float)
+    r_setting_c = db.Column(db.Float)
+    x_setting_a = db.Column(db.Float)
+    x_setting_b = db.Column(db.Float)
+    x_setting_c = db.Column(db.Float)
+    primary_current_rating = db.Column(db.Float)
+    pt_ratio = db.Column(db.Float)
+    no_load_loss_kw = db.Column(db.Float)
+    exciting_current_pct = db.Column(db.Float)
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+class ShuntCapacitor(db.Model):
+    __tablename__ = 'shunt_capacitor'
+    id = db.Column(db.Integer, primary_key=True)
+    capacitor_id = db.Column(db.String(64), index=True)
+    bus_connected_id = db.Column(db.String(64), index=True)
+    phase_type = db.Column(db.String(32))
+    phasing = db.Column(db.String(32))
+    voltage_rating_kv = db.Column(db.Float)
+    kvar_rating_a = db.Column(db.Float)
+    kvar_rating_b = db.Column(db.Float)
+    kvar_rating_c = db.Column(db.Float)
+    power_loss_watts = db.Column(db.Float)
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+class ShuntInductor(db.Model):
+    __tablename__ = 'shunt_inductor'
+    id = db.Column(db.Integer, primary_key=True)
+    inductor_id = db.Column(db.String(64), index=True)
+    bus_connected_id = db.Column(db.String(64), index=True)
+    phase_type = db.Column(db.String(32))
+    phasing = db.Column(db.String(32))
+    voltage_rating_kv = db.Column(db.Float)
+    resistance_a = db.Column(db.Float)
+    resistance_b = db.Column(db.Float)
+    resistance_c = db.Column(db.Float)
+    reactance_a = db.Column(db.Float)
+    reactance_b = db.Column(db.Float)
+    reactance_c = db.Column(db.Float)
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+class SeriesInductor(db.Model):
+    __tablename__ = 'series_inductor'
+    id = db.Column(db.Integer, primary_key=True)
+    inductor_id = db.Column(db.String(64), index=True)
+    from_bus_id = db.Column(db.String(64), index=True)
+    to_bus_id = db.Column(db.String(64))
+    phase_type = db.Column(db.String(32))
+    phasing = db.Column(db.String(32))
+    voltage_rating_kv = db.Column(db.Float)
+    resistance_a = db.Column(db.Float)
+    resistance_b = db.Column(db.Float)
+    resistance_c = db.Column(db.Float)
+    reactance_a = db.Column(db.Float)
+    reactance_b = db.Column(db.Float)
+    reactance_c = db.Column(db.Float)
+
+    def to_dict(self):
+        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+# --- Customer & Consumption Data ---
+class Customer(db.Model):
+    __tablename__ = 'customer'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    name = db.Column(db.String(128))
+    customer_type = db.Column(db.String(64))
+    service_voltage = db.Column(db.String(32))
+    phase = db.Column(db.String(32))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'customer_id': self.customer_id,
+            'name': self.name,
+            'customer_type': self.customer_type,
+            'service_voltage': self.service_voltage,
+            'phase': self.phase,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+class EnergyConsumption(db.Model):
+    __tablename__ = 'energy_consumption'
+    id = db.Column(db.Integer, primary_key=True)
+    # Linking by string ID from CSV
+    customer_id = db.Column(db.String(64), db.ForeignKey('customer.customer_id'), nullable=False, index=True)
+    billing_period = db.Column(db.String(64))
+    kwh_consumed = db.Column(db.Float)
+    power_factor = db.Column(db.Float)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    customer = db.relationship('Customer', backref=db.backref('consumption_records', lazy=True))
+
+    def to_dict(self):
+         return {
+            'id': self.id,
+            'customer_id': self.customer_id,
+            'billing_period': self.billing_period,
+            'kwh_consumed': self.kwh_consumed,
+            'power_factor': self.power_factor,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }

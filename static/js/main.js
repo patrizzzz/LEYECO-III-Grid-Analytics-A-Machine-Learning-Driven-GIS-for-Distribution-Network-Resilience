@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
   const mapEl = document.getElementById('map');
   if (!mapEl) {
     console.warn('main.js: #map element not found.');
@@ -18,30 +18,42 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   if (window._mapInstance) {
-    setTimeout(function() { try { window._mapInstance.invalidateSize(); } catch (e) {} }, 100);
+    setTimeout(function () { try { window._mapInstance.invalidateSize(); } catch (e) { } }, 100);
     return;
   }
+
+  // Base Layers (Defined outside try block for scope access)
+  const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© OpenStreetMap contributors',
+  });
+
+  const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+  });
+
+  const terrainLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri — Esri, DeLorme, NAVTEQ, TomTom, Intermap, iPC, USGS, FAO, NPS, NRCAN, GeoBase, Kadaster NL, Ordnance Survey, Esri Japan, METI, Esri China (Hong Kong), and the GIS User Community'
+  });
 
   var map;
   try {
     map = L.map(mapEl).setView([12.8797, 121.7740], 6);
     window._mapInstance = map;
-    
-      // If a specific post location was passed via URL params, remember it
-      const targetLat = window._targetLat;
-      const targetLng = window._targetLng;
-      const targetPostId = window._targetPostId;
-      if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
-        map.setView([targetLat, targetLng], 15); // Zoom to level 15 for post location
-      }
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors',
-    }).addTo(map);
+    // If a specific post location was passed via URL params, remember it
+    const targetLat = window._targetLat;
+    const targetLng = window._targetLng;
+    const targetPostId = window._targetPostId;
+    if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
+      map.setView([targetLat, targetLng], 15); // Zoom to level 15 for post location
+    }
 
-    try { map._container.style.borderRadius = '8px'; } catch (e) {}
-    try { map._container.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)'; } catch (e) {}
+    // Default to OSM
+    osmLayer.addTo(map);
+
+    try { map._container.style.borderRadius = '8px'; } catch (e) { }
+    try { map._container.style.boxShadow = '0 4px 6px -1px rgba(0,0,0,0.1)'; } catch (e) { }
   } catch (err) {
     showMapError('Map could not start: ' + (err.message || err));
     return;
@@ -51,22 +63,390 @@ document.addEventListener('DOMContentLoaded', function() {
   const latlongLayer = L.layerGroup();
   const connectionsLayer = L.layerGroup();
   const networkLinesLayer = L.layerGroup();
+
+  // Maps and Bounds - Must be defined here
   const postMarkers = {}; // map post_id -> marker
   const busToPostMap = {}; // map bus_id -> post data
   const poleToPostMap = {}; // map pole_number -> post data
   const bounds = L.latLngBounds();
 
+  const baseLayers = {
+    'Standard': osmLayer,
+    'Satellite': satelliteLayer,
+    'Terrain': terrainLayer
+  };
+
   const overlays = {
     'Posts (canonical)': postsLayer,
     'LatLongData (raw)': latlongLayer,
-    'Connections': connectionsLayer,
     'Network lines (DB)': networkLinesLayer
   };
-  L.control.layers(null, overlays, { collapsed: false }).addTo(map);
+
+  // --- Global Line Color State ---
+  let globalLineColor = localStorage.getItem('globalLineColor') || null;
+  let usePhasingColor = localStorage.getItem('usePhasingColor') === 'true' || false;
+
+  // --- Feeder filter state ---
+  let knownFeeders = new Set();
+  let activeFeeders = new Set(); // feeders currently visible – starts with all enabled
+
+  // --- Phase filter state ---
+  // Categories: '1' (Single Phase), '2' (Double Phase), '3' (Three Phase), '0' (Other/Unknown)
+  let activePhaseCategories = new Set(['1', '2', '3', '0']);
+
+  const _allPostMarkers = []; // keeps references to ALL markers even when removed from layer
+
+  function applyFeederFilter() {
+    // Filter posts: remove/add from postsLayer
+    // Show all when: no feeders known, or all feeders are checked (Show All)
+    const showAllFeeds = knownFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
+    // activePhaseCategories covers 1, 2, 3, 0
+
+    _allPostMarkers.forEach(function (marker) {
+      if (!marker._postData) return;
+      const f = marker._postData.feeder || '';
+      const shouldShowFeeder = showAllFeeds || activeFeeders.has(f);
+
+      // For posts, we might not filter by phase strictly unless they have phase data
+      // Assume posts show if feeder is active. If needed, we can check post phasing.
+      // But typically phase filtering applies more to lines.
+      const shouldShow = shouldShowFeeder;
+
+      if (shouldShow) {
+        if (!postsLayer.hasLayer(marker)) postsLayer.addLayer(marker);
+      } else {
+        if (postsLayer.hasLayer(marker)) postsLayer.removeLayer(marker);
+      }
+    });
+
+    // Filter network lines: remove/add from networkLinesLayer
+    const allLines = [];
+    networkLinesLayer.eachLayer(function (layer) { allLines.push(layer); });
+    if (!window._hiddenNetworkLines) window._hiddenNetworkLines = [];
+    const allNetLines = allLines.concat(window._hiddenNetworkLines);
+    window._hiddenNetworkLines = [];
+
+    allNetLines.forEach(function (layer) {
+      if (layer instanceof L.Polyline) {
+        // Feeder Check
+        const f = layer._feederName || '';
+        const isFeederVisible = showAllFeeds || activeFeeders.has(f);
+
+        // Phase Check
+        let isPhaseVisible = true;
+        // Check if all phases are active (size 4), otherwise filter
+        if (activePhaseCategories.size < 4) {
+          const pStr = String(layer.phasingType || '').toUpperCase().trim();
+          // Count unique phases (A, B, C)
+          let distinctPhases = 0;
+          if (pStr.includes('A')) distinctPhases++;
+          if (pStr.includes('B')) distinctPhases++;
+          if (pStr.includes('C')) distinctPhases++;
+
+          // Determine category
+          let category = '0'; // default Other
+          if (distinctPhases === 1) category = '1';
+          else if (distinctPhases === 2) category = '2';
+          else if (distinctPhases === 3) category = '3';
+
+          isPhaseVisible = activePhaseCategories.has(category);
+        }
+
+        if (isFeederVisible && isPhaseVisible) {
+          if (!networkLinesLayer.hasLayer(layer)) networkLinesLayer.addLayer(layer);
+        } else {
+          if (networkLinesLayer.hasLayer(layer)) networkLinesLayer.removeLayer(layer);
+          window._hiddenNetworkLines.push(layer);
+        }
+      }
+    });
+  }
+
+  // Expose function so it can be called after data loads
+  window._refreshFeederList = function () { };
+
+  // --- Unified Map Settings Control ---
+  const mapSettingsControl = L.control({ position: 'topright' });
+  mapSettingsControl.onAdd = function () {
+    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control map-settings-panel');
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
+
+    // State for collapse
+    let collapsed = false;
+
+    // --- Header ---
+    const header = document.createElement('div');
+    header.className = 'msp-header';
+    header.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 -960 960 960" fill="currentColor"><path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z"/></svg>
+      <span>Map Settings</span>
+      <button class="msp-toggle" title="Collapse">▾</button>
+    `;
+
+    const body = document.createElement('div');
+    body.className = 'msp-body';
+    body.style.maxHeight = '400px';
+    body.style.overflowY = 'auto';
+
+    header.querySelector('.msp-toggle').addEventListener('click', function () {
+      collapsed = !collapsed;
+      body.style.display = collapsed ? 'none' : '';
+      this.textContent = collapsed ? '▸' : '▾';
+      container.classList.toggle('msp-collapsed', collapsed);
+    });
+
+    // === Section 1: Base Map ===
+    const baseSection = document.createElement('div');
+    baseSection.className = 'msp-section';
+    baseSection.innerHTML = '<div class="msp-section-title">Base Map</div>';
+    const baseList = document.createElement('div');
+    baseList.className = 'msp-option-list';
+
+    let currentBase = 'Standard';
+    Object.keys(baseLayers).forEach(function (name) {
+      const row = document.createElement('label');
+      row.className = 'msp-option';
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'base-map';
+      radio.checked = name === 'Standard';
+      radio.addEventListener('change', function () {
+        if (this.checked) {
+          if (currentBase && baseLayers[currentBase]) map.removeLayer(baseLayers[currentBase]);
+          baseLayers[name].addTo(map);
+          currentBase = name;
+        }
+      });
+      const span = document.createElement('span');
+      span.textContent = name;
+      row.appendChild(radio);
+      row.appendChild(span);
+      baseList.appendChild(row);
+    });
+    baseSection.appendChild(baseList);
+
+    // === Section 2: Layers ===
+    const layerSection = document.createElement('div');
+    layerSection.className = 'msp-section';
+    layerSection.innerHTML = '<div class="msp-section-title">Layers</div>';
+    const layerList = document.createElement('div');
+    layerList.className = 'msp-option-list';
+
+    const layerDefaults = {
+      'Posts (canonical)': true,
+      'LatLongData (raw)': false,
+      'Network lines (DB)': true
+    };
+
+    Object.keys(overlays).forEach(function (name) {
+      const row = document.createElement('label');
+      row.className = 'msp-option';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      const isOn = layerDefaults[name] !== false;
+      cb.checked = isOn;
+      if (isOn) overlays[name].addTo(map);
+      cb.addEventListener('change', function () {
+        if (this.checked) { overlays[name].addTo(map); }
+        else { map.removeLayer(overlays[name]); }
+      });
+      const span = document.createElement('span');
+      span.textContent = name;
+      row.appendChild(cb);
+      row.appendChild(span);
+      layerList.appendChild(row);
+    });
+    layerSection.appendChild(layerList);
+
+    // === Section 3: Feeder Filter ===
+    const feederSection = document.createElement('div');
+    feederSection.className = 'msp-section';
+    feederSection.innerHTML = '<div class="msp-section-title">Feeder Filter</div>';
+    const feederList = document.createElement('div');
+    feederList.className = 'msp-option-list msp-feeder-list';
+    feederList.innerHTML = '<span class="msp-hint">Loading feeders…</span>';
+    feederSection.appendChild(feederList);
+
+    // Refresh feeder list after post data is loaded
+    window._refreshFeederList = function () {
+      feederList.innerHTML = '';
+      if (knownFeeders.size === 0) {
+        feederList.innerHTML = '<span class="msp-hint">No feeders found</span>';
+        return;
+      }
+      // "Show All" option
+      const allRow = document.createElement('label');
+      allRow.className = 'msp-option msp-feeder-all';
+      const allCb = document.createElement('input');
+      allCb.type = 'checkbox';
+      allCb.checked = true;
+      const allSpan = document.createElement('span');
+      allSpan.textContent = 'Show All';
+      allSpan.style.fontWeight = '600';
+      allRow.appendChild(allCb);
+      allRow.appendChild(allSpan);
+      feederList.appendChild(allRow);
+
+      const feederCbs = [];
+      const sortedFeeders = Array.from(knownFeeders).sort();
+      sortedFeeders.forEach(function (fname) {
+        activeFeeders.add(fname);
+        const row = document.createElement('label');
+        row.className = 'msp-option';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = true;
+        cb.dataset.feeder = fname;
+        cb.addEventListener('change', function () {
+          if (this.checked) { activeFeeders.add(fname); }
+          else { activeFeeders.delete(fname); }
+          // Sync "Show All"
+          allCb.checked = activeFeeders.size === knownFeeders.size;
+          applyFeederFilter();
+        });
+        const span = document.createElement('span');
+        span.textContent = fname;
+        row.appendChild(cb);
+        row.appendChild(span);
+        feederList.appendChild(row);
+        feederCbs.push(cb);
+      });
+
+      allCb.addEventListener('change', function () {
+        feederCbs.forEach(function (cb) {
+          cb.checked = allCb.checked;
+          if (allCb.checked) { activeFeeders.add(cb.dataset.feeder); }
+          else { activeFeeders.delete(cb.dataset.feeder); }
+        });
+        applyFeederFilter();
+      });
+    };
+
+    // === Section 3.5: Phase Filter ===
+    const phaseSection = document.createElement('div');
+    phaseSection.className = 'msp-section';
+    phaseSection.innerHTML = '<div class="msp-section-title">Phase Filter</div>';
+    const phaseList = document.createElement('div');
+    phaseList.className = 'msp-option-list';
+
+    const phases = [
+      { id: '1', label: 'Single Phase' },
+      { id: '2', label: 'Double Phase' },
+      { id: '3', label: 'Three Phase' },
+      { id: '0', label: 'Other' }
+    ];
+
+    phases.forEach(function (p) {
+      const row = document.createElement('label');
+      row.className = 'msp-option';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = activePhaseCategories.has(p.id);
+      cb.addEventListener('change', function () {
+        if (this.checked) activePhaseCategories.add(p.id);
+        else activePhaseCategories.delete(p.id);
+        applyFeederFilter(); // Re-run filter logic
+      });
+      const span = document.createElement('span');
+      span.textContent = p.label;
+      row.appendChild(cb);
+      row.appendChild(span);
+      phaseList.appendChild(row);
+    });
+    phaseSection.appendChild(phaseList);
+
+    // === Section 4: Visualization ===
+    const vizSection = document.createElement('div');
+    vizSection.className = 'msp-section';
+    vizSection.innerHTML = '<div class="msp-section-title">Visualization</div>';
+
+    // Global color picker row
+    const colorRow = document.createElement('div');
+    colorRow.className = 'msp-color-row';
+
+    const colorLabel = document.createElement('span');
+    colorLabel.textContent = 'Line Color';
+    colorLabel.className = 'msp-color-label';
+
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.className = 'msp-color-input';
+    colorInput.value = globalLineColor || '#000000';
+
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'msp-reset-btn';
+    resetBtn.textContent = '✕';
+    resetBtn.title = 'Reset to default';
+    resetBtn.style.display = globalLineColor ? '' : 'none';
+
+    colorRow.appendChild(colorLabel);
+    colorRow.appendChild(colorInput);
+    colorRow.appendChild(resetBtn);
+
+    // Phasing toggle row
+    const phasingRow = document.createElement('label');
+    phasingRow.className = 'msp-option';
+
+    const phasingCb = document.createElement('input');
+    phasingCb.type = 'checkbox';
+    phasingCb.id = 'phasing-color-toggle';
+    phasingCb.checked = usePhasingColor;
+
+    const phasingSpan = document.createElement('span');
+    phasingSpan.textContent = 'Color by Phasing';
+    phasingSpan.style.flex = '1';
+
+    const helpIcon = document.createElement('span');
+    helpIcon.className = 'msp-help-icon';
+    helpIcon.textContent = '?';
+    helpIcon.title = 'Color lines by electrical phase:\nPhase A = Brown\nPhase B = Black\nPhase C = Gray\nMulti-phase = Purple';
+
+    phasingRow.appendChild(phasingCb);
+    phasingRow.appendChild(phasingSpan);
+    phasingRow.appendChild(helpIcon);
+
+    vizSection.appendChild(colorRow);
+    vizSection.appendChild(phasingRow);
+
+    // Event handlers for visualization controls
+    colorInput.addEventListener('input', function (e) {
+      globalLineColor = e.target.value;
+      localStorage.setItem('globalLineColor', globalLineColor);
+      resetBtn.style.display = '';
+      updateNetworkLineColors();
+    });
+
+    resetBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      globalLineColor = null;
+      localStorage.removeItem('globalLineColor');
+      colorInput.value = '#000000';
+      resetBtn.style.display = 'none';
+      updateNetworkLineColors();
+    });
+
+    phasingCb.addEventListener('change', function () {
+      usePhasingColor = this.checked;
+      localStorage.setItem('usePhasingColor', usePhasingColor);
+      updateNetworkLineColors();
+    });
+
+    // Assemble
+    body.appendChild(baseSection);
+    body.appendChild(layerSection);
+    body.appendChild(feederSection);
+    body.appendChild(phaseSection);
+    body.appendChild(vizSection);
+    container.appendChild(header);
+    container.appendChild(body);
+    return container;
+  };
+  mapSettingsControl.addTo(map);
 
   // Force Leaflet to measure container and load tiles (fixes blank map)
   function refreshMapSize() {
-    try { map.invalidateSize(); } catch (e) {}
+    try { map.invalidateSize(); } catch (e) { }
   }
   refreshMapSize();
   map.whenReady(refreshMapSize);
@@ -81,10 +461,10 @@ document.addEventListener('DOMContentLoaded', function() {
       window._currentUser = info.user;
       if (info.user.role !== 'admin') {
         const connBtns = document.querySelectorAll('.connection-control .conn-btn');
-        connBtns.forEach(b => { try { b.disabled = true; } catch (e) {} });
+        connBtns.forEach(b => { try { b.disabled = true; } catch (e) { } });
       }
     }
-  }).catch(() => {});
+  }).catch(() => { });
 
   // Custom electrical-post icon
   const poleIcon = L.icon({
@@ -135,13 +515,13 @@ document.addEventListener('DOMContentLoaded', function() {
   function reloadMapData() {
     console.log('🔄 Reloading map data...');
     clearAllMapLayers();
-    
+
     // Reload posts, connections, and network geometry with slight delays for sequencing
-    setTimeout(function() {
+    setTimeout(function () {
       loadPosts();
     }, 100);
-    
-    setTimeout(function() {
+
+    setTimeout(function () {
       loadLineConnections();
       loadNetworkGeometry();
     }, 1500);
@@ -151,61 +531,130 @@ document.addEventListener('DOMContentLoaded', function() {
   window.reloadMapData = reloadMapData;
 
   // Delete all data from backend (posts, connections, network lines, raw data) and reset IDs
+  // Delete all data
   function deleteAllData() {
-    if (!confirm('⚠️ DELETE ALL DATA?\n\nThis will permanently delete:\n- All posts/poles\n- All connections\n- All network lines\n- All raw coordinates\n\nIDs will reset to 1. This cannot be undone!\n\nType OK to confirm.')) {
-      return Promise.resolve({ success: false, message: 'Cancelled by user' });
-    }
+    return showConfirmModal('⚠️ DELETE ALL DATA?\n\nThis will permanently delete:\n- All posts/poles\n- All connections\n- All network lines\n- All raw coordinates\n\nIDs will reset to 1. This cannot be undone!', {
+      title: 'DANGER: Delete All Data',
+      okText: 'DELETE EVERYTHING',
+      cancelText: 'Cancel'
+    }).then(confirmed => {
+      if (!confirmed) return { success: false, message: 'Cancelled by user' };
 
-    console.log('Starting deleteAllData request...');
-    
-    return fetch('/api/data/delete-all', { 
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    })
-      .then(r => {
-        console.log('Delete API response status:', r.status);
-        if (!r.ok) {
-          console.error('Delete API returned status:', r.status);
-          return r.json().then(data => {
-            throw new Error(`Server error (${r.status}): ${data.message || data.error || 'Unknown error'}`);
-          });
-        }
-        return r.json();
+      console.log('Starting deleteAllData request...');
+      return fetch('/api/data/delete-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
       })
-      .then(data => {
-        console.log('Delete response:', data);
-        if (data.result === 'success') {
-          console.log('✓ Backend: All data deleted, IDs reset');
-          console.log('Reset status:', data.id_reset_status);
-          clearAllMapLayers();
-          return { success: true, message: data.message };
-        } else if (data.error) {
-          console.error('❌ Delete failed:', data.message);
-          return { success: false, message: data.message };
-        } else {
-          console.error('Unexpected response:', data);
-          return { success: false, message: 'Unexpected response from server' };
+        .then(r => {
+          if (!r.ok) {
+            return r.json().then(data => {
+              throw new Error(`Server error (${r.status}): ${data.message || data.error || 'Unknown error'}`);
+            });
+          }
+          return r.json();
+        })
+        .then(data => {
+          if (data.result === 'success') {
+            console.log('✓ Backend: All data deleted');
+            clearAllMapLayers();
+            return { success: true, message: data.message };
+          } else {
+            return { success: false, message: data.message || 'Unknown error' };
+          }
+        })
+        .catch(err => {
+          return { success: false, message: err.message || 'API error' };
+        });
+    });
+  }
+
+  // Delete button handler
+  const deleteBtn = document.getElementById('delete-data-btn');
+  if (deleteBtn) {
+    deleteBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      deleteBtn.disabled = true;
+      deleteAllData().then(result => {
+        deleteBtn.disabled = false;
+        if (result.success) {
+          showNoticeModal('Success', '✅ ' + result.message);
+        } else if (result.message !== 'Cancelled by user') {
+          showNoticeModal('Error', '❌ ' + result.message);
         }
-      })
-      .catch(err => {
-        console.error('❌ Delete API error:', err);
-        return { success: false, message: err.message || 'API error: ' + String(err) };
+      }).catch(err => {
+        deleteBtn.disabled = false;
+        showNoticeModal('Error', '❌ Error: ' + err);
       });
+    });
   }
 
   function formatMeters(m) {
-    if (m >= 1000) return (m/1000).toFixed(2) + ' km';
+    if (m >= 1000) return (m / 1000).toFixed(2) + ' km';
     return Math.round(m) + ' m';
   }
 
-  // Helper function to determine line color based on Circuit field
-  function getLineColor(circuit) {
-    if (!circuit) return '#999'; // Default gray for null/undefined
+  // Track current base layer for adaptive styling
+  let currentBaseLayer = 'Standard';
+
+  map.on('baselayerchange', function (e) {
+    currentBaseLayer = e.name;
+    updateNetworkLineColors();
+  });
+
+  // Helper function to determine line color based on Circuit field and Map Layer
+  function getLineColor(circuit, phasing) {
+    // 1. Phasing Color Mode (Philippine IEC Standard) - High Priority
+    if (usePhasingColor && phasing) {
+      const p = String(phasing).toUpperCase().trim();
+      const hasA = p.includes('A');
+      const hasB = p.includes('B');
+      const hasC = p.includes('C');
+
+      // Single phase colors
+      if (hasA && !hasB && !hasC) return '#8B4513'; // Brown (Phase A only)
+      if (hasB && !hasA && !hasC) return '#000000'; // Black (Phase B only)
+      if (hasC && !hasA && !hasB) return '#808080'; // Gray (Phase C only)
+
+      // Multi-phase (anything with 2 or 3 phases)
+      if ((hasA && hasB) || (hasB && hasC) || (hasC && hasA)) {
+        return '#800080'; // Purple for multi-phase
+      }
+
+      // Fallback if phasing exists but doesn't match patterns
+      return '#666666';
+    }
+
+    // 0. Global Override
+    if (globalLineColor) return globalLineColor;
+
+    // 2. Satellite Mode: Use bright/neon colors for visibility on dark imagery
+    if (currentBaseLayer === 'Satellite') {
+      if (!circuit) return '#dddddd';
+      const normalizedCircuit = String(circuit).trim().toLowerCase();
+      if (normalizedCircuit === '3 phase') return '#00ff00';      // Neon Green
+      if (normalizedCircuit === 'single phase') return '#ff3333'; // Bright Red
+      if (normalizedCircuit === 'v phase') return '#00ffff';      // Cyan
+      return '#dddddd';
+    }
+
+    // 3. Standard / Terrain Mode: Use darker, standard colors
+    if (!circuit) return '#999'; // Default gray
     const normalizedCircuit = String(circuit).trim().toLowerCase();
-    if (normalizedCircuit === '3 phase') return '#228B22'; // Green
+    if (normalizedCircuit === '3 phase') return '#228B22'; // Forest Green
     if (normalizedCircuit === 'single phase') return '#d63031'; // Red
     if (normalizedCircuit === 'v phase') return '#0984e3'; // Blue
-    return '#999'; // Default gray for unknown values
+    return '#999';
+  }
+
+  function updateNetworkLineColors() {
+    function updateLayer(layer) {
+      if (layer instanceof L.Polyline) {
+        const color = getLineColor(layer.circuitType, layer.phasingType);
+        layer.setStyle({ color: color });
+      }
+    }
+    networkLinesLayer.eachLayer(updateLayer);
+    connectionsLayer.eachLayer(updateLayer);
   }
 
   function haversine(lat1, lon1, lat2, lon2) {
@@ -213,8 +662,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const toRad = (deg) => deg * Math.PI / 180;
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
 
@@ -225,36 +674,68 @@ document.addEventListener('DOMContentLoaded', function() {
     if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
     const popupHtml = `
-      <div class="popup-post-content">
-        <div class="popup-post-details">
-          <strong>${(p.name || 'Post ' + p.id).replace(/</g, '&lt;')}</strong><br>
-          Status: ${(p.status || 'N/A').replace(/</g, '&lt;')}<br>
-          Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>
-          ID: ${p.id}
+      <div class="post-popup-container">
+        <div class="post-popup-tabs">
+            <button class="tab-link active" data-tab="General-${p.id}">General</button>
+            <button class="tab-link" data-tab="Connections-${p.id}">Connections</button>
+            <button class="tab-link" data-tab="Assets-${p.id}">Assets</button>
         </div>
-        <div class="popup-connect-actions">
-          <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}">Primary line-overhead</button>
-          <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Distribution Transformer</button>
+
+        <div id="General-${p.id}" class="tab-content" style="display: block;">
+            <div class="popup-post-details">
+              <strong>${(p.name || 'Post ' + p.id).replace(/</g, '&lt;')}</strong><br>
+              Feeder: ${(p.feeder || 'N/A').replace(/</g, '&lt;')}<br>
+              Status: ${(p.status || 'N/A').replace(/</g, '&lt;')}<br>
+              Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>
+              ID: ${p.id}
+            </div>
+            <div class="popup-connect-actions" style="margin-bottom:4px;">
+                <button class="btn btn-outline btn-street-view" data-lat="${lat}" data-lng="${lng}" data-post-id="${p.id}" title="Open Street View at this location">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 -960 960 960" fill="currentColor" style="vertical-align:middle;margin-right:4px;"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q27-35 43.5-76t22.5-86H640v40q0 33 23.5 56.5T720-306v42Z"/></svg>
+                  Street View
+                </button>
+            </div>
+             <div class="popup-connect-actions">
+                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}">Primary line-overhead</button>
+                <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Distribution Transformer</button>
+            </div>
         </div>
-        <div class="popup-connections-inner"></div>
+
+        <div id="Connections-${p.id}" class="tab-content" style="display: none;">
+             <div class="popup-connect-actions">
+                <button class="btn btn-outline secondary-lines-btn" data-post-id="${p.id}">Secondary Lines</button>
+                <button class="btn btn-outline service-drop-btn" data-post-id="${p.id}">Secondary Service Drop</button>
+                <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connected Lines</button>
+            </div>
+        </div>
+
+        <div id="Assets-${p.id}" class="tab-content" style="display: none;">
+            <div class="popup-connect-actions grid-actions">
+              <button class="btn btn-outline voltage-regulator-btn" data-post-id="${p.id}">Voltage Regulator</button>
+              <button class="btn btn-outline shunt-capacitor-btn" data-post-id="${p.id}">Shunt Capacitor</button>
+              <button class="btn btn-outline shunt-inductor-btn" data-post-id="${p.id}">Shunt Inductor</button>
+              <button class="btn btn-outline series-inductor-btn" data-post-id="${p.id}">Series Inductor</button>
+            </div>
+        </div>
       </div>
     `;
 
     const marker = L.marker([lat, lng], { title: p.name || `Post ${p.id}`, icon: poleIcon })
-      .bindPopup(popupHtml);
+      .bindPopup(popupHtml, { maxWidth: 400, minWidth: 280 });
 
     // Store post data on marker for later access (connections, etc.)
     marker._postData = p;
 
     // keep a reference for selection / bulk operations
-    try { postMarkers[p.id] = marker; } catch (e) {}
-    
+    try { postMarkers[p.id] = marker; } catch (e) { }
+
     // Also store in lookup maps for connection drawing
     if (p.pole_number) {
       poleToPostMap[p.pole_number] = p;
       busToPostMap[p.pole_number] = p; // Primary bus is usually the pole number
     }
     if (p.feeder) {
+      knownFeeders.add(p.feeder);
       // Also create aliases for common bus naming patterns
       if (p.primary_bus_id) {
         busToPostMap[p.primary_bus_id] = p;
@@ -264,6 +745,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Bind tooltip but control open/close to avoid overlapping tooltips
     marker.bindTooltip(`ID: ${p.id}`, { permanent: false, direction: 'top' });
     marker.addTo(layer);
+    _allPostMarkers.push(marker);
 
     // Ensure only one tooltip is visible at a time to prevent overlap
     marker.on('mouseover', function () {
@@ -271,22 +753,22 @@ document.addEventListener('DOMContentLoaded', function() {
         if (window._lastTooltipMarker && window._lastTooltipMarker !== marker) {
           window._lastTooltipMarker.closeTooltip();
         }
-      } catch (e) {}
-      try { marker.openTooltip(); } catch (e) {}
+      } catch (e) { }
+      try { marker.openTooltip(); } catch (e) { }
       window._lastTooltipMarker = marker;
     });
 
     // Small delay on mouseout to avoid flicker when moving between nearby markers
     marker.on('mouseout', function () {
       setTimeout(function () {
-        try { marker.closeTooltip(); } catch (e) {}
+        try { marker.closeTooltip(); } catch (e) { }
         if (window._lastTooltipMarker === marker) window._lastTooltipMarker = null;
       }, 250);
     });
     bounds.extend([lat, lng]);
 
     // support connection mode: click marker to add to connection
-    marker.on('click', function(e) {
+    marker.on('click', function (e) {
       // If selection mode is active, toggle selection instead of normal connection flow
       if (window._selectionMode) {
         toggleSelect(p.id, lat, lng, marker);
@@ -299,61 +781,399 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Attach popup button handlers on popupopen
-    marker.on('popupopen', function() {
+    marker.on('popupopen', function () {
       const popupEl = marker.getPopup().getElement();
       if (!popupEl) return;
+
+      // Tab switching logic
+      const tabLinks = popupEl.querySelectorAll('.tab-link');
+      const tabContents = popupEl.querySelectorAll('.tab-content');
+      tabLinks.forEach(link => {
+        link.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          // Hide all separate tabs
+          tabContents.forEach(c => c.style.display = 'none');
+          tabLinks.forEach(l => l.classList.remove('active'));
+          // Show target
+          const targetId = this.getAttribute('data-tab');
+          const target = popupEl.querySelector('#' + targetId);
+          if (target) target.style.display = 'block';
+          this.classList.add('active');
+        });
+      });
+
+      // Street View button: open Google Maps Street View at this post's coordinates
+      const streetViewBtn = popupEl.querySelector('.btn-street-view');
+      if (streetViewBtn) {
+        streetViewBtn.onclick = function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          const svLat = streetViewBtn.getAttribute('data-lat');
+          const svLng = streetViewBtn.getAttribute('data-lng');
+          if (!svLat || !svLng) return;
+
+          // Google Maps Street View URL (opens directly in Street View mode)
+          const streetViewUrl = `https://www.google.com/maps/@${svLat},${svLng},3a,80y,0h,90t/data=!3m4!1e1!3m2!1s!2e0`;
+
+          // Open in new tab — Google blocks iframe embedding of Maps
+          window.open(streetViewUrl, '_blank', 'noopener');
+        };
+      }
 
       // Primary line-overhead button: show modal with technical data
       const primaryLineBtn = popupEl.querySelector('.primary-line-overhead-btn');
       if (primaryLineBtn) {
-        primaryLineBtn.onclick = function() {
+        primaryLineBtn.onclick = function () {
           const postId = primaryLineBtn.getAttribute('data-post-id');
           if (!postId) return;
           fetch('/api/posts/' + postId)
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
               if (data && data.error) return;
               showPrimaryLineOverheadModal(data);
             })
-            .catch(function() {});
+            .catch(function () { });
         };
       }
 
       // Distribution Transformer button: fetch transformer by bus_id
       const transformerBtn = popupEl.querySelector('.distribution-transformer-btn');
       if (transformerBtn) {
-        transformerBtn.onclick = function() {
+        transformerBtn.onclick = function () {
           const postId = transformerBtn.getAttribute('data-post-id');
           if (!postId) return;
           // First get post to find primary_bus_id
           fetch('/api/posts/' + postId)
-            .then(function(r) { return r.json(); })
-            .then(function(postData) {
+            .then(function (r) { return r.json(); })
+            .then(function (postData) {
               if (postData && postData.error) return;
               var busId = postData.primary_bus_id || postData.pole_number;
               if (!busId) {
-                alert('No primary bus ID found for this post');
+                showNoticeModal('Info', 'No primary bus ID found for this post');
                 return;
               }
               fetch('/api/transformers/by-bus/' + encodeURIComponent(busId))
-                .then(function(r) { return r.json(); })
-                .then(function(result) {
+                .then(function (r) { return r.json(); })
+                .then(function (result) {
                   if (result && result.error) {
-                    alert('Error: ' + result.error);
+                    showNoticeModal('Error', 'Error: ' + result.error);
                     return;
                   }
                   if (!result.transformers || result.transformers.length === 0) {
-                    alert('No transformer found for bus ID: ' + busId);
+                    showNoticeModal('Info', 'No transformer found for bus ID: ' + busId);
                     return;
                   }
                   // Show first transformer (or all if multiple)
                   showDistributionTransformerModal(result.transformers[0]);
                 })
-                .catch(function(err) {
-                  alert('Failed to load transformer: ' + (err && err.message ? err.message : String(err)));
+                .catch(function (err) {
+                  showNoticeModal('Error', 'Failed to load transformer: ' + (err && err.message ? err.message : String(err)));
                 });
             })
-            .catch(function() {});
+            .catch(function () { });
+        };
+      }
+
+      // Secondary Lines button: fetch lines via Transformer's secondary bus ID
+      const secondaryLinesBtn = popupEl.querySelector('.secondary-lines-btn');
+      if (secondaryLinesBtn) {
+        secondaryLinesBtn.onclick = function () {
+          const postId = secondaryLinesBtn.getAttribute('data-post-id');
+          if (!postId) return;
+
+          // 1. Get Post Details to find Primary Bus ID
+          fetch('/api/posts/' + postId)
+            .then(function (r) { return r.json(); })
+            .then(function (postData) {
+              if (postData && postData.error) return;
+
+              var primaryBusId = postData.primary_bus_id || postData.pole_number;
+              if (!primaryBusId) {
+                showNoticeModal('Info', 'No primary bus ID found for this post.');
+                return;
+              }
+
+              // 2. Find Transformer connected to this Primary Bus
+              fetch('/api/transformers/by-bus/' + encodeURIComponent(primaryBusId))
+                .then(function (r) { return r.json(); })
+                .then(function (transResult) {
+                  if (transResult && transResult.error) {
+                    console.warn('Transformer fetch error:', transResult.error);
+                    showNoticeModal('Info', 'No transformer found connected to this post. Secondary lines must be linked via a Distribution Transformer.');
+                    return;
+                  }
+
+                  if (!transResult.transformers || transResult.transformers.length === 0) {
+                    showNoticeModal('Info', 'No transformer found for bus ID: ' + primaryBusId + '. Cannot resolve secondary lines.');
+                    return;
+                  }
+
+                  // 3. Get Secondary Bus ID from the first found transformer
+                  var transformer = transResult.transformers[0];
+                  var secondaryBusId = transformer.to_secondary_bus_id;
+
+                  if (!secondaryBusId) {
+                    showNoticeModal('Info', 'Transformer found, but it has no Secondary Bus ID defined.');
+                    return;
+                  }
+
+                  // 4. Fetch Secondary Lines using the Transformer's Secondary Bus ID
+                  fetch('/api/secondary-lines/by-bus/' + encodeURIComponent(secondaryBusId))
+                    .then(function (r) { return r.json(); })
+                    .then(function (result) {
+                      if (result && result.error) {
+                        showNoticeModal('Error', 'Error fetching lines: ' + result.error);
+                        return;
+                      }
+                      showSecondaryLineModal(result);
+                    })
+                    .catch(function (err) {
+                      showNoticeModal('Error', 'Failed to load secondary lines: ' + (err.message || String(err)));
+                    });
+
+                })
+                .catch(function (err) {
+                  showNoticeModal('Error', 'Failed to check for transformer: ' + (err.message || String(err)));
+                });
+            })
+            .catch(function (err) {
+              console.error('Post details fetch failed:', err);
+            });
+        };
+      }
+
+      // Secondary Service Drop button: fetch drops via Secondary Line's to_bus_id
+      const serviceDropBtn = popupEl.querySelector('.service-drop-btn');
+      if (serviceDropBtn) {
+        serviceDropBtn.onclick = function () {
+          const postId = serviceDropBtn.getAttribute('data-post-id');
+          if (!postId) return;
+
+          // 1. Get Post Details to find Primary Bus ID
+          fetch('/api/posts/' + postId)
+            .then(function (r) { return r.json(); })
+            .then(function (postData) {
+              if (postData && postData.error) return;
+
+              var primaryBusId = postData.primary_bus_id || postData.pole_number;
+              if (!primaryBusId) {
+                showNoticeModal('Info', 'No primary bus ID found for this post.');
+                return;
+              }
+
+              // 2. Find Transformer connected to this Primary Bus
+              fetch('/api/transformers/by-bus/' + encodeURIComponent(primaryBusId))
+                .then(function (r) { return r.json(); })
+                .then(function (transResult) {
+                  if (transResult && transResult.error) {
+                    console.warn('Transformer fetch error:', transResult.error);
+                    showNoticeModal('Info', 'No transformer found. Service drops require a transformer connection.');
+                    return;
+                  }
+
+                  if (!transResult.transformers || transResult.transformers.length === 0) {
+                    showNoticeModal('Info', 'No transformer found for bus ID: ' + primaryBusId);
+                    return;
+                  }
+
+                  // 3. Get Secondary Bus ID from the transformer
+                  var transformer = transResult.transformers[0];
+                  var secondaryBusId = transformer.to_secondary_bus_id;
+
+                  if (!secondaryBusId) {
+                    showNoticeModal('Info', 'Transformer has no Secondary Bus ID defined.');
+                    return;
+                  }
+
+                  // 4. Fetch Secondary Lines using the Transformer's Secondary Bus ID
+                  fetch('/api/secondary-lines/by-bus/' + encodeURIComponent(secondaryBusId))
+                    .then(function (r) { return r.json(); })
+                    .then(function (linesResult) {
+                      if (linesResult && linesResult.error) {
+                        showNoticeModal('Error', 'Error fetching secondary lines: ' + linesResult.error);
+                        return;
+                      }
+
+                      if (!linesResult.secondary_lines || linesResult.secondary_lines.length === 0) {
+                        showNoticeModal('Info', 'No secondary lines found for this transformer.');
+                        return;
+                      }
+
+                      // 5. Collect all to_bus_id values from secondary lines
+                      var toBusIds = [];
+                      linesResult.secondary_lines.forEach(function (line) {
+                        if (line.to_bus_id && toBusIds.indexOf(line.to_bus_id) === -1) {
+                          toBusIds.push(line.to_bus_id);
+                        }
+                      });
+
+                      if (toBusIds.length === 0) {
+                        showNoticeModal('Info', 'No valid bus IDs found in secondary lines.');
+                        return;
+                      }
+
+                      // 6. Fetch service drops for each to_bus_id and combine results
+                      var allDrops = [];
+                      var fetchPromises = toBusIds.map(function (busId) {
+                        return fetch('/api/secondary-service-drops/by-bus/' + encodeURIComponent(busId))
+                          .then(function (r) { return r.json(); })
+                          .then(function (result) {
+                            if (result && result.service_drops) {
+                              allDrops = allDrops.concat(result.service_drops);
+                            }
+                          });
+                      });
+
+                      Promise.all(fetchPromises).then(function () {
+                        showServiceDropModal({
+                          count: allDrops.length,
+                          service_drops: allDrops
+                        });
+                      }).catch(function (err) {
+                        showNoticeModal('Error', 'Failed to load service drops: ' + (err.message || String(err)));
+                      });
+
+                    })
+                    .catch(function (err) {
+                      showNoticeModal('Error', 'Failed to load secondary lines: ' + (err.message || String(err)));
+                    });
+
+                })
+                .catch(function (err) {
+                  showNoticeModal('Error', 'Failed to check for transformer: ' + (err.message || String(err)));
+                });
+            })
+            .catch(function (err) {
+              console.error('Post details fetch failed:', err);
+            });
+        };
+      }
+
+      // Show Connected Lines Button
+      const showConnectionsBtn = popupEl.querySelector('.btn-show-connections');
+      if (showConnectionsBtn) {
+        showConnectionsBtn.onclick = function () {
+          const postId = showConnectionsBtn.getAttribute('data-post-id');
+          if (!postId) return;
+
+          // Show loading state or similar if desired
+          showConnectionsBtn.textContent = 'Loading...';
+
+          fetch('/api/posts/' + postId + '/connections')
+            .then(r => r.json())
+            .then(connections => {
+              showConnectionsBtn.textContent = 'View Connected Lines';
+              showConnectionsBtn.textContent = 'View Connected Lines';
+              if (!connections) {
+                showNoticeModal('Error', 'Failed to load connections.');
+                return;
+              }
+              if (connections.length === 0) {
+                showNoticeModal('Info', 'No connections found for this post.');
+                return;
+              }
+              showConnectionsModal(connections, postId);
+            })
+            .catch(err => {
+              console.error('Connection fetch failed:', err);
+              showConnectionsBtn.textContent = 'View Connected Lines';
+              showNoticeModal('Error', 'Error loading connections.');
+            });
+        };
+      }
+
+      // --- New Asset Handlers ---
+
+      // Voltage Regulator
+      const vrBtn = popupEl.querySelector('.voltage-regulator-btn');
+      if (vrBtn) {
+        vrBtn.onclick = function () {
+          const postId = vrBtn.getAttribute('data-post-id');
+          if (!postId) return;
+          fetch('/api/posts/' + postId)
+            .then(r => r.json())
+            .then(postData => {
+              if (postData.error) return;
+              const busId = postData.primary_bus_id || postData.pole_number;
+              if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
+              fetch('/api/voltage-regulators/by-bus/' + encodeURIComponent(busId))
+                .then(r => r.json())
+                .then(res => {
+                  if (res.error) { showNoticeModal('Error', res.error); return; }
+                  if (res.count === 0) { showNoticeModal('Info', 'No Voltage Regulators found for bus: ' + busId); return; }
+                  showVoltageRegulatorModal(res);
+                });
+            });
+        };
+      }
+
+      // Shunt Capacitor
+      const scBtn = popupEl.querySelector('.shunt-capacitor-btn');
+      if (scBtn) {
+        scBtn.onclick = function () {
+          const postId = scBtn.getAttribute('data-post-id');
+          if (!postId) return;
+          fetch('/api/posts/' + postId)
+            .then(r => r.json())
+            .then(postData => {
+              if (postData.error) return;
+              const busId = postData.primary_bus_id || postData.pole_number;
+              if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
+              fetch('/api/shunt-capacitors/by-bus/' + encodeURIComponent(busId))
+                .then(r => r.json())
+                .then(res => {
+                  if (res.error) { showNoticeModal('Error', res.error); return; }
+                  if (res.count === 0) { showNoticeModal('Info', 'No Shunt Capacitors found for bus: ' + busId); return; }
+                  showShuntCapacitorModal(res);
+                });
+            });
+        };
+      }
+
+      // Shunt Inductor
+      const siBtn = popupEl.querySelector('.shunt-inductor-btn');
+      if (siBtn) {
+        siBtn.onclick = function () {
+          const postId = siBtn.getAttribute('data-post-id');
+          if (!postId) return;
+          fetch('/api/posts/' + postId)
+            .then(r => r.json())
+            .then(postData => {
+              if (postData.error) return;
+              const busId = postData.primary_bus_id || postData.pole_number;
+              if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
+              fetch('/api/shunt-inductors/by-bus/' + encodeURIComponent(busId))
+                .then(r => r.json())
+                .then(res => {
+                  if (res.error) { showNoticeModal('Error', res.error); return; }
+                  if (res.count === 0) { showNoticeModal('Info', 'No Shunt Inductors found for bus: ' + busId); return; }
+                  showShuntInductorModal(res);
+                });
+            });
+        };
+      }
+
+      // Series Inductor
+      const eriBtn = popupEl.querySelector('.series-inductor-btn');
+      if (eriBtn) {
+        eriBtn.onclick = function () {
+          const postId = eriBtn.getAttribute('data-post-id');
+          if (!postId) return;
+          fetch('/api/posts/' + postId)
+            .then(r => r.json())
+            .then(postData => {
+              if (postData.error) return;
+              const busId = postData.primary_bus_id || postData.pole_number;
+              if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
+              fetch('/api/series-inductors/by-bus/' + encodeURIComponent(busId))
+                .then(r => r.json())
+                .then(res => {
+                  if (res.error) { showNoticeModal('Error', res.error); return; }
+                  if (res.count === 0) { showNoticeModal('Info', 'No Series Inductors found for bus: ' + busId); return; }
+                  showSeriesInductorModal(res);
+                });
+            });
         };
       }
 
@@ -364,17 +1184,42 @@ document.addEventListener('DOMContentLoaded', function() {
           .then(r => r.json())
           .then(data => {
             if (!data || data.error) return;
-            const latText = (typeof data.lat === 'number') ? data.lat.toFixed(6) : (data.lat || '');
-            const lngText = (typeof data.lng === 'number') ? data.lng.toFixed(6) : (data.lng || '');
-            let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong><br>`;
-            infoHtml += `Pole Number: ${data.pole_number || '—'}<br>`;
-            infoHtml += `Status: ${data.status || 'N/A'}<br>`;
-            infoHtml += `Feeder: ${data.feeder || '—'}<br>`;
-            infoHtml += `kVA Rating: ${data.kva_rating != null ? data.kva_rating : '—'}<br>`;
-            infoHtml += `Meter: ${data.meter_brand ? (data.meter_brand + (data.meter_id ? ' / ' + data.meter_id : '')) : (data.meter_id || '—')}<br>`;
-            infoHtml += `Coordinates: ${latText}, ${lngText}<br>`;
-            if (detailsEl) detailsEl.innerHTML = infoHtml;
-          }).catch(() => {});
+
+            // Fetch Voltage Regulator to get kVA Rating if available
+            const busId = data.primary_bus_id || data.pole_number;
+            let vrPromise = Promise.resolve(null);
+
+            if (busId) {
+              vrPromise = fetch('/api/voltage-regulators/by-bus/' + encodeURIComponent(busId))
+                .then(r => r.json())
+                .then(res => {
+                  if (res.items && res.items.length > 0) return res.items[0];
+                  return null;
+                })
+                .catch(() => null);
+            }
+
+            vrPromise.then(vrData => {
+              const latText = (typeof data.lat === 'number') ? data.lat.toFixed(6) : (data.lat || '');
+              const lngText = (typeof data.lng === 'number') ? data.lng.toFixed(6) : (data.lng || '');
+
+              // Determine KVA: prefer VR data if available, else Post data
+              let kvaDisplay = '—';
+              if (vrData && vrData.kva_rating != null) {
+                kvaDisplay = vrData.kva_rating;
+              } else if (data.kva_rating != null) {
+                kvaDisplay = data.kva_rating;
+              }
+
+              let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong><br>`;
+              infoHtml += `Pole Number: ${data.pole_number || '—'}<br>`;
+              infoHtml += `Status: ${data.status || 'N/A'}<br>`;
+              infoHtml += `Feeder: ${data.feeder || '—'}<br>`;
+              infoHtml += `kVA Rating: ${kvaDisplay}<br>`;
+              infoHtml += `Coordinates: ${latText}, ${lngText}<br>`;
+              if (detailsEl) detailsEl.innerHTML = infoHtml;
+            });
+          }).catch(() => { });
       } catch (e) { console.error('Failed to fetch post details', e); }
 
       // Load connections that include this post — section is inside the popup (modal) content
@@ -383,7 +1228,7 @@ document.addEventListener('DOMContentLoaded', function() {
       connectionsContainer.innerHTML = '';
       fetch(`/api/posts/${p.id}/connections`)
         .then(r => r.json())
-        .then(function(conns) {
+        .then(function (conns) {
           if (!conns || !Array.isArray(conns)) conns = (conns && conns.connections) ? conns.connections : [];
           if (conns.length === 0) return;
           const section = document.createElement('div');
@@ -394,10 +1239,10 @@ document.addEventListener('DOMContentLoaded', function() {
           section.appendChild(title);
           const list = document.createElement('ul');
           list.className = 'post-connections-list';
-          conns.forEach(function(c) {
+          conns.forEach(function (c) {
             const li = document.createElement('li');
             const name = (typeof c.name === 'string' && c.name && c.name.indexOf('{') !== 0) ? c.name : ('Connection #' + (c.id != null ? c.id : ''));
-            const ids = (c.points || []).map(function(pt) { return pt.post_id ? '#' + pt.post_id : (pt.lat != null && pt.lng != null ? pt.lat.toFixed(6) + ',' + pt.lng.toFixed(6) : ''); }).join(', ');
+            const ids = (c.points || []).map(function (pt) { return pt.post_id ? '#' + pt.post_id : (pt.lat != null && pt.lng != null ? pt.lat.toFixed(6) + ',' + pt.lng.toFixed(6) : ''); }).join(', ');
             li.innerHTML = (name.replace(/</g, '&lt;')) + ' (id ' + (c.id != null ? c.id : '') + ') — ' + formatMeters(c.total_length || 0) + '<br/>IDs: ' + (ids || '—') + ' <button class="btn btn-danger disconnect-from-post" data-conn-id="' + (c.id != null ? c.id : '') + '">Disconnect</button>';
             list.appendChild(li);
           });
@@ -407,11 +1252,11 @@ document.addEventListener('DOMContentLoaded', function() {
           // attach handlers scoped to the newly created section
           const btns = section.querySelectorAll('.disconnect-from-post');
           btns.forEach(b => {
-            b.addEventListener('click', function(ev) {
+            b.addEventListener('click', function (ev) {
               ev.preventDefault();
               const id = b.getAttribute('data-conn-id');
               showConfirmModal('Disconnect/delete this connection?', { title: 'Delete connection', okText: 'Delete', cancelText: 'Cancel' })
-                .then(function(confirmed) {
+                .then(function (confirmed) {
                   if (!confirmed) return;
                   fetch('/api/connections/' + id, { method: 'DELETE' })
                     .then(r => r.json())
@@ -431,14 +1276,14 @@ document.addEventListener('DOMContentLoaded', function() {
             });
           });
         }).catch(err => console.error('Failed to load post connections', err));
-        const expBtn = popupEl.querySelector('.export-post');
-        if (expBtn) {
-          expBtn.addEventListener('click', function (ev) {
-            ev.preventDefault();
-            // trigger file download
-            window.location = '/api/export/post/' + p.id;
-          });
-        }
+      const expBtn = popupEl.querySelector('.export-post');
+      if (expBtn) {
+        expBtn.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          // trigger file download
+          window.location = '/api/export/post/' + p.id;
+        });
+      }
     });
 
     return marker;
@@ -463,15 +1308,15 @@ document.addEventListener('DOMContentLoaded', function() {
     })
     .then(response => {
       console.log('Posts API response:', response);
-      
+
       // Handle both old array format and new paginated format
       const posts = Array.isArray(response) ? response : (response.data || []);
       console.log('Posts to render on map:', posts.length, posts);
-      
+
       if (!posts || posts.length === 0) {
         console.warn('No posts found - map may appear empty');
       }
-      
+
       let addedCount = 0;
       posts.forEach(p => {
         if (p && p.lat && p.lng) {
@@ -481,25 +1326,25 @@ document.addEventListener('DOMContentLoaded', function() {
           console.warn('Skipping post with missing coords:', p);
         }
       });
-      
+
       console.log(`Added ${addedCount} markers to posts layer`);
-      
+
       // Add postsLayer to map by default
       postsLayer.addTo(map);
       console.log('Posts layer added to map');
-      
+
       // Fit map if we added markers (use isValid() guard — isEmpty() isn't available in this Leaflet build)
       if (typeof bounds.isValid === 'function' ? bounds.isValid() : !bounds.isEmpty) {
-        try { 
+        try {
           map.fitBounds(bounds.pad(0.12));
           console.log('Map bounds fitted');
-        } catch (e) { 
-          console.warn('Failed to fit bounds:', e); 
+        } catch (e) {
+          console.warn('Failed to fit bounds:', e);
         }
       } else {
         console.log('Bounds not valid - using default map view');
       }
-      
+
       // If a target post id was provided via URL params, center/fly to it and open popup
       try {
         const targetId = window._targetPostId;
@@ -507,11 +1352,11 @@ document.addEventListener('DOMContentLoaded', function() {
           const tid = parseInt(targetId, 10);
           console.log('Targeting post ID:', tid);
           // small timeout to ensure markers have been added to the layer
-          setTimeout(function() {
+          setTimeout(function () {
             const marker = postMarkers[tid];
             if (marker && marker.getLatLng) {
               try { map.flyTo(marker.getLatLng(), 17); } catch (e) { map.setView(marker.getLatLng(), 17); }
-              try { marker.openPopup(); } catch (e) {}
+              try { marker.openPopup(); } catch (e) { }
             } else {
               console.warn('Target marker not found:', tid);
             }
@@ -534,7 +1379,7 @@ document.addEventListener('DOMContentLoaded', function() {
   // Load and draw inferred line connections
   function loadLineConnections() {
     console.log('Starting loadLineConnections...');
-    
+
     fetch('/api/line-connections')
       .then(r => {
         if (!r.ok) throw new Error(`API error: ${r.status}`);
@@ -543,7 +1388,7 @@ document.addEventListener('DOMContentLoaded', function() {
       .then(data => {
         const connections = data.connections || [];
         console.log(`API returned ${connections.length} connections`);
-        
+
         if (!connections || connections.length === 0) {
           console.log('No line connections to display');
           return;
@@ -576,7 +1421,7 @@ document.addEventListener('DOMContentLoaded', function() {
           // Extract first numeric value from bus ID
           const fromMatch = fromBus.match(/\d+/);
           const toMatch = toBus.match(/\d+/);
-          
+
           if (!fromMatch || !toMatch) {
             skippedCount++;
             return;
@@ -598,11 +1443,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
           if (!fromLatLng || !toLatLng) {
             skippedCount++;
+            const toBus = conn.to_bus_id || conn.to_bus;
             return;
           }
 
-          // Determine line color based on Circuit field
-          let lineColor = getLineColor(conn.circuit);
+          // Determine line color
+          const lineColor = getLineColor(conn.circuit, conn.phasing);
           let lineWeight = 2;
           let dashArray = null;
 
@@ -624,13 +1470,18 @@ document.addEventListener('DOMContentLoaded', function() {
             dashArray: dashArray
           });
 
+          // Store circuit type for dynamic styling
+          polyline.circuitType = conn.circuit;
+          polyline.phasingType = conn.phasing; // Store phasing for color updates
+
           // Add popup
           const popupText = `
             <strong>${connType.replace(/_/g, ' → ')}</strong><br>
             From Bus: ${fromBus}<br>
             To Bus: ${toBus}<br>
             Feeder: ${conn.feeder || 'N/A'}<br>
-            Circuit: ${conn.circuit || 'N/A'}
+            Circuit: ${conn.circuit || 'N/A'}<br>
+            Phasing: ${conn.phasing || 'N/A'}
           `;
           polyline.bindPopup(popupText);
 
@@ -648,45 +1499,113 @@ document.addEventListener('DOMContentLoaded', function() {
       });
   }
 
+  // Chain segments that share an endpoint into continuous paths (so network looks like connected lines, not many separate segments)
+  function chainSegmentsIntoPaths(lines) {
+    var tol = 1e-6;
+    function eq(a, b) { return Math.abs(parseFloat(a) - parseFloat(b)) < tol; }
+    function samePoint(lat1, lng1, lat2, lng2) { return eq(lat1, lat2) && eq(lng1, lng2); }
+    var used = {};
+    var paths = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (used[i]) continue;
+      var line = lines[i];
+      var lat1 = parseFloat(line.lat1);
+      var lng1 = parseFloat(line.lng1);
+      var lat2 = parseFloat(line.lat2);
+      var lng2 = parseFloat(line.lng2);
+      if (Number.isNaN(lat1) || Number.isNaN(lng1) || Number.isNaN(lat2) || Number.isNaN(lng2)) continue;
+      var points = [[lat1, lng1], [lat2, lng2]];
+      var pathMeta = { connection_type: line.connection_type || '', circuit: line.circuit, feeder: line.feeder, phasing: line.phasing, from_bus: line.from_bus, to_bus: line.to_bus, length_meters: line.length_meters, segments: 1 };
+      used[i] = true;
+      var changed = true;
+      while (changed) {
+        changed = false;
+        var head = points[points.length - 1];
+        var tail = points[0];
+        for (var j = 0; j < lines.length; j++) {
+          if (used[j]) continue;
+          var s = lines[j];
+          var s1 = [parseFloat(s.lat1), parseFloat(s.lng1)];
+          var s2 = [parseFloat(s.lat2), parseFloat(s.lng2)];
+          if (samePoint(head[0], head[1], s1[0], s1[1])) { points.push(s2); pathMeta.segments++; pathMeta.to_bus = s.to_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
+          if (samePoint(head[0], head[1], s2[0], s2[1])) { points.push(s1); pathMeta.segments++; pathMeta.to_bus = s.from_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
+          if (samePoint(tail[0], tail[1], s2[0], s2[1])) { points.unshift(s1); pathMeta.segments++; pathMeta.from_bus = s.from_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
+          if (samePoint(tail[0], tail[1], s1[0], s1[1])) { points.unshift(s2); pathMeta.segments++; pathMeta.from_bus = s.to_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
+        }
+      }
+      paths.push({ points: points, meta: pathMeta });
+    }
+    return paths;
+  }
+
   // Load network line geometry from DB (coordinates from DB only; no client-side resolution)
   function loadNetworkGeometry() {
     fetch('/api/network-geometry')
-      .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error(r.statusText)); })
-      .then(function(data) {
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.statusText)); })
+      .then(function (data) {
         networkLinesLayer.clearLayers();
         var lines = data.lines || [];
         var stats = data.stats || {};
-        lines.forEach(function(line) {
-          var lat1 = parseFloat(line.lat1);
-          var lng1 = parseFloat(line.lng1);
-          var lat2 = parseFloat(line.lat2);
-          var lng2 = parseFloat(line.lng2);
-          if (Number.isNaN(lat1) || Number.isNaN(lng1) || Number.isNaN(lat2) || Number.isNaN(lng2)) return;
-          var connType = line.connection_type || '';
-          var color = getLineColor(line.circuit);
+        var hintEl = document.getElementById('network-geometry-hint');
+        if (data.error) {
+          console.warn('Network geometry (server message):', data.error);
+          if (hintEl) {
+            hintEl.textContent = 'Network lines: ' + data.error + ' (check migrations or database).';
+            hintEl.style.display = 'block';
+          }
+        } else if (lines.length === 0) {
+          console.log('Network geometry: no lines yet. Import posts with coordinates from the Resources page.');
+          if (hintEl) {
+            hintEl.innerHTML = 'No network lines yet. Upload posts with <strong>Pole Number, Latitude, Longitude</strong> from the <a href="/resources">Resources</a> page to see lines on the map.';
+            hintEl.style.display = 'block';
+          }
+        } else {
+          if (hintEl) { hintEl.style.display = 'none'; }
+        }
+        // Chain segments into continuous paths so the network draws as connected lines, not many separate straight segments
+        var paths = chainSegmentsIntoPaths(lines);
+        paths.forEach(function (pathObj) {
+          var points = pathObj.points;
+          var meta = pathObj.meta;
+          if (points.length < 2) return;
+          var connType = meta.connection_type || '';
+          var color = getLineColor(meta.circuit, meta.phasing);
           var weight = 2;
           var dash = null;
           if (connType.indexOf('Primary_to_Primary') !== -1) { weight = 3; }
+          else if (connType === 'Distribution_Line') { weight = 3; }
           else if (connType.indexOf('Primary_to_Transformer') !== -1) { weight = 2.5; }
           else if (connType.indexOf('Transformer_to_Secondary') !== -1) { weight = 2; }
-          var poly = L.polyline([[lat1, lng1], [lat2, lng2]], { color: color, weight: weight, opacity: 0.8, dashArray: dash });
-          var lenStr = (line.length_meters != null && !Number.isNaN(line.length_meters))
-            ? '<br>Length: ' + Number(line.length_meters).toFixed(2) + ' m'
+          else if (connType === 'Primary_to_Secondary') { weight = 2.5; }
+          else if (connType === 'Secondary_Line') { weight = 2; }
+          var poly = L.polyline(points, { color: color, weight: weight, opacity: 0.8, dashArray: dash, lineJoin: 'round', lineCap: 'round' });
+
+          // Store circuit type and phasing for dynamic styling on layer change
+          poly.circuitType = meta.circuit;
+          poly.phasingType = meta.phasing;
+          poly._feederName = meta.feeder || '';
+          if (meta.feeder) knownFeeders.add(meta.feeder);
+
+          var lenStr = (meta.length_meters != null && !Number.isNaN(meta.length_meters))
+            ? '<br>Length: ' + Number(meta.length_meters).toFixed(2) + ' m'
             : '';
-          var popup = '<strong>' + (connType.replace(/_/g, ' \u2192 ')) + '</strong><br>From: ' + (line.from_bus || '') + ' \u2192 To: ' + (line.to_bus || '') + '<br>Feeder: ' + (line.feeder || '') + ' | Circuit: ' + (line.circuit || '') + lenStr;
+          var segStr = meta.segments > 1 ? ' (' + meta.segments + ' segments)' : '';
+          var popup = '<strong>' + (connType.replace(/_/g, ' \u2192 ') || 'Network') + segStr + '</strong><br>From: ' + (meta.from_bus || '') + ' \u2192 To: ' + (meta.to_bus || '') + '<br>Feeder: ' + (meta.feeder || '') + ' | Circuit: ' + (meta.circuit || '') + ' | Phasing: ' + (meta.phasing || 'N/A') + lenStr;
           poly.bindPopup(popup);
           poly.addTo(networkLinesLayer);
         });
         networkLinesLayer.addTo(map);
+        // Refresh the feeder filter UI after network lines are loaded
+        if (typeof window._refreshFeederList === 'function') window._refreshFeederList();
         var totalM = stats.total_length_meters != null ? stats.total_length_meters : 0;
-        console.log('Network geometry: ' + lines.length + ' lines (nodes: ' + (stats.nodes || 0) + ', total length: ' + (typeof totalM === 'number' ? totalM.toFixed(2) : totalM) + ' m)');
+        console.log('Network geometry: ' + lines.length + ' segments chained into ' + paths.length + ' paths (nodes: ' + (stats.nodes || 0) + ', total length: ' + (typeof totalM === 'number' ? totalM.toFixed(2) : totalM) + ' m)');
       })
-      .catch(function(err) { console.warn('Network geometry load failed:', err); });
+      .catch(function (err) { console.warn('Network geometry load failed:', err); });
   }
 
 
   // Load connections after posts are loaded
-  setTimeout(function() {
+  setTimeout(function () {
     console.log('Calling loadLineConnections after posts...');
     loadLineConnections();
     loadNetworkGeometry();
@@ -760,7 +1679,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // compute total
     let total = 0;
     for (let i = 1; i < connectionPoints.length; i++) {
-      total += haversine(connectionPoints[i-1].lat, connectionPoints[i-1].lng, connectionPoints[i].lat, connectionPoints[i].lng);
+      total += haversine(connectionPoints[i - 1].lat, connectionPoints[i - 1].lng, connectionPoints[i].lat, connectionPoints[i].lng);
     }
   }
 
@@ -793,7 +1712,7 @@ document.addEventListener('DOMContentLoaded', function() {
         </div>
         <div class="modal-body result-modal-body">
           <p class="result-modal-message"></p>
-          <dl class="result-modal-details"></dl>
+          <div class="result-modal-details"></div>
         </div>
         <div class="modal-footer">
           <button class="btn result-modal-ok">OK</button>
@@ -831,13 +1750,25 @@ document.addEventListener('DOMContentLoaded', function() {
       messageEl.textContent = options.message || (options.name ? `"${options.name}" has been saved.` : 'Connection has been saved.');
       const length = options.length != null ? options.length : 0;
       const count = options.count != null ? options.count : (options.id != null ? 1 : 0);
+
+      let gridHtml = '';
       if (count > 1) {
-        detailsEl.innerHTML = `<dt>Segments saved</dt><dd>${count} post-to-post</dd><dt>Total length</dt><dd>${formatMeters(length)}</dd>`;
+        gridHtml += `<div class="kv-item"><div class="kv-label">Segments saved</div><div class="kv-value">${count} post-to-post</div></div>`;
+        gridHtml += `<div class="kv-item"><div class="kv-label">Total length</div><div class="kv-value">${formatMeters(length)}</div></div>`;
       } else if (count === 0 && options.id != null) {
-        detailsEl.innerHTML = `<dt>Post ID</dt><dd>${options.id}</dd>`;
+        gridHtml += `<div class="kv-item"><div class="kv-label">Post ID</div><div class="kv-value">${options.id}</div></div>`;
       } else {
-        detailsEl.innerHTML = `<dt>Connection ID</dt><dd>${options.id != null ? options.id : '—'}</dd><dt>Length</dt><dd>${formatMeters(length)}</dd>`;
+        gridHtml += `<div class="kv-item"><div class="kv-label">Connection ID</div><div class="kv-value">${options.id != null ? options.id : '—'}</div></div>`;
+        gridHtml += `<div class="kv-item"><div class="kv-label">Length</div><div class="kv-value">${formatMeters(length)}</div></div>`;
       }
+
+      detailsEl.innerHTML = `
+        <div class="info-card">
+          <div class="kv-grid">
+            ${gridHtml}
+          </div>
+        </div>
+      `;
     }
     m.style.display = 'flex';
     m.tabIndex = -1;
@@ -877,13 +1808,13 @@ document.addEventListener('DOMContentLoaded', function() {
     overlay.className = 'modal-overlay primary-line-overhead-modal-overlay';
     overlay.setAttribute('aria-label', 'Primary line-overhead');
     overlay.innerHTML = [
-      '<div class="modal result-modal" style="max-width: 480px; width: 90vw;">',
+      '<div class="modal result-modal" style="max-width: 500px; width: 90vw;">',
       '  <div class="modal-header result-modal-header">',
       '    <h3 class="result-modal-title">Primary line-overhead</h3>',
       '    <button class="modal-close primary-line-overhead-close" aria-label="Close">✕</button>',
       '  </div>',
-      '  <div class="modal-body result-modal-body primary-line-overhead-body" style="max-height: 60vh; overflow-y: auto; padding: 12px 16px;">',
-      '    <dl class="result-modal-details primary-line-overhead-dl"></dl>',
+      '  <div class="modal-body result-modal-body primary-line-overhead-body enhanced-body" style="max-height: 70vh; overflow-y: auto;">',
+      '    <div class="primary-line-overhead-content"></div>',
       '  </div>',
       '  <div class="modal-footer"><button class="btn result-modal-ok primary-line-overhead-ok">OK</button></div>',
       '</div>'
@@ -891,28 +1822,42 @@ document.addEventListener('DOMContentLoaded', function() {
     document.body.appendChild(overlay);
     overlay.querySelector('.primary-line-overhead-close').addEventListener('click', closePrimaryLineOverheadModal);
     overlay.querySelector('.primary-line-overhead-ok').addEventListener('click', closePrimaryLineOverheadModal);
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) closePrimaryLineOverheadModal(); });
-    overlay.addEventListener('keydown', function(e) { if (e.key === 'Escape') closePrimaryLineOverheadModal(); });
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closePrimaryLineOverheadModal(); });
+    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePrimaryLineOverheadModal(); });
     _primaryLineOverheadModal = overlay;
     return _primaryLineOverheadModal;
   }
   function showPrimaryLineOverheadModal(data) {
     var m = createPrimaryLineOverheadModal();
-    var dl = m.querySelector('.primary-line-overhead-dl');
+    var contentDiv = m.querySelector('.primary-line-overhead-content');
     var title = m.querySelector('.result-modal-title');
     title.textContent = 'Primary line-overhead' + (data && data.name ? ' — ' + data.name : '');
-    dl.innerHTML = '';
-    PRIMARY_LINE_OVERHEAD_FIELDS.forEach(function(f) {
+
+    contentDiv.innerHTML = '';
+
+    const card = document.createElement('div');
+    card.className = 'info-card';
+
+    // Optional: Add a header to the card if needed, but for now just the grid
+    // card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Attributes</h4></div>`; 
+
+    const grid = document.createElement('div');
+    grid.className = 'kv-grid';
+
+    PRIMARY_LINE_OVERHEAD_FIELDS.forEach(function (f) {
       var val = data && data[f.key];
       if (val === undefined || val === null || val === '') val = '—';
       else if (typeof val === 'number') val = Number(val);
-      var dt = document.createElement('dt');
-      dt.textContent = f.label;
-      var dd = document.createElement('dd');
-      dd.textContent = val;
-      dl.appendChild(dt);
-      dl.appendChild(dd);
+
+      const item = document.createElement('div');
+      item.className = 'kv-item';
+      item.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
+      grid.appendChild(item);
     });
+
+    card.appendChild(grid);
+    contentDiv.appendChild(card);
+
     m.style.display = 'flex';
     m.tabIndex = -1;
     m.focus();
@@ -950,13 +1895,13 @@ document.addEventListener('DOMContentLoaded', function() {
     overlay.className = 'modal-overlay distribution-transformer-modal-overlay';
     overlay.setAttribute('aria-label', 'Distribution Transformer');
     overlay.innerHTML = [
-      '<div class="modal result-modal" style="max-width: 500px; width: 90vw;">',
+      '<div class="modal result-modal" style="max-width: 520px; width: 90vw;">',
       '  <div class="modal-header result-modal-header">',
       '    <h3 class="result-modal-title">Distribution Transformer</h3>',
       '    <button class="modal-close distribution-transformer-close" aria-label="Close">✕</button>',
       '  </div>',
-      '  <div class="modal-body result-modal-body distribution-transformer-body" style="max-height: 60vh; overflow-y: auto; padding: 12px 16px;">',
-      '    <dl class="result-modal-details distribution-transformer-dl"></dl>',
+      '  <div class="modal-body result-modal-body distribution-transformer-body enhanced-body" style="max-height: 70vh; overflow-y: auto;">',
+      '    <div class="distribution-transformer-content"></div>',
       '  </div>',
       '  <div class="modal-footer"><button class="btn result-modal-ok distribution-transformer-ok">OK</button></div>',
       '</div>'
@@ -964,18 +1909,27 @@ document.addEventListener('DOMContentLoaded', function() {
     document.body.appendChild(overlay);
     overlay.querySelector('.distribution-transformer-close').addEventListener('click', closeDistributionTransformerModal);
     overlay.querySelector('.distribution-transformer-ok').addEventListener('click', closeDistributionTransformerModal);
-    overlay.addEventListener('click', function(e) { if (e.target === overlay) closeDistributionTransformerModal(); });
-    overlay.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeDistributionTransformerModal(); });
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeDistributionTransformerModal(); });
+    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDistributionTransformerModal(); });
     _distributionTransformerModal = overlay;
     return _distributionTransformerModal;
   }
   function showDistributionTransformerModal(data) {
     var m = createDistributionTransformerModal();
-    var dl = m.querySelector('.distribution-transformer-dl');
+    var contentDiv = m.querySelector('.distribution-transformer-content');
     var title = m.querySelector('.result-modal-title');
     title.textContent = 'Distribution Transformer' + (data && data.transformer_id ? ' — ' + data.transformer_id : '');
-    dl.innerHTML = '';
-    DISTRIBUTION_TRANSFORMER_FIELDS.forEach(function(f) {
+
+    contentDiv.innerHTML = '';
+
+    const card = document.createElement('div');
+    card.className = 'info-card';
+    // card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Equipment Details</h4></div>`;
+
+    const grid = document.createElement('div');
+    grid.className = 'kv-grid';
+
+    DISTRIBUTION_TRANSFORMER_FIELDS.forEach(function (f) {
       var val = data && data[f.key];
       if (val === undefined || val === null || val === '') val = '—';
       else if (f.key === 'created_at' && val) {
@@ -988,19 +1942,224 @@ document.addEventListener('DOMContentLoaded', function() {
       } else if (typeof val === 'number') {
         val = Number(val);
       }
-      var dt = document.createElement('dt');
-      dt.textContent = f.label;
-      var dd = document.createElement('dd');
-      dd.textContent = val;
-      dl.appendChild(dt);
-      dl.appendChild(dd);
+
+      const item = document.createElement('div');
+      item.className = 'kv-item';
+      item.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
+      grid.appendChild(item);
     });
+
+    card.appendChild(grid);
+    contentDiv.appendChild(card);
+
     m.style.display = 'flex';
     m.tabIndex = -1;
     m.focus();
   }
   function closeDistributionTransformerModal() {
     if (_distributionTransformerModal) _distributionTransformerModal.style.display = 'none';
+  }
+
+  // --- Secondary Line modal ---
+  var _secondaryLineModal = null;
+  var SECONDARY_LINE_FIELDS = [
+    { key: 'secondary_line_id', label: 'Secondary Line ID' },
+    { key: 'from_bus_id', label: 'From Bus ID' },
+    { key: 'to_bus_id', label: 'To Bus ID' },
+    { key: 'phasing', label: 'Phasing' },
+    { key: 'conductor_type', label: 'Conductor Type' },
+    { key: 'conductor_size', label: 'Conductor Size' },
+    { key: 'conductor_unit', label: 'Unit' },
+    { key: 'length_meters', label: 'Length (m)' },
+    { key: 'system_grounding_type', label: 'System Grounding' },
+    { key: 'neutral_wire_type', label: 'Neutral Wire Type' },
+    { key: 'neutral_wire_size', label: 'Neutral Wire Size' }
+  ];
+
+  function createSecondaryLineModal() {
+    if (_secondaryLineModal) return _secondaryLineModal;
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay secondary-line-modal-overlay';
+    overlay.setAttribute('aria-label', 'Secondary Lines');
+    overlay.innerHTML = [
+      '<div class="modal result-modal" style="max-width: 600px; width: 90vw;">',
+      '  <div class="modal-header result-modal-header">',
+      '    <h3 class="result-modal-title">Secondary Lines</h3>',
+      '    <button class="modal-close secondary-line-close" aria-label="Close">✕</button>',
+      '  </div>',
+      '  <div class="modal-body result-modal-body secondary-line-body enhanced-body" style="max-height: 70vh; overflow-y: auto;">',
+      '    <div class="secondary-line-content"></div>',
+      '  </div>',
+      '  <div class="modal-footer"><button class="btn result-modal-ok secondary-line-ok">OK</button></div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(overlay);
+    overlay.querySelector('.secondary-line-close').addEventListener('click', closeSecondaryLineModal);
+    overlay.querySelector('.secondary-line-ok').addEventListener('click', closeSecondaryLineModal);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeSecondaryLineModal(); });
+    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSecondaryLineModal(); });
+    _secondaryLineModal = overlay;
+    return _secondaryLineModal;
+  }
+
+  function showSecondaryLineModal(data) {
+    var m = createSecondaryLineModal();
+    var contentDiv = m.querySelector('.secondary-line-content');
+    var title = m.querySelector('.result-modal-title');
+
+    title.textContent = 'Secondary Lines (' + (data.count || 0) + ')';
+    contentDiv.innerHTML = '';
+
+    if (!data.secondary_lines || data.secondary_lines.length === 0) {
+      contentDiv.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center; color:var(--text-secondary);">No secondary lines found for this bus.</div></div>';
+    } else {
+      // Create a list or series of DLs for multiple lines
+      data.secondary_lines.forEach(function (line, idx) {
+
+        var card = document.createElement('div');
+        card.className = 'info-card';
+
+        var lineId = line.secondary_line_id ? line.secondary_line_id : `Line #${idx + 1}`;
+        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">${lineId}</h4></div>`;
+
+        var grid = document.createElement('div');
+        grid.className = 'kv-grid';
+
+        SECONDARY_LINE_FIELDS.forEach(function (f) {
+          var val = line[f.key];
+          if (val === undefined || val === null || val === '') return; // Skip empty
+          if (typeof val === 'number') val = Number(val);
+
+          var item = document.createElement('div');
+          item.className = 'kv-item';
+          item.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
+          grid.appendChild(item);
+        });
+
+        card.appendChild(grid);
+        contentDiv.appendChild(card);
+      });
+    }
+
+    m.style.display = 'flex';
+    m.tabIndex = -1;
+    m.focus();
+  }
+
+  function closeSecondaryLineModal() {
+    if (_secondaryLineModal) _secondaryLineModal.style.display = 'none';
+  }
+
+  // --- Secondary Service Drop modal ---
+  var _serviceDropModal = null;
+  var SERVICE_DROP_FIELDS = [
+    { key: 'service_drop_id', label: 'Service Drop ID' },
+    { key: 'to_customer_id', label: 'Customer ID' },
+    { key: 'phasing', label: 'Phasing' },
+    { key: 'installation_type', label: 'Installation Type' },
+    { key: 'conductor_type', label: 'Conductor Type' },
+    { key: 'conductor_size', label: 'Conductor Size' },
+    { key: 'conductor_unit', label: 'Unit' },
+    { key: 'length_meters_1', label: 'Length-1 (m)' },
+    { key: 'length_meters_2', label: 'Length-2 (m)' }
+  ];
+
+  function createServiceDropModal() {
+    if (_serviceDropModal) return _serviceDropModal;
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay service-drop-modal-overlay';
+    overlay.setAttribute('aria-label', 'Service Drops');
+    overlay.innerHTML = [
+      '<div class="modal result-modal" style="max-width: 600px; width: 90vw;">',
+      '  <div class="modal-header result-modal-header">',
+      '    <h3 class="result-modal-title">Secondary Service Drops</h3>',
+      '    <button class="modal-close service-drop-close" aria-label="Close">✕</button>',
+      '  </div>',
+      '  <div class="modal-body result-modal-body service-drop-body enhanced-body" style="max-height: 60vh; overflow-y: auto; padding: 12px 16px;">',
+      '    <div class="service-drop-content"></div>',
+      '  </div>',
+      '  <div class="modal-footer"><button class="btn result-modal-ok service-drop-ok">OK</button></div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(overlay);
+    overlay.querySelector('.service-drop-close').addEventListener('click', closeServiceDropModal);
+    overlay.querySelector('.service-drop-ok').addEventListener('click', closeServiceDropModal);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeServiceDropModal(); });
+    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeServiceDropModal(); });
+    _serviceDropModal = overlay;
+    return _serviceDropModal;
+  }
+
+  function showServiceDropModal(data) {
+    var m = createServiceDropModal();
+    var contentDiv = m.querySelector('.service-drop-content');
+    var title = m.querySelector('.result-modal-title');
+
+    title.textContent = 'Service Drops (' + (data.count || 0) + ')';
+    contentDiv.innerHTML = '';
+
+    if (!data.service_drops || data.service_drops.length === 0) {
+      contentDiv.innerHTML = '<div class="info-card" style="text-align:center; color:var(--text-secondary);">No service drops found for this bus.</div>';
+    } else {
+      data.service_drops.forEach(function (drop, idx) {
+        var card = document.createElement('div');
+        card.className = 'info-card';
+
+        // Header
+        var header = document.createElement('div');
+        header.className = 'info-card-header';
+
+        var title = document.createElement('div');
+        title.className = 'info-card-title';
+        title.textContent = 'Drop #' + (idx + 1) + (drop.service_drop_id ? ' (' + drop.service_drop_id + ')' : '');
+        header.appendChild(title);
+
+        if (drop.to_customer_id) {
+          var cBtn = document.createElement('button');
+          cBtn.className = 'btn btn-sm';
+          cBtn.style.fontSize = '0.8rem';
+          cBtn.style.padding = '4px 12px';
+          cBtn.textContent = 'View Customer Info';
+          cBtn.onclick = function () { showCustomerInfoModal(drop.to_customer_id); };
+          header.appendChild(cBtn);
+        }
+        card.appendChild(header);
+
+        // Grid
+        var grid = document.createElement('div');
+        grid.className = 'kv-grid';
+
+        SERVICE_DROP_FIELDS.forEach(function (f) {
+          var val = drop[f.key];
+          if (val === undefined || val === null || val === '') return;
+
+          var item = document.createElement('div');
+          item.className = 'kv-item';
+
+          var label = document.createElement('div');
+          label.className = 'kv-label';
+          label.textContent = f.label;
+
+          var value = document.createElement('div');
+          value.className = 'kv-value';
+          value.textContent = val;
+
+          item.appendChild(label);
+          item.appendChild(value);
+          grid.appendChild(item);
+        });
+        card.appendChild(grid);
+        contentDiv.appendChild(card);
+      });
+    }
+
+    m.style.display = 'flex';
+    m.tabIndex = -1;
+    m.focus();
+  }
+
+  function closeServiceDropModal() {
+    if (_serviceDropModal) _serviceDropModal.style.display = 'none';
   }
 
   // --- Confirmation modal (replaces window.confirm) ---
@@ -1098,12 +2257,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Save a connection from the current points
   function saveConnection(nameArg) {
-    if (connectionPoints.length < 2) { alert('Add at least two points to save a connection.'); return; }
+    if (connectionPoints.length < 2) { showNoticeModal('Info', 'Add at least two points to save a connection.'); return; }
     let name = nameArg;
-    if (!name) name = prompt('Name this connection', `Connection ${new Date().toISOString().slice(0,19)}`) || 'Connection';
+    if (!name) name = prompt('Name this connection', `Connection ${new Date().toISOString().slice(0, 19)}`) || 'Connection';
     hideConnectionHint();
     // Send a plain array of { post_id, lat, lng } so backend never receives a dict or non-numeric values
-    var pointsPayload = connectionPoints.map(function(pt) {
+    var pointsPayload = connectionPoints.map(function (pt) {
       var lat = parseFloat(pt.lat);
       var lng = parseFloat(pt.lng);
       return {
@@ -1164,8 +2323,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
           // Invisible, wider polyline to make clicking the connection easier
           const buffer = L.polyline(latlngs, { color: 'transparent', weight: 20, opacity: 0, className: 'click-buffer' }).addTo(connectionsLayer);
-          buffer.on('click', function() { poly.openPopup(); highlightPoly(poly); });
-          poly.on('click', function() { poly.openPopup(); highlightPoly(poly); });
+          buffer.on('click', function () { poly.openPopup(); highlightPoly(poly); });
+          poly.on('click', function () { poly.openPopup(); highlightPoly(poly); });
 
           // Add non-interactive endpoint markers for each point to ensure visual match
           c.points.forEach(pt => {
@@ -1173,16 +2332,16 @@ document.addEventListener('DOMContentLoaded', function() {
           });
 
           // Attach handler when popup opens
-          poly.on('popupopen', function() {
+          poly.on('popupopen', function () {
             const el = poly.getPopup().getElement();
             if (!el) return;
             const btn = el.querySelector('.disconnect-conn');
             if (!btn) return;
-            btn.addEventListener('click', function(ev) {
+            btn.addEventListener('click', function (ev) {
               ev.preventDefault();
               const id = btn.getAttribute('data-conn-id');
               showConfirmModal('Disconnect and delete this connection?', { title: 'Delete connection', okText: 'Delete', cancelText: 'Cancel' })
-                .then(function(confirmed) {
+                .then(function (confirmed) {
                   if (!confirmed) return;
                   fetch('/api/connections/' + id, { method: 'DELETE' })
                     .then(r => r.json())
@@ -1212,17 +2371,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const idx = selectedOrder.indexOf(postId);
     if (idx === -1) {
       selectedOrder.push(postId);
-      try { marker.setOpacity(0.6); } catch (e) {}
+      try { marker.setOpacity(0.6); } catch (e) { }
     } else {
       selectedOrder.splice(idx, 1);
-      try { marker.setOpacity(1); } catch (e) {}
+      try { marker.setOpacity(1); } catch (e) { }
     }
     updateSelectionBadge();
   }
 
   function clearSelection() {
     selectedOrder.slice().forEach(id => {
-      const m = postMarkers[id]; if (m) try { m.setOpacity(1); } catch (e) {}
+      const m = postMarkers[id]; if (m) try { m.setOpacity(1); } catch (e) { }
     });
     selectedOrder.length = 0;
     updateSelectionBadge();
@@ -1235,19 +2394,19 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 
   function connectSelected() {
-    if (selectedOrder.length < 2) { alert('Select at least two posts to connect.'); return; }
+    if (selectedOrder.length < 2) { showNoticeModal('Info', 'Select at least two posts to connect.'); return; }
     const points = selectedOrder.map(id => {
       const m = postMarkers[id];
       if (!m) return null;
       const latlng = m.getLatLng();
       return { post_id: id, lat: latlng.lat, lng: latlng.lng };
     }).filter(Boolean);
-    if (points.length < 2) { alert('Selected posts do not have valid coordinates.'); return; }
+    if (points.length < 2) { showNoticeModal('Info', 'Selected posts do not have valid coordinates.'); return; }
     const name = 'Bulk connect';
     fetch('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, points: points }) })
       .then(r => r.json()).then(j => {
         if (j && j.created) {
-          showResultModal({ name: name, length: j.created.reduce((s,c)=>s+(c.total_length||0),0), count: j.count || j.created.length });
+          showResultModal({ name: name, length: j.created.reduce((s, c) => s + (c.total_length || 0), 0), count: j.count || j.created.length });
           clearSelection();
           loadConnections();
         } else if (j && j.error) {
@@ -1255,5 +2414,902 @@ document.addEventListener('DOMContentLoaded', function() {
         }
       }).catch(err => showResultModal({ error: true, message: 'Save failed: ' + err }));
   }
+
+  // --- New Asset Modals ---
+
+  // Voltage Regulator
+  let _vrModal = null;
+  const VR_FIELDS = [
+    { key: 'regulator_id', label: 'ID' },
+    { key: 'from_bus_id', label: 'From Bus' },
+    { key: 'to_bus_id', label: 'To Bus' },
+    { key: 'regulated_bus_id', label: 'Regulated Bus' },
+    { key: 'phase_type', label: 'Phase Type' },
+    { key: 'phasing', label: 'Phasing' },
+    { key: 'kva_rating', label: 'KVA' },
+    { key: 'kv_rating', label: 'KV' },
+    { key: 'target_voltage', label: 'Target V' },
+    { key: 'bandwidth', label: 'Bandwidth' },
+    { key: 'pt_ratio', label: 'PT Ratio' },
+    { key: 'primary_current_rating', label: 'Pri. Current (A)' }
+  ];
+
+  function createVRModal() {
+    if (_vrModal) return _vrModal;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal result-modal">
+        <div class="modal-header">
+          <h3 class="result-modal-title">Voltage Regulators</h3>
+          <button class="modal-close vr-close">✕</button>
+        </div>
+        <div class="modal-body result-modal-body vr-content enhanced-body" style="max-height: 70vh; overflow-y: auto;"></div>
+        <div class="modal-footer">
+          <button class="btn btn-primary vr-ok">Close</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.vr-close').addEventListener('click', () => overlay.style.display = 'none');
+    overlay.querySelector('.vr-ok').addEventListener('click', () => overlay.style.display = 'none');
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+    _vrModal = overlay;
+    return _vrModal;
+  }
+
+  function showVoltageRegulatorModal(data) {
+    const m = createVRModal();
+    const content = m.querySelector('.vr-content');
+    const title = m.querySelector('.result-modal-title');
+    title.textContent = 'Voltage Regulators (' + (data.count || 0) + ')';
+    content.innerHTML = '';
+
+    if (!data.items || data.items.length === 0) {
+      content.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
+    } else {
+      data.items.forEach((item, idx) => {
+        const card = document.createElement('div');
+        card.className = 'info-card';
+        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.regulator_id || ''})</h4></div>`;
+
+        const grid = document.createElement('div');
+        grid.className = 'kv-grid';
+
+        VR_FIELDS.forEach(f => {
+          let val = item[f.key];
+          if (val !== undefined && val !== null && val !== '') {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'kv-item';
+            itemEl.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
+            grid.appendChild(itemEl);
+          }
+        });
+        card.appendChild(grid);
+        content.appendChild(card);
+      });
+    }
+    m.style.display = 'flex';
+  }
+
+  // Shunt Capacitor
+  let _scModal = null;
+  const SC_FIELDS = [
+    { key: 'capacitor_id', label: 'ID' },
+    { key: 'bus_connected_id', label: 'Bus' },
+    { key: 'phase_type', label: 'Phase Type' },
+    { key: 'phasing', label: 'Phasing' },
+    { key: 'voltage_rating_kv', label: 'Voltage (kV)' },
+    { key: 'kvar_rating_a', label: 'KVAR (A)' },
+    { key: 'kvar_rating_b', label: 'KVAR (B)' },
+    { key: 'kvar_rating_c', label: 'KVAR (C)' },
+    { key: 'power_loss_watts', label: 'Power Loss (W)' }
+  ];
+
+  function createSCModal() {
+    if (_scModal) return _scModal;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal result-modal">
+        <div class="modal-header">
+          <h3 class="result-modal-title">Shunt Capacitors</h3>
+          <button class="modal-close sc-close">✕</button>
+        </div>
+        <div class="modal-body result-modal-body sc-content enhanced-body" style="max-height: 70vh; overflow-y: auto;"></div>
+        <div class="modal-footer">
+          <button class="btn btn-primary sc-ok">Close</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.sc-close').addEventListener('click', () => overlay.style.display = 'none');
+    overlay.querySelector('.sc-ok').addEventListener('click', () => overlay.style.display = 'none');
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+    _scModal = overlay;
+    return _scModal;
+  }
+
+  function showShuntCapacitorModal(data) {
+    const m = createSCModal();
+    const content = m.querySelector('.sc-content');
+    const title = m.querySelector('.result-modal-title');
+    title.textContent = 'Shunt Capacitors (' + (data.count || 0) + ')';
+    content.innerHTML = '';
+
+    if (!data.items || data.items.length === 0) {
+      content.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
+    } else {
+      data.items.forEach((item, idx) => {
+        const card = document.createElement('div');
+        card.className = 'info-card';
+        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.capacitor_id || ''})</h4></div>`;
+
+        const grid = document.createElement('div');
+        grid.className = 'kv-grid';
+
+        SC_FIELDS.forEach(f => {
+          let val = item[f.key];
+          if (val !== undefined && val !== null && val !== '') {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'kv-item';
+            itemEl.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
+            grid.appendChild(itemEl);
+          }
+        });
+        card.appendChild(grid);
+        content.appendChild(card);
+      });
+    }
+    m.style.display = 'flex';
+  }
+
+  // Shunt Inductor
+  let _siModal = null;
+  const SI_FIELDS = [
+    { key: 'inductor_id', label: 'ID' },
+    { key: 'bus_connected_id', label: 'Bus' },
+    { key: 'phase_type', label: 'Phase Type' },
+    { key: 'phasing', label: 'Phasing' },
+    { key: 'voltage_rating_kv', label: 'Voltage (kV)' },
+    { key: 'resistance_a', label: 'R (A)' },
+    { key: 'reactance_a', label: 'X (A)' }
+  ];
+
+  function createSIModal() {
+    if (_siModal) return _siModal;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal result-modal">
+        <div class="modal-header">
+          <h3 class="result-modal-title">Shunt Inductors</h3>
+          <button class="modal-close si-close">✕</button>
+        </div>
+        <div class="modal-body result-modal-body si-content enhanced-body" style="max-height: 70vh; overflow-y: auto;"></div>
+        <div class="modal-footer">
+          <button class="btn btn-primary si-ok">Close</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.si-close').addEventListener('click', () => overlay.style.display = 'none');
+    overlay.querySelector('.si-ok').addEventListener('click', () => overlay.style.display = 'none');
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+    _siModal = overlay;
+    return _siModal;
+  }
+
+  function showShuntInductorModal(data) {
+    const m = createSIModal();
+    const content = m.querySelector('.si-content');
+    const title = m.querySelector('.result-modal-title');
+    title.textContent = 'Shunt Inductors (' + (data.count || 0) + ')';
+    content.innerHTML = '';
+
+    if (!data.items || data.items.length === 0) {
+      content.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
+    } else {
+      data.items.forEach((item, idx) => {
+        const card = document.createElement('div');
+        card.className = 'info-card';
+        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.inductor_id || ''})</h4></div>`;
+
+        const grid = document.createElement('div');
+        grid.className = 'kv-grid';
+
+        SI_FIELDS.forEach(f => {
+          let val = item[f.key];
+          if (val !== undefined && val !== null && val !== '') {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'kv-item';
+            itemEl.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
+            grid.appendChild(itemEl);
+          }
+        });
+        card.appendChild(grid);
+        content.appendChild(card);
+      });
+    }
+    m.style.display = 'flex';
+  }
+
+  // Series Inductor
+  let _eriModal = null;
+  const ERI_FIELDS = [
+    { key: 'inductor_id', label: 'ID' },
+    { key: 'from_bus_id', label: 'From Bus' },
+    { key: 'to_bus_id', label: 'To Bus' },
+    { key: 'phase_type', label: 'Phase Type' },
+    { key: 'phasing', label: 'Phasing' },
+    { key: 'voltage_rating_kv', label: 'Voltage (kV)' },
+    { key: 'resistance_a', label: 'R (A)' },
+    { key: 'reactance_a', label: 'X (A)' }
+  ];
+
+  function createERIModal() {
+    if (_eriModal) return _eriModal;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal result-modal">
+        <div class="modal-header">
+          <h3 class="result-modal-title">Series Inductors</h3>
+          <button class="modal-close eri-close">✕</button>
+        </div>
+        <div class="modal-body result-modal-body eri-content enhanced-body" style="max-height: 70vh; overflow-y: auto;"></div>
+        <div class="modal-footer">
+          <button class="btn btn-primary eri-ok">Close</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.eri-close').addEventListener('click', () => overlay.style.display = 'none');
+    overlay.querySelector('.eri-ok').addEventListener('click', () => overlay.style.display = 'none');
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
+    _eriModal = overlay;
+    return _eriModal;
+  }
+
+  function showSeriesInductorModal(data) {
+    const m = createERIModal();
+    const content = m.querySelector('.eri-content');
+    const title = m.querySelector('.result-modal-title');
+    title.textContent = 'Series Inductors (' + (data.count || 0) + ')';
+    content.innerHTML = '';
+
+    if (!data.items || data.items.length === 0) {
+      content.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
+    } else {
+      data.items.forEach((item, idx) => {
+        const card = document.createElement('div');
+        card.className = 'info-card';
+        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.inductor_id || ''})</h4></div>`;
+
+        const grid = document.createElement('div');
+        grid.className = 'kv-grid';
+
+        ERI_FIELDS.forEach(f => {
+          let val = item[f.key];
+          if (val !== undefined && val !== null && val !== '') {
+            const itemEl = document.createElement('div');
+            itemEl.className = 'kv-item';
+            itemEl.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
+            grid.appendChild(itemEl);
+          }
+        });
+        card.appendChild(grid);
+        content.appendChild(card);
+      });
+    }
+    m.style.display = 'flex';
+  }
+
+  // --- Customer Info Modal ---
+  var _customerInfoModal = null;
+  function createCustomerInfoModal() {
+    if (_customerInfoModal) return _customerInfoModal;
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay customer-info-modal-overlay';
+    overlay.setAttribute('aria-label', 'Customer Info');
+    overlay.innerHTML = [
+      '<div class="modal result-modal" style="max-width: 600px; width: 90vw;">',
+      '  <div class="modal-header result-modal-header">',
+      '    <h3 class="result-modal-title">Customer Info</h3>',
+      '    <button class="modal-close customer-info-close" aria-label="Close">✕</button>',
+      '  </div>',
+      '  <div class="modal-body result-modal-body customer-info-body enhanced-body" style="max-height: 70vh; overflow-y: auto; padding: 16px;">',
+      '    <div class="customer-details" style="margin-bottom: 20px;"></div>',
+      '    <h4 style="margin-bottom: 10px; border-bottom: 2px solid #eee; padding-bottom: 5px;">Energy Consumption</h4>',
+      '    <div class="customer-consumption"></div>',
+      '  </div>',
+      '  <div class="modal-footer"><button class="btn result-modal-ok customer-info-ok">Close</button></div>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(overlay);
+    overlay.querySelector('.customer-info-close').addEventListener('click', closeCustomerInfoModal);
+    overlay.querySelector('.customer-info-ok').addEventListener('click', closeCustomerInfoModal);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeCustomerInfoModal(); });
+    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeCustomerInfoModal(); });
+    _customerInfoModal = overlay;
+    return _customerInfoModal;
+  }
+
+  function closeCustomerInfoModal() {
+    if (_customerInfoModal) _customerInfoModal.style.display = 'none';
+  }
+
+  // --- Connections Modal ---
+  let connectionsModalStub = null;
+  function showConnectionsModal(connections, postId) {
+    if (connectionsModalStub) {
+      if (connectionsModalStub.parentNode) document.body.removeChild(connectionsModalStub);
+      connectionsModalStub = null;
+    }
+
+    // Create modal elements
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay connections-modal-overlay';
+    overlay.innerHTML = `
+        <div class="modal connections-modal" style="max-width: 500px; width: 90%;">
+            <div class="modal-header">
+                <h3>Connected Lines for Post #${postId}</h3>
+                <button class="modal-close" aria-label="Close">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="connections-list" style="max-height: 400px; overflow-y: auto; padding-right: 4px;">
+                    ${connections.map(conn => `
+                        <div class="connection-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #eee; gap: 12px;">
+                            <div class="connection-info">
+                                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 2px;">
+                                    ${conn.name || 'Unknown Segment'}
+                                </div>
+                                <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                                    ${conn.type} • ID: ${conn.id}
+                                </div>
+                                <div style="font-size: 0.8rem; color: #666; margin-top: 2px;">
+                                    ${conn.from_bus} → ${conn.to_bus}
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary modal-close-btn">Close</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    connectionsModalStub = overlay;
+    overlay.style.display = 'flex'; // Ensure flex display
+
+    // Handlers
+    const close = () => {
+      overlay.style.display = 'none';
+      if (overlay.parentNode) document.body.removeChild(overlay);
+      connectionsModalStub = null;
+    };
+
+    overlay.querySelector('.modal-close').onclick = close;
+    overlay.querySelector('.modal-close-btn').onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+    // Disconnect handlers
+    overlay.querySelectorAll('.btn-disconnect').forEach(btn => {
+      btn.onclick = function () {
+        const id = this.getAttribute('data-id');
+        showConfirmModal(`Are you sure you want to disconnect ${id}? (This is a simulation)`, { title: 'Disconnect', okText: 'Disconnect', cancelText: 'Cancel' })
+          .then(confirmed => {
+            if (confirmed) {
+              showNoticeModal('Info', `Disconnected ${id} (Mock Action)`);
+              // logical removal from UI could happen here
+              this.closest('.connection-item').style.opacity = '0.5';
+              this.disabled = true;
+              this.textContent = 'Disconnected';
+            }
+          });
+      };
+    });
+  }
+
+  window.showCustomerInfoModal = function (customerId) {
+    if (!customerId) return;
+    var m = createCustomerInfoModal();
+    var detailsDiv = m.querySelector('.customer-details');
+    var consDiv = m.querySelector('.customer-consumption');
+
+    detailsDiv.innerHTML = '<div class="spinner"></div> Loading details...';
+    consDiv.innerHTML = '';
+    m.style.display = 'flex';
+
+    // Fetch Customer Data
+    fetch('/api/customers/' + encodeURIComponent(customerId))
+      .then(function (r) { return r.json(); })
+      .then(function (cData) {
+        if (cData.error) {
+          detailsDiv.innerHTML = '<p style="color:red">Error: ' + cData.error + '</p>';
+          return;
+        }
+
+        var html = '<div class="info-card">';
+        html += '<div class="info-card-header"><h4 class="info-card-title">Account Details</h4></div>';
+        html += '<div class="kv-grid">';
+        html += '<div class="kv-item"><div class="kv-label">Customer Name</div><div class="kv-value">' + (cData.name || '—') + '</div></div>';
+        html += '<div class="kv-item"><div class="kv-label">Customer ID</div><div class="kv-value">' + (cData.customer_id || '—') + '</div></div>';
+        html += '<div class="kv-item"><div class="kv-label">Type</div><div class="kv-value">' + (cData.customer_type || '—') + '</div></div>';
+        html += '<div class="kv-item"><div class="kv-label">Service Voltage</div><div class="kv-value">' + (cData.service_voltage || '—') + '</div></div>';
+        html += '<div class="kv-item"><div class="kv-label">Phase</div><div class="kv-value">' + (cData.phase || '—') + '</div></div>';
+        html += '</div></div>';
+        detailsDiv.innerHTML = html;
+
+        // Fetch Consumption Data
+        fetch('/api/customers/' + encodeURIComponent(customerId) + '/consumption')
+          .then(function (r) { return r.json(); })
+          .then(function (consData) {
+            if (consData.error) {
+              consDiv.innerHTML = '<div class="info-card" style="color:#b91c1c;">Error loading consumption.</div>';
+              return;
+            }
+            if (!consData.items || consData.items.length === 0) {
+              consDiv.innerHTML = '<div class="info-card" style="color:var(--text-secondary); text-align:center;">No consumption records found.</div>';
+              return;
+            }
+
+            var table = '<div class="table-scroll" style="border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden;"><table class="modern-table">';
+            table += '<thead><tr>';
+            table += '<th>Billing Period</th>';
+            table += '<th>Energy (kWh)</th>';
+            table += '<th>Power Factor</th>';
+            table += '</tr></thead><tbody>';
+
+            consData.items.forEach(function (item) {
+              table += '<tr>';
+              table += '<td>' + (item.billing_period || '—') + '</td>';
+              table += '<td>' + (item.kwh_consumed || '—') + '</td>';
+              table += '<td>' + (item.power_factor || '—') + '</td>';
+              table += '</tr>';
+            });
+            table += '</tbody></table></div>';
+            consDiv.innerHTML = table;
+          })
+          .catch(function (e) {
+            consDiv.innerHTML = '<div class="info-card" style="color:#b91c1c;">Failed to load consumption.</div>';
+          });
+      })
+      .catch(function (e) {
+        detailsDiv.innerHTML = '<p style="color:red">Failed to load customer details.</p>';
+      });
+  };
+
+
+  // ═══════════════════════════════════════════════════════
+  // CUSTOMER SEARCH BAR (Top-Right Corner)
+  // ═══════════════════════════════════════════════════════
+
+  // ── 1. Build expandable search icon HTML ──
+  var searchIconHTML = `
+    <div class="expandable-search-wrapper">
+      <button id="search-icon-btn" class="search-icon-btn" title="Search Customer">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor">
+          <path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/>
+        </svg>
+      </button>
+    </div>
+  `;
+
+  var expandedBarHTML = `
+    <div id="search-bar-expanded" class="search-bar-expanded">
+      <div style="position:relative;width:100%;">
+        <input id="customer-search-input" class="top-search-input"
+          type="text" placeholder="Customer ID…"
+          autocomplete="off" spellcheck="false" />
+        <button id="search-clear-btn" class="search-clear-btn" title="Clear Search">✕</button>
+        <div id="customer-search-suggestions" class="customer-search-suggestions"></div>
+      </div>
+    </div>
+  `;
+
+  // Append search icon to the map header (aligned with title on the right)
+  var mapHeader = document.querySelector('.map-header');
+  if (!mapHeader) {
+    // Fallback: create header if it doesn't exist
+    mapHeader = document.createElement('div');
+    mapHeader.className = 'map-header';
+    mapEl.parentElement.insertBefore(mapHeader, mapEl);
+  }
+
+  mapHeader.style.position = 'relative';
+  mapHeader.style.zIndex = '2000';
+
+  var searchWrapper = document.createElement('div');
+  searchWrapper.style.cssText = 'position:absolute;top:0;right:10px;height:100%;display:flex;align-items:center;z-index:1001;';
+  searchWrapper.innerHTML = searchIconHTML;
+  mapHeader.appendChild(searchWrapper);
+
+  // Append expanded bar to header (absolute positioning within header)
+  var expandedBarWrapper = document.createElement('div');
+  expandedBarWrapper.innerHTML = expandedBarHTML;
+  mapHeader.appendChild(expandedBarWrapper);
+
+  // Append route result to body
+  var routeResultWrapper = document.createElement('div');
+  routeResultWrapper.innerHTML = '<div id="route-result" class="route-result" style="display:none;"></div>';
+  document.body.appendChild(routeResultWrapper);
+
+  // ── 1.5. Toggle search bar expansion ──
+  var searchIconBtn = document.getElementById('search-icon-btn');
+  var searchBarExpanded = document.getElementById('search-bar-expanded');
+  var customerSearchInput = document.getElementById('customer-search-input');
+  var customerSearchSuggestions = document.getElementById('customer-search-suggestions');
+  var searchClearBtn = document.getElementById('search-clear-btn');
+
+  function toggleSearchBar(show) {
+    if (show === undefined) {
+      show = !searchBarExpanded.classList.contains('active');
+    }
+
+    if (show) {
+      searchBarExpanded.classList.add('active');
+    } else {
+      searchBarExpanded.classList.remove('active');
+    }
+
+    searchIconBtn.setAttribute('aria-expanded', show);
+
+    if (show) {
+      customerSearchInput.focus();
+      customerSearchInput.select();
+    } else {
+      customerSearchInput.blur();
+      customerSearchSuggestions.classList.remove('active');
+    }
+  }
+
+  searchIconBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleSearchBar();
+  });
+
+  // Keyboard support
+  customerSearchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      toggleSearchBar(false);
+      e.preventDefault();
+    }
+  });
+
+  // Clear search when closing
+  searchBarExpanded.addEventListener('focusout', function (e) {
+    // Only close if focus moved outside the search bar
+    if (!searchBarExpanded.contains(e.relatedTarget)) {
+      // Don't automatically close, let user interact
+    }
+  });
+
+  // ── 1.6. Customer Search functionality ──
+  var customerSearchTimeout = null;
+  var selectedCustomerData = null;
+  var customerSearchHighlight = null;
+
+  // Search customers as user types with loading state
+  customerSearchInput.addEventListener('input', function (e) {
+    clearTimeout(customerSearchTimeout);
+    var query = e.target.value.trim();
+
+    // Toggle clear button
+    if (query.length > 0) {
+      searchClearBtn.classList.add('active');
+    } else {
+      searchClearBtn.classList.remove('active');
+    }
+
+    if (!query || query.length < 1) {
+      customerSearchSuggestions.classList.remove('active');
+      return;
+    }
+
+    // Show loading state
+    customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading">🔍 Searching...</div>';
+    customerSearchSuggestions.classList.add('active');
+
+    customerSearchTimeout = setTimeout(function () {
+      fetch('/api/customers?q=' + encodeURIComponent(query) + '&per_page=5')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.data || data.data.length === 0) {
+            customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-empty">No customers found</div>';
+            customerSearchSuggestions.classList.add('active');
+            return;
+          }
+
+          var html = data.data.map(function (cust, idx) {
+            var name = cust.name || 'N/A';
+            return '<div class="customer-search-item" data-customer-id="' + cust.customer_id + '" tabindex="' + idx + '">' +
+              '<div class="customer-search-item-id">🏢 ' + cust.customer_id + '</div>' +
+              '<div class="customer-search-item-name">' + name + '</div>' +
+              '</div>';
+          }).join('');
+
+          customerSearchSuggestions.innerHTML = html;
+          customerSearchSuggestions.classList.add('active');
+
+          // Add click handlers to suggestions
+          var items = customerSearchSuggestions.querySelectorAll('.customer-search-item');
+          items.forEach(function (item) {
+            item.addEventListener('click', function (e) {
+              e.stopPropagation();
+              var customerId = item.getAttribute('data-customer-id');
+              selectCustomer(customerId);
+            });
+            item.addEventListener('keydown', function (e) {
+              if (e.key === 'Enter') {
+                var customerId = item.getAttribute('data-customer-id');
+                selectCustomer(customerId);
+              }
+            });
+          });
+        })
+        .catch(function (err) {
+          console.error('Customer search error:', err);
+          customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error">⚠️ Error loading customers</div>';
+          customerSearchSuggestions.classList.add('active');
+        });
+    }, 300);
+  });
+
+  // Clear button logic
+  searchClearBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    customerSearchInput.value = '';
+    searchClearBtn.classList.remove('active');
+    customerSearchSuggestions.classList.remove('active');
+    customerSearchInput.focus();
+
+    // Clear highlights and routes
+    if (customerSearchHighlight) {
+      map.removeLayer(customerSearchHighlight);
+      customerSearchHighlight = null;
+    }
+    clearRoute();
+  });
+
+  // Hide suggestions and close search when clicking elsewhere
+  document.addEventListener('click', function (e) {
+    if (!searchBarExpanded.contains(e.target) && e.target !== searchIconBtn && !searchIconBtn.contains(e.target)) {
+      customerSearchSuggestions.classList.remove('active');
+    }
+  });
+
+  function selectCustomer(customerId) {
+    // Show loading state
+    customerSearchInput.value = customerId;
+    customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading" style="padding: 12px; text-align: center; color: var(--text-secondary);">⏳ Locating and calculating route...</div>';
+    customerSearchSuggestions.classList.add('active');
+
+    // Fetch customer location and details
+    fetch('/api/customers/' + encodeURIComponent(customerId) + '/location')
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.found || !data.customer) {
+          customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error" style="padding: 12px; text-align: center; color: #dc2626;">⚠️ Customer not found</div>';
+          setTimeout(function () { customerSearchSuggestions.classList.remove('active'); }, 2000);
+          return;
+        }
+
+        selectedCustomerData = data;
+
+        // Highlight customer location on map if post location exists
+        if (data.connected_post) {
+          // Clear previous highlight
+          if (customerSearchHighlight) {
+            map.removeLayer(customerSearchHighlight);
+          }
+
+          // Add highlight marker
+          var lat = data.connected_post.lat;
+          var lng = data.connected_post.lng;
+
+          customerSearchHighlight = L.circleMarker([lat, lng], {
+            radius: 20,
+            fillColor: '#fbbf24',
+            color: '#f59e0b',
+            weight: 3,
+            opacity: 0.8,
+            fillOpacity: 0.6
+          }).addTo(map);
+
+          // Zoom to customer location
+          map.setView([lat, lng], 17);
+        }
+
+        // AUTO-TRIGGER ROUTE FINDING
+        findRouteToCustomer(customerId).finally(function () {
+          customerSearchSuggestions.classList.remove('active');
+          searchClearBtn.classList.add('active'); // Show clear button
+        });
+      })
+      .catch(function (err) {
+        console.error('Error fetching customer location:', err);
+        customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error" style="padding: 12px; text-align: center; color: #dc2626;">⚠️ Error loading customer location</div>';
+        setTimeout(function () { customerSearchSuggestions.classList.remove('active'); }, 2000);
+      });
+  }
+
+  // ── 2. Route layer ──
+  var routeLayer = L.layerGroup().addTo(map);
+  var _routePolyline = null;
+  var _routeMarkers = [];
+
+  function clearRoute() {
+    routeLayer.clearLayers();
+    _routePolyline = null;
+    _routeMarkers = [];
+    document.getElementById('route-result').style.display = 'none';
+  }
+
+  // ── 3. Auto-trigger route finding when customer selected ──
+  function findRouteToCustomer(custId) {
+    return new Promise(function (resolve, reject) {
+      if (!custId) {
+        console.error('No customer ID provided');
+        resolve();
+        return;
+      }
+
+      if (!navigator.geolocation) {
+        console.error('Geolocation is not supported by your browser.');
+        resolve();
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          var lat = pos.coords.latitude;
+          var lng = pos.coords.longitude;
+
+          var url = '/api/path?customer_id=' + encodeURIComponent(custId)
+            + '&user_lat=' + lat + '&user_lng=' + lng;
+
+          fetch(url)
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+              if (!data.found) {
+                console.warn('No path found for customer ' + custId);
+              } else {
+                drawRoute(data, lat, lng);
+              }
+              resolve();
+            })
+            .catch(function (err) {
+              console.error('Route finding error:', err);
+              resolve();
+            });
+        },
+        function (err) {
+          console.error('Geolocation error:', err);
+          resolve();
+        },
+        { enableHighAccuracy: true, timeout: 15000 }
+      );
+    });
+  }
+
+  // ── 4. Status helper ──
+  function showRouteStatus(type, msg) {
+    var el = document.getElementById('route-status');
+    if (!el) return;
+    el.style.display = 'block';
+    el.className = 'route-status route-status--' + type;
+    el.innerHTML = msg;
+  }
+
+  // ── 5. Draw the route on the map ──
+  function drawRoute(data, userLat, userLng) {
+    clearRoute();
+
+    var path = data.path || [];
+    if (path.length < 1) {
+      showRouteStatus('error', 'Path returned no coordinates.');
+      return;
+    }
+
+    var latlngs = path.map(function (n) { return [n.lat, n.lng]; });
+
+    // Add user location as first point
+    var userIcon = L.divIcon({
+      className: '',
+      html: '<div class="route-user-dot"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8]
+    });
+    var userMarker = L.marker([userLat, userLng], { icon: userIcon })
+      .bindPopup('<strong>📍 Your Location</strong>');
+    routeLayer.addLayer(userMarker);
+    _routeMarkers.push(userMarker);
+
+    // Destination marker
+    var destPost = data.destination_post;
+    var destIcon = L.divIcon({
+      className: '',
+      html: '<div class="route-dest-flag">🏁</div>',
+      iconSize: [28, 28],
+      iconAnchor: [10, 24]
+    });
+    var destMarker = L.marker([destPost.lat, destPost.lng], { icon: destIcon })
+      .bindPopup('<strong>🏁 ' + (destPost.name || 'Destination Post') + '</strong><br>Customer: <code>' + data.customer_id + '</code><br>' + (data.customer_name || ''));
+    routeLayer.addLayer(destMarker);
+    _routeMarkers.push(destMarker);
+
+    // Animated polyline — user location + all path posts
+    var fullLine = [[userLat, userLng]].concat(latlngs);
+    var polyline = L.polyline(fullLine, {
+      color: '#06b6d4',
+      weight: 4,
+      opacity: 0.9,
+      dashArray: '10 8',
+      lineJoin: 'round'
+    }).addTo(routeLayer);
+    _routePolyline = polyline;
+
+    // Fit map to route
+    var bounds = L.latLngBounds([[userLat, userLng]].concat(latlngs));
+    map.fitBounds(bounds, { padding: [50, 50] });
+
+    // Show result card
+    renderRouteResult(data, path);
+  }
+
+  // ── 6. Result card ──
+  function renderRouteResult(data, path) {
+    var el = document.getElementById('route-result');
+    el.classList.add('route-result-visible');
+    el.style.display = 'block';
+
+    var distKm = (data.total_distance_m / 1000).toFixed(2);
+    var distText = data.total_distance_m < 1000
+      ? Math.round(data.total_distance_m) + ' m'
+      : distKm + ' km';
+
+    // Format duration
+    var durationText = '';
+    if (data.duration_sec) {
+      var mins = Math.floor(data.duration_sec / 60);
+      var hrs = Math.floor(mins / 60);
+      if (hrs > 0) {
+        durationText = hrs + ' hr ' + (mins % 60) + ' min';
+      } else {
+        durationText = (mins || 1) + ' min';
+      }
+    }
+
+    el.innerHTML =
+      '<div class="route-summary">' +
+      '<div class="route-summary-item"><span class="route-summary-num">' + durationText + '</span><span class="route-summary-label">Est. Time</span></div>' +
+      '<div class="route-summary-sep">|</div>' +
+      '<div class="route-summary-item"><span class="route-summary-num">' + distText + '</span><span class="route-summary-label">Road Distance</span></div>' +
+      '</div>' +
+      '<div class="route-customer-info">' +
+      '<div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:2px;">Destination</div>' +
+      '<strong>' + (data.customer_name || data.customer_id) + '</strong>' +
+      '<div style="font-size:0.75rem;color:var(--text-secondary); margin-top:1px;">' + (data.destination_post.name || 'Post #' + data.destination_post.id) + '</div>' +
+      '</div>' +
+      '<button class="route-cancel-btn">✕ Cancel Route</button>';
+  }
+
+  // Handle dinamically added Cancel Route button
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.classList.contains('route-cancel-btn')) {
+      clearRoute();
+      // Also clear search state
+      customerSearchInput.value = '';
+      searchClearBtn.classList.remove('active');
+      if (customerSearchHighlight) {
+        map.removeLayer(customerSearchHighlight);
+        customerSearchHighlight = null;
+      }
+    }
+  });
 
 });

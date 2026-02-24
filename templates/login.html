@@ -3,212 +3,350 @@
 {% block title %}Leyeco III - Sign In{% endblock %}
 
 {% block content %}
-  <style>
-    .login-card { max-width: 360px; }
-    .role-selector { display: flex; gap: 0; margin-bottom: 24px; background: #f3f4f6; border-radius: 6px; padding: 4px; }
-    .role-btn { flex: 1; padding: 10px 12px; border: none; background: transparent; color: var(--text-secondary); font-weight: 500; font-size: 0.95rem; cursor: pointer; border-radius: 4px; transition: all 0.2s ease; }
-    .role-btn.active { background: var(--surface); color: var(--text-primary); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .role-btn:hover { background: rgba(255,255,255,0.5); }
-    
-    .form-group { margin-bottom: 16px; }
-    .form-label { display: block; font-size: 0.95rem; font-weight: 500; color: var(--text-primary); margin-bottom: 6px; }
-    .form-input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.95rem; font-family: inherit; transition: border-color 0.2s ease; box-sizing: border-box; }
-    .form-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
-    
-    .password-group { position: relative; }
-    .password-toggle-btn { position: absolute; right: 10px; top: 36px; background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1rem; padding: 4px 8px; }
-    .password-toggle-btn:hover { color: var(--text-primary); }
-    
-    .error-text { color: #dc2626; font-size: 0.9rem; margin-top: 4px; }
-    .error-banner { background: #fee2e2; color: #991b1b; padding: 12px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 0.9rem; }
-    
-    .submit-btn { width: 100%; padding: 10px 12px; background: var(--primary); color: white; border: none; border-radius: 6px; font-weight: 600; font-size: 0.95rem; cursor: pointer; transition: background 0.2s ease, opacity 0.2s ease; }
-    .submit-btn:hover:not(:disabled) { background: var(--primary-dark); }
-    .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-    
-    .footer-text { margin-top: 24px; text-align: center; color: var(--text-secondary); font-size: 0.85rem; line-height: 1.4; }
-    
-    body.dark-theme .role-selector { background: rgba(255,255,255,0.08); }
-    body.dark-theme .role-btn.active { background: var(--surface); color: var(--text-primary); }
-  </style>
+<style>
+  .login-card {
+    max-width: 380px;
+  }
 
-  {% if error %}
-    <div class="error-banner" role="alert">{{ error }}</div>
-  {% endif %}
+  .role-selector {
+    display: flex;
+    gap: 0;
+    margin-bottom: 28px;
+    background: var(--background);
+    border-radius: 10px;
+    padding: 4px;
+    border: 1px solid var(--border);
+  }
 
-  <form method="post" action="/login" id="login-form" novalidate>
-    <!-- Role Selector -->
-    <div class="role-selector" role="radiogroup" aria-label="Account type">
-      <button type="button" class="role-btn active" data-role="admin" aria-pressed="true">Admin</button>
-      <button type="button" class="role-btn" data-role="viewer" aria-pressed="false">Viewer</button>
-    </div>
+  .role-btn {
+    flex: 1;
+    padding: 10px 14px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    letter-spacing: 0.01em;
+  }
 
-    <!-- Username Field (common to both roles) -->
-    <div class="form-group">
-      <label for="username" class="form-label">Username</label>
-      <input 
-        id="username" 
-        name="username" 
-        type="text" 
-        class="form-input" 
-        required 
-        autocomplete="username"
-        placeholder="Enter your username"
-      />
-    </div>
+  .role-btn.active {
+    background: var(--primary);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+  }
 
-    <!-- Admin: Password Row -->
-    <div class="form-group password-group" id="password-row">
-      <label for="password" class="form-label">Password</label>
-      <input 
-        id="password" 
-        name="password" 
-        type="password" 
-        class="form-input" 
-        autocomplete="current-password"
-        placeholder="Enter your password"
-      />
-      <button type="button" class="password-toggle-btn" id="toggle-password" aria-label="Show password" title="Show password">
-        <span aria-hidden="true">👁️</span>
-      </button>
-    </div>
+  .role-btn:not(.active):hover {
+    background: rgba(37, 99, 235, 0.08);
+    color: var(--primary);
+  }
 
-    <!-- Viewer: Access Code Row -->
-    <div class="form-group" id="access-row" hidden>
-      <label for="access_code" class="form-label">Access Code</label>
-      <input 
-        id="access_code" 
-        name="access_code" 
-        type="text" 
-        class="form-input" 
-        autocomplete="one-time-code"
-        placeholder="Enter your access code"
-      />
-    </div>
+  .form-group {
+    margin-bottom: 18px;
+  }
 
-    <!-- Submit Button -->
-    <button type="submit" class="submit-btn" id="submit-btn">Sign in</button>
+  .form-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 7px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
 
-    <!-- Footer -->
-    <div class="footer-text">
-      Internal Leyeco III system.<br>Accounts are managed by administrators.
-    </div>
-  </form>
+  .form-input {
+    width: 100%;
+    padding: 11px 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+    background: var(--surface-raised, #f8fafc);
+    color: var(--text-primary);
+  }
 
-  {% block scripts %}
-    <script>
-      (function(){
-        const form = document.getElementById('login-form');
-        const roleButtons = document.querySelectorAll('.role-btn');
-        const passwordRow = document.getElementById('password-row');
-        const accessRow = document.getElementById('access-row');
-        const passwordInput = document.getElementById('password');
-        const accessInput = document.getElementById('access_code');
-        const usernameInput = document.getElementById('username');
-        const submitBtn = document.getElementById('submit-btn');
-        const toggleBtn = document.getElementById('toggle-password');
-        
-        let currentRole = 'admin';
+  .form-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    background: var(--surface);
+  }
 
-        // Role selector logic
-        roleButtons.forEach(btn => {
-          btn.addEventListener('click', function(e){
-            e.preventDefault();
-            const role = this.dataset.role;
-            
-            // Update button states
-            roleButtons.forEach(b => {
-              b.classList.toggle('active', b.dataset.role === role);
-              b.setAttribute('aria-pressed', b.dataset.role === role ? 'true' : 'false');
-            });
+  .form-input::placeholder {
+    color: var(--text-muted, #94a3b8);
+  }
 
-            // Clear inputs when switching roles
-            usernameInput.value = '';
-            passwordInput.value = '';
-            accessInput.value = '';
-            passwordInput.type = 'password';
-            toggleBtn.textContent = '👁️';
-            toggleBtn.setAttribute('aria-label', 'Show password');
+  .password-group {
+    position: relative;
+  }
 
-            // Update form visibility
-            if (role === 'admin') {
-              passwordRow.hidden = false;
-              accessRow.hidden = true;
-              passwordInput.required = true;
-              accessInput.required = false;
-              submitBtn.textContent = 'Sign in';
-              usernameInput.focus();
-            } else {
-              passwordRow.hidden = true;
-              accessRow.hidden = false;
-              passwordInput.required = false;
-              accessInput.required = true;
-              submitBtn.textContent = 'Access Dashboard';
-              usernameInput.focus();
-            }
+  .password-toggle-btn {
+    position: absolute;
+    right: 12px;
+    top: 36px;
+    background: none;
+    border: none;
+    color: var(--text-muted, #94a3b8);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s;
+  }
 
-            currentRole = role;
-            // Hidden input for role
-            let roleInput = form.querySelector('input[name="login_type"]');
-            if (!roleInput) {
-              roleInput = document.createElement('input');
-              roleInput.type = 'hidden';
-              roleInput.name = 'login_type';
-              form.appendChild(roleInput);
-            }
-            roleInput.value = role;
-          });
+  .password-toggle-btn:hover {
+    color: var(--primary);
+  }
+
+  .password-toggle-btn svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .error-text {
+    color: var(--danger, #dc2626);
+    font-size: 0.85rem;
+    margin-top: 4px;
+    font-weight: 500;
+  }
+
+  .error-banner {
+    background: var(--danger-light, #fee2e2);
+    color: #991b1b;
+    padding: 12px 16px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    border-left: 3px solid var(--danger, #dc2626);
+  }
+
+  .submit-btn {
+    width: 100%;
+    padding: 12px 14px;
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+    letter-spacing: 0.01em;
+  }
+
+  .submit-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--primary-dark), #1a3a8f);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(37, 99, 235, 0.35);
+  }
+
+  .submit-btn:active:not(:disabled) {
+    transform: translateY(0);
+  }
+
+  .submit-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .footer-text {
+    margin-top: 28px;
+    text-align: center;
+    color: var(--text-muted, #94a3b8);
+    font-size: 0.82rem;
+    line-height: 1.5;
+  }
+
+  body.dark-theme .role-selector {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--border);
+  }
+
+  body.dark-theme .role-btn.active {
+    background: var(--primary);
+    color: #fff;
+  }
+
+  body.dark-theme .form-input {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--border);
+  }
+
+  body.dark-theme .form-input:focus {
+    background: rgba(255, 255, 255, 0.08);
+  }
+</style>
+
+{% if error %}
+<div class="error-banner" role="alert">{{ error }}</div>
+{% endif %}
+
+<form method="post" action="/login" id="login-form" novalidate>
+  <!-- Role Selector -->
+  <div class="role-selector" role="radiogroup" aria-label="Account type">
+    <button type="button" class="role-btn active" data-role="admin" aria-pressed="true">Admin</button>
+    <button type="button" class="role-btn" data-role="viewer" aria-pressed="false">Viewer</button>
+  </div>
+
+  <!-- Username Field (common to both roles) -->
+  <div class="form-group">
+    <label for="username" class="form-label">Username</label>
+    <input id="username" name="username" type="text" class="form-input" required autocomplete="username"
+      placeholder="Enter your username" />
+  </div>
+
+  <!-- Admin: Password Row -->
+  <div class="form-group password-group" id="password-row">
+    <label for="password" class="form-label">Password</label>
+    <input id="password" name="password" type="password" class="form-input" autocomplete="current-password"
+      placeholder="Enter your password" />
+    <button type="button" class="password-toggle-btn" id="toggle-password" aria-label="Show password"
+      title="Show password">
+      <span aria-hidden="true">👁️</span>
+    </button>
+  </div>
+
+  <!-- Viewer: Access Code Row -->
+  <div class="form-group" id="access-row" hidden>
+    <label for="access_code" class="form-label">Access Code</label>
+    <input id="access_code" name="access_code" type="text" class="form-input" autocomplete="one-time-code"
+      placeholder="Enter your access code" />
+  </div>
+
+  <!-- Submit Button -->
+  <button type="submit" class="submit-btn" id="submit-btn">Sign in</button>
+
+  <!-- Footer -->
+  <div class="footer-text">
+    Internal Leyeco III system.<br>Accounts are managed by administrators.
+  </div>
+</form>
+
+{% block scripts %}
+<script>
+  (function () {
+    const form = document.getElementById('login-form');
+    const roleButtons = document.querySelectorAll('.role-btn');
+    const passwordRow = document.getElementById('password-row');
+    const accessRow = document.getElementById('access-row');
+    const passwordInput = document.getElementById('password');
+    const accessInput = document.getElementById('access_code');
+    const usernameInput = document.getElementById('username');
+    const submitBtn = document.getElementById('submit-btn');
+    const toggleBtn = document.getElementById('toggle-password');
+
+    let currentRole = 'admin';
+
+    // Role selector logic
+    roleButtons.forEach(btn => {
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        const role = this.dataset.role;
+
+        // Update button states
+        roleButtons.forEach(b => {
+          b.classList.toggle('active', b.dataset.role === role);
+          b.setAttribute('aria-pressed', b.dataset.role === role ? 'true' : 'false');
         });
 
-        // Password visibility toggle
-        toggleBtn.addEventListener('click', function(e){
-          e.preventDefault();
-          const isPassword = passwordInput.type === 'password';
-          passwordInput.type = isPassword ? 'text' : 'password';
-          toggleBtn.textContent = isPassword ? '🙈' : '👁️';
-          toggleBtn.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
-          toggleBtn.setAttribute('title', isPassword ? 'Hide password' : 'Show password');
-        });
+        // Clear inputs when switching roles
+        usernameInput.value = '';
+        passwordInput.value = '';
+        accessInput.value = '';
+        passwordInput.type = 'password';
+        toggleBtn.textContent = '👁️';
+        toggleBtn.setAttribute('aria-label', 'Show password');
 
-        // Form submission
-        form.addEventListener('submit', function(e){
-          const username = usernameInput.value.trim();
-          
-          if (!username) {
-            e.preventDefault();
-            usernameInput.focus();
-            return;
-          }
+        // Update form visibility
+        if (role === 'admin') {
+          passwordRow.hidden = false;
+          accessRow.hidden = true;
+          passwordInput.required = true;
+          accessInput.required = false;
+          submitBtn.textContent = 'Sign in';
+          usernameInput.focus();
+        } else {
+          passwordRow.hidden = true;
+          accessRow.hidden = false;
+          passwordInput.required = false;
+          accessInput.required = true;
+          submitBtn.textContent = 'Access Dashboard';
+          usernameInput.focus();
+        }
 
-          if (currentRole === 'admin') {
-            if (!passwordInput.value) {
-              e.preventDefault();
-              passwordInput.focus();
-              return;
-            }
-          } else {
-            if (!accessInput.value.trim()) {
-              e.preventDefault();
-              accessInput.focus();
-              return;
-            }
-          }
+        currentRole = role;
+        // Hidden input for role
+        let roleInput = form.querySelector('input[name="login_type"]');
+        if (!roleInput) {
+          roleInput = document.createElement('input');
+          roleInput.type = 'hidden';
+          roleInput.name = 'login_type';
+          form.appendChild(roleInput);
+        }
+        roleInput.value = role;
+      });
+    });
 
-          // Disable button during submission
-          submitBtn.disabled = true;
-          submitBtn.textContent = currentRole === 'admin' ? 'Signing in...' : 'Accessing...';
-        });
+    // Password visibility toggle
+    toggleBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      const isPassword = passwordInput.type === 'password';
+      passwordInput.type = isPassword ? 'text' : 'password';
+      document.getElementById('eye-show').style.display = isPassword ? 'none' : 'block';
+      document.getElementById('eye-hide').style.display = isPassword ? 'block' : 'none';
+      toggleBtn.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+      toggleBtn.setAttribute('title', isPassword ? 'Hide password' : 'Show password');
+    });
 
-        // Initialize
+    // Form submission
+    form.addEventListener('submit', function (e) {
+      const username = usernameInput.value.trim();
+
+      if (!username) {
+        e.preventDefault();
         usernameInput.focus();
-        
-        // Set initial hidden role input
-        let roleInput = document.createElement('input');
-        roleInput.type = 'hidden';
-        roleInput.name = 'login_type';
-        roleInput.value = 'admin';
-        form.appendChild(roleInput);
-      })();
-    </script>
-  {% endblock %}
+        return;
+      }
+
+      if (currentRole === 'admin') {
+        if (!passwordInput.value) {
+          e.preventDefault();
+          passwordInput.focus();
+          return;
+        }
+      } else {
+        if (!accessInput.value.trim()) {
+          e.preventDefault();
+          accessInput.focus();
+          return;
+        }
+      }
+
+      // Disable button during submission
+      submitBtn.disabled = true;
+      submitBtn.textContent = currentRole === 'admin' ? 'Signing in...' : 'Accessing...';
+    });
+
+    // Initialize
+    usernameInput.focus();
+
+    // Set initial hidden role input
+    let roleInput = document.createElement('input');
+    roleInput.type = 'hidden';
+    roleInput.name = 'login_type';
+    roleInput.value = 'admin';
+    form.appendChild(roleInput);
+  })();
+</script>
+{% endblock %}
 {% endblock %}

@@ -1,244 +1,973 @@
 {% extends "base.html" %}
-
 {% block title %}Resources - Leyeco{% endblock %}
 
 {% block head %}
-  <link rel="stylesheet" href="/static/css/styles.css">
+<link rel="stylesheet" href="/static/css/styles.css">
+<style>
+  /* ── Page Header ── */
+  .res-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 2rem;
+  }
+
+  .res-header-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, .3);
+  }
+
+  .res-header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+  }
+
+  .res-header p {
+    margin: 2px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+
+  /* ── Sub-Tab Bar ── */
+  .res-tab-bar {
+    display: flex;
+    gap: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 5px;
+    margin-bottom: 1.75rem;
+    overflow-x: auto;
+  }
+
+  .res-tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 18px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    font-size: 0.87rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    transition: all 0.18s ease;
+  }
+
+  .res-tab-btn:hover {
+    background: rgba(59, 130, 246, .07);
+    color: var(--primary);
+  }
+
+  .res-tab-btn.active {
+    background: var(--primary);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(59, 130, 246, .3);
+  }
+
+  .res-tab-btn .tab-count {
+    background: rgba(255, 255, 255, .25);
+    color: inherit;
+    padding: 1px 7px;
+    border-radius: 99px;
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+
+  .res-tab-btn:not(.active) .tab-count {
+    background: var(--border);
+    color: var(--text-secondary);
+  }
+
+  /* ── Tab Panels ── */
+  .res-panel {
+    display: none;
+  }
+
+  .res-panel.active {
+    display: block;
+    animation: fadeIn .2s ease;
+  }
+
+  /* ── Panel Section Title ── */
+  .panel-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+  }
+
+  /* ── Upload Card Grid ── */
+  .upload-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+
+  /* ── Upload Card ── */
+  .upload-card {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    transition: all .18s ease;
+  }
+
+  .upload-card:hover {
+    background: #fff;
+    border-color: var(--primary);
+    box-shadow: 0 4px 16px rgba(59, 130, 246, .1);
+  }
+
+  .upload-card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .upload-card-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+
+  .upload-card-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+  }
+
+  .upload-card-desc {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.45;
+    margin-bottom: .75rem;
+    flex-grow: 1;
+  }
+
+  .upload-card-desc code {
+    background: #e2e8f0;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: #1e293b;
+  }
+
+  .upload-card-history {
+    margin-bottom: 8px;
+  }
+
+  .history-badge-inner {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.78rem;
+    color: #059669;
+    background: #d1fae5;
+    padding: 3px 8px;
+    border-radius: 5px;
+  }
+
+  /* file input */
+  .file-input {
+    width: 100%;
+    margin-bottom: .6rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+  }
+
+  .file-input::file-selector-button {
+    border: 1px solid var(--border);
+    padding: 5px 10px;
+    border-radius: 5px;
+    background: #fff;
+    cursor: pointer;
+    margin-right: 8px;
+    font-size: 0.82rem;
+  }
+
+  /* action row */
+  .upload-card-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .btn-upload-main {
+    flex: 1;
+    padding: 8px 0;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+
+  .btn-upload-main:hover {
+    background: var(--primary-dark);
+  }
+
+  .btn-upload-main:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+  }
+
+  /* sample CSV button */
+  .btn-sample {
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: transparent;
+    color: var(--primary);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .btn-sample:hover {
+    border-color: var(--primary);
+    background: rgba(59, 130, 246, .05);
+  }
+
+  .status-msg {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    min-height: 1em;
+    color: var(--text-secondary);
+  }
+
+  /* ── Export Panel ── */
+  .export-master-card {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 1.4rem;
+    border: 1px solid #a7f3d0;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #ecfdf5, #f0fdf4);
+    margin-bottom: 1.25rem;
+    transition: all .2s;
+  }
+
+  .export-master-card:hover {
+    box-shadow: 0 4px 14px rgba(4, 120, 87, .1);
+    border-color: #6ee7b7;
+  }
+
+  .export-master-info {
+    flex: 1;
+  }
+
+  .btn-export-master {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 22px;
+    background: linear-gradient(135deg, #059669, #047857);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.92rem;
+    border-radius: 8px;
+    border: none;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: all .2s;
+    box-shadow: 0 2px 8px rgba(5, 150, 105, .25);
+  }
+
+  .btn-export-master:hover {
+    background: linear-gradient(135deg, #047857, #065f46);
+    transform: translateY(-1px);
+  }
+
+  /* ── Danger Zone ── */
+  .danger-card {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 12px;
+    padding: 1.25rem;
+  }
+
+  .danger-title {
+    color: #b91c1c;
+    font-size: 1rem;
+    font-weight: 700;
+    margin: 0 0 8px;
+  }
+
+  .danger-desc {
+    color: #7f1d1d;
+    font-size: 0.88rem;
+    margin: 0 0 1rem;
+    line-height: 1.5;
+  }
+
+  .btn-danger-main {
+    padding: 9px 22px;
+    background: #dc2626;
+    color: #fff;
+    border: none;
+    border-radius: 7px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .15s;
+  }
+
+  .btn-danger-main:hover {
+    background: #b91c1c;
+  }
+</style>
+{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <ol class="breadcrumbs__list">
+    <li class="breadcrumbs__item">
+      <a href="/" class="breadcrumbs__link">Home</a>
+    </li>
+    <li class="breadcrumbs__item breadcrumbs__item--active" aria-current="page">Resources</li>
+  </ol>
+</nav>
 {% endblock %}
 
 {% block content %}
-  <h1>Resources</h1>
-  <p style="color:var(--text-secondary); margin-top:-6px;">
-    Upload post + connection files and download processed outputs for verification and GIS.
-  </p>
+<div class="res-header">
+  <div class="res-header-icon">
+    <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round"
+        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+    </svg>
+  </div>
+  <div>
+    <h1>Resources</h1>
+    <p>Import GIS data, download sample templates, and export processed datasets.</p>
+  </div>
+</div>
 
-  <div class="dashboard-grid dashboard-grid--data">
-    <div class="dashboard-card">
-      <h2>⬆️ Upload</h2>
+<!-- Sub-tab bar -->
+<div class="res-tab-bar" role="tablist">
+  <button class="res-tab-btn active" data-tab="tab-infrastructure" role="tab">
+    🗼 Infrastructure <span class="tab-count">4</span>
+  </button>
+  <button class="res-tab-btn" data-tab="tab-customers" role="tab">
+    👥 Customer Data <span class="tab-count">2</span>
+  </button>
+  <button class="res-tab-btn" data-tab="tab-assets" role="tab">
+    ⚙️ Assets <span class="tab-count">4</span>
+  </button>
+  <button class="res-tab-btn" data-tab="tab-export" role="tab">
+    📤 Export &amp; Danger
+  </button>
+</div>
 
-      <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px;">
-        <form id="upload-posts-form" style="padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
-          <div style="font-weight:700; margin-bottom: 8px;">Import Posts (CSV/Excel)</div>
-          <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 10px;">
-            Required columns: <code>Pole Number</code>, <code>Latitude</code>, <code>Longitude</code> (plus any infrastructure fields you have).
-          </div>
-          <input type="file" id="upload-posts-file" accept=".csv,.xlsx,.xls" style="width:100%; margin-bottom: 10px;">
-          <button type="submit" class="btn" id="upload-posts-btn">Upload</button>
-          <div id="upload-posts-status" style="margin-top:10px; font-size:0.95rem; color:var(--text-secondary);"></div>
-        </form>
+<!-- ═══ Panel 1: Infrastructure ═══ -->
+<div id="tab-infrastructure" class="res-panel active">
+  <div class="panel-title">Core Network Infrastructure</div>
+  <div class="upload-grid">
 
-        <form id="upload-connections-form" style="padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
-          <div style="font-weight:700; margin-bottom: 8px;">Import Connections (CSV/Excel)</div>
-          <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 10px;">
-            Required columns: <code>From_ID</code>, <code>To_ID</code>, <code>Connection_Type</code>
-          </div>
-          <input type="file" id="upload-connections-file" accept=".csv,.xlsx,.xls" style="width:100%; margin-bottom: 10px;">
-          <button type="submit" class="btn" id="upload-connections-btn">Upload</button>
-          <div id="upload-connections-status" style="margin-top:10px; font-size:0.95rem; color:var(--text-secondary);"></div>
-        </form>
-      <div style="margin-top:12px;">
-        <form id="upload-transformers-form" style="padding: 12px; border: 1px solid var(--border); border-radius: 8px; max-width:640px;">
-          <div style="font-weight:700; margin-bottom: 8px;">Import Distribution Transformers (example2.csv)</div>
-          <div style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 10px;">Example file: <code>example2.csv</code>. Required: <code>Distribution Transformer ID</code> and <code>From Primary Bus ID</code>.</div>
-          <input type="file" id="upload-transformers-file" accept=".csv,.xlsx,.xls" style="width:100%; margin-bottom: 10px;">
-          <button type="submit" class="btn" id="upload-transformers-btn">Upload Transformer CSV</button>
-          <div id="upload-transformers-status" style="margin-top:10px; font-size:0.95rem; color:var(--text-secondary);"></div>
-        </form>
+    <!-- Posts -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#dbeafe;color:#1d4ed8;">📍</div>
+        <span class="upload-card-title">Posts / Poles</span>
       </div>
-    </div>
-
-    <div class="dashboard-card">
-      <h2>⬇️ Export</h2>
-      <div style="display:grid; gap: 10px;">
-        <div style="padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
-          <div style="font-weight:700; margin-bottom: 6px;">CSV exports</div>
-          <div style="display:flex; gap: 10px; flex-wrap: wrap;">
-            <a class="btn" href="/api/export/posts.csv">Download Posts CSV</a>
-            <a class="btn" href="/api/export/line-connections.csv">Download Line Connections CSV</a>
-          </div>
-        </div>
-
-        <div style="padding: 12px; border: 1px solid var(--border); border-radius: 8px;">
-          <div style="font-weight:700; margin-bottom: 6px;">GeoJSON</div>
-          <div style="color:var(--text-secondary); font-size:0.95rem; margin-bottom: 10px;">
-            Map-renderable network geometry generated from DB topology + stored coordinates only.
-          </div>
-          <div style="display:flex; gap: 10px; flex-wrap: wrap;">
-            <a class="btn" href="/api/network-geometry.geojson">Download Network Geometry (GeoJSON)</a>
-            <a class="btn btn-secondary" href="/api/network-geometry" target="_blank" rel="noopener">View Network Geometry JSON</a>
-          </div>
-        </div>
+      <div class="upload-card-desc">
+        Primary poles and structures. Required columns: <code>Pole Number</code>, <code>Lat</code>, <code>Lon</code>,
+        <code>Status</code>.
       </div>
-    </div>
-
-    <div class="dashboard-card">
-      <h2>🗑️ Data Management</h2>
-      <div style="padding: 12px; border: 1px solid #fee2e2; border-radius: 8px; background: #fef2f2;">
-        <div style="font-weight:700; margin-bottom: 6px; color: #991b1b;">Delete All Data</div>
-        <div style="font-size: 0.95rem; color: #7f1d1d; margin-bottom: 12px;">
-          Permanently delete all posts, connections, network lines, and raw data. IDs will reset to 1. <strong>This cannot be undone.</strong>
-        </div>
-        <button id="delete-all-btn" class="btn" style="background-color: #dc2626; border-color: #dc2626; color: white;">
-          🗑️ Delete All Data
+      <div class="upload-card-history">
+        <div id="history-posts" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-posts-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-posts-btn" data-form="posts">⬆ Upload</button>
+        <button class="btn-sample" data-sample="posts" title="Download sample CSV">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
         </button>
-        <div id="delete-status" style="margin-top:10px; font-size:0.95rem; color:var(--text-secondary);"></div>
       </div>
+      <div id="upload-posts-status" class="status-msg"></div>
+    </div>
+
+    <!-- Transformers -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#fef9c3;color:#a16207;">⚡</div>
+        <span class="upload-card-title">Transformers</span>
+      </div>
+      <div class="upload-card-desc">
+        Distribution transformers. Required: <code>From Primary Bus ID</code>, <code>To Secondary Bus ID</code>,
+        <code>kVA Rating</code>.
+      </div>
+      <div class="upload-card-history">
+        <div id="history-transformers" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-transformers-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-transformers-btn" data-form="transformers">⬆ Upload</button>
+        <button class="btn-sample" data-sample="transformers">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
+        </button>
+      </div>
+      <div id="upload-transformers-status" class="status-msg"></div>
+    </div>
+
+    <!-- Secondary Lines -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#ede9fe;color:#6d28d9;">〰️</div>
+        <span class="upload-card-title">Secondary Lines</span>
+      </div>
+      <div class="upload-card-desc">
+        Low voltage line segments. Required: <code>From Bus ID</code>, <code>To Bus ID</code>, <code>Length</code>,
+        <code>Phasing</code>.
+      </div>
+      <div class="upload-card-history">
+        <div id="history-secondary_lines" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-secondary-lines-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-secondary-lines-btn" data-form="secondary-lines">⬆ Upload</button>
+        <button class="btn-sample" data-sample="secondary-lines">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
+        </button>
+      </div>
+      <div id="upload-secondary-lines-status" class="status-msg"></div>
+    </div>
+
+    <!-- Service Drops -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#fce7f3;color:#be185d;">🏠</div>
+        <span class="upload-card-title">Service Drops</span>
+      </div>
+      <div class="upload-card-desc">
+        Customer connections. Required: <code>From Bus ID</code>, <code>To Customer ID</code>, <code>Phasing</code>.
+      </div>
+      <div class="upload-card-history">
+        <div id="history-service_drops" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-service-drops-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-service-drops-btn" data-form="service-drops">⬆ Upload</button>
+        <button class="btn-sample" data-sample="service-drops">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
+        </button>
+      </div>
+      <div id="upload-service-drops-status" class="status-msg"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ Panel 2: Customer Data ═══ -->
+<div id="tab-customers" class="res-panel">
+  <div class="panel-title">Customer &amp; Billing Data</div>
+  <div class="upload-grid">
+
+    <!-- Customers -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#d1fae5;color:#065f46;">👥</div>
+        <span class="upload-card-title">Customers</span>
+      </div>
+      <div class="upload-card-desc">
+        Customer master list. Required: <code>Customer ID</code>, <code>Name</code>, <code>Customer Type</code>,
+        <code>Phase</code>.
+      </div>
+      <div class="upload-card-history">
+        <div id="history-customers" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-customers-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-customers-btn" data-form="customers">⬆ Upload</button>
+        <button class="btn-sample" data-sample="customers">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
+        </button>
+      </div>
+      <div id="upload-customers-status" class="status-msg"></div>
+    </div>
+
+    <!-- Energy Consumption -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#fef3c7;color:#b45309;">⚡</div>
+        <span class="upload-card-title">Energy Consumption</span>
+      </div>
+      <div class="upload-card-desc">
+        Billing / kWh records. Required: <code>Customer ID</code>, <code>Billing Period</code>,
+        <code>kWh Consumed</code>.
+      </div>
+      <div class="upload-card-history">
+        <div id="history-energy_consumption" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-energy-consumption-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-energy-consumption-btn" data-form="energy-consumption">⬆
+          Upload</button>
+        <button class="btn-sample" data-sample="energy-consumption">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
+        </button>
+      </div>
+      <div id="upload-energy-consumption-status" class="status-msg"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ Panel 3: Assets ═══ -->
+<div id="tab-assets" class="res-panel">
+  <div class="panel-title">Network Assets &amp; Equipment</div>
+  <div class="upload-grid">
+
+    <!-- Voltage Regulators -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#e0f2fe;color:#0369a1;">⚙️</div>
+        <span class="upload-card-title">Voltage Regulators</span>
+      </div>
+      <div class="upload-card-desc">
+        Required: <code>From Bus ID</code>, <code>To Bus ID</code>, <code>Regulated Bus ID</code>,
+        <code>kVA Rating</code>.
+      </div>
+      <div class="upload-card-history">
+        <div id="history-voltage_regulators" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-voltage-regulators-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-voltage-regulators-btn" data-form="voltage-regulators">⬆
+          Upload</button>
+        <button class="btn-sample" data-sample="voltage-regulators">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
+        </button>
+      </div>
+      <div id="upload-voltage-regulators-status" class="status-msg"></div>
+    </div>
+
+    <!-- Shunt Capacitors -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#ffedd5;color:#c2410c;">🔋</div>
+        <span class="upload-card-title">Shunt Capacitors</span>
+      </div>
+      <div class="upload-card-desc">
+        Required: <code>Bus Connected ID</code>, <code>kVAR Rating</code>, <code>Voltage Level</code>.
+      </div>
+      <div class="upload-card-history">
+        <div id="history-shunt_capacitors" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-shunt-capacitors-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-shunt-capacitors-btn" data-form="shunt-capacitors">⬆ Upload</button>
+        <button class="btn-sample" data-sample="shunt-capacitors">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
+        </button>
+      </div>
+      <div id="upload-shunt-capacitors-status" class="status-msg"></div>
+    </div>
+
+    <!-- Shunt Inductors -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#f0fdf4;color:#15803d;">🔌</div>
+        <span class="upload-card-title">Shunt Inductors</span>
+      </div>
+      <div class="upload-card-desc">
+        Required: <code>Bus Connected ID</code>, <code>kVAR Rating</code>, <code>Voltage Level</code>.
+      </div>
+      <div class="upload-card-history">
+        <div id="history-shunt_inductors" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-shunt-inductors-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-shunt-inductors-btn" data-form="shunt-inductors">⬆ Upload</button>
+        <button class="btn-sample" data-sample="shunt-inductors">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
+        </button>
+      </div>
+      <div id="upload-shunt-inductors-status" class="status-msg"></div>
+    </div>
+
+    <!-- Series Inductors -->
+    <div class="upload-card">
+      <div class="upload-card-head">
+        <div class="upload-card-icon" style="background:#fdf4ff;color:#7e22ce;">🔗</div>
+        <span class="upload-card-title">Series Inductors</span>
+      </div>
+      <div class="upload-card-desc">
+        Required: <code>From Bus ID</code>, <code>To Bus ID</code>, <code>Inductance (mH)</code>.
+      </div>
+      <div class="upload-card-history">
+        <div id="history-series_inductors" style="display:none;"></div>
+      </div>
+      <input type="file" id="upload-series-inductors-file" accept=".csv,.xlsx,.xls" class="file-input">
+      <div class="upload-card-actions">
+        <button class="btn-upload-main" id="upload-series-inductors-btn" data-form="series-inductors">⬆ Upload</button>
+        <button class="btn-sample" data-sample="series-inductors">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round"
+              d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3" />
+          </svg>
+          Sample
+        </button>
+      </div>
+      <div id="upload-series-inductors-status" class="status-msg"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ Panel 4: Export & Danger ═══ -->
+<div id="tab-export" class="res-panel">
+  <div class="panel-title">Export Data</div>
+  <div class="export-master-card">
+    <div class="export-master-info">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+        <span style="font-size:1.3rem;">📊</span>
+        <strong style="font-size:1.05rem;color:var(--text-primary);">Master CSV Export</strong>
+      </div>
+      <p style="margin:0;font-size:0.87rem;color:var(--text-secondary);line-height:1.5;">
+        Download a single comprehensive CSV combining Posts, Distribution Lines, Transformers,
+        Secondary Lines, Service Drops, Customers, and Energy Consumption — fully flattened.
+      </p>
+    </div>
+    <a class="btn-export-master" href="/api/export/master.csv">
+      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+      Export Master CSV
+    </a>
+  </div>
+
+  <div class="panel-title" style="margin-top:1.5rem;">Danger Zone</div>
+  <div class="danger-card">
+    <p class="danger-title">⚠️ Delete All Data</p>
+    <p class="danger-desc">
+      Permanently deletes all posts, transformers, lines, service drops, customers, and related records.
+      <strong>IDs will reset to 1. This cannot be undone.</strong>
+    </p>
+    <button id="delete-all-btn" class="btn-danger-main">Delete All Data</button>
+    <div id="delete-status" style="margin-top:10px;font-size:0.9rem;font-weight:600;"></div>
+  </div>
+</div>
+
+<!-- Custom Delete All Confirmation Modal -->
+<div id="delete-all-modal" class="modal-overlay" style="display: none;">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 style="color:var(--danger);">⚠️ Confirm Deletion</h3>
+      <button class="modal-close" id="delete-modal-close" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-weight: 700; color: var(--text-primary); margin-bottom: 12px;">Are you absolutely sure you want to
+        delete ALL data?</p>
+      <p>This will permanently remove all Infrastructure, Customers, and Asset records. This action <b>cannot be
+          undone</b> and all IDs will reset to 1.</p>
+    </div>
+    <div class="modal-footer">
+      <button id="delete-all-cancel" class="btn btn-secondary"
+        style="background:#e8e8e8;color:#333;padding:10px 20px;border-radius:6px;font-weight:600;border:none;cursor:pointer;">Cancel</button>
+      <button id="delete-all-confirm" class="btn btn-danger"
+        style="background:var(--danger);color:#fff;padding:10px 20px;border-radius:6px;font-weight:600;border:none;cursor:pointer;">Delete
+        All Data</button>
     </div>
   </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
+  /* Wire sidebar sub-links → tab panels */
+  function activateResTab(tabId) {
+    document.querySelectorAll('.res-tab-btn').forEach(function (b) { b.classList.remove('active'); });
+    document.querySelectorAll('.res-panel').forEach(function (p) { p.classList.remove('active'); });
+    var panel = document.getElementById(tabId);
+    if (panel) panel.classList.add('active');
+    var btn = document.querySelector('.res-tab-btn[data-tab="' + tabId + '"]');
+    if (btn) btn.classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   document.addEventListener('DOMContentLoaded', function () {
-    function bindUpload(formId, fileId, btnId, statusId, url, onSuccess) {
-      const form = document.getElementById(formId);
-      const file = document.getElementById(fileId);
-      const btn = document.getElementById(btnId);
-      const status = document.getElementById(statusId);
-      if (!form || !file || !btn || !status) return;
-
-      form.addEventListener('submit', function(e) {
+    /* Sidebar sub-link clicks */
+    document.querySelectorAll('.res-nav-sub').forEach(function (link) {
+      link.addEventListener('click', function (e) {
         e.preventDefault();
-        if (!file.files || !file.files.length) {
-          alert('Select a file first.');
-          return;
-        }
-
-        const fd = new FormData();
-        fd.append('file', file.files[0]);
-        btn.disabled = true;
-        status.textContent = 'Uploading...';
-
-        fetch(url, { method: 'POST', body: fd })
-          .then(r => r.json())
-          .then(j => {
-            btn.disabled = false;
-            if (j && j.error) {
-              status.textContent = 'Error: ' + j.error;
-              return;
-            }
-            status.textContent = j && j.message ? j.message : 'Upload complete.';
-            try { if (onSuccess) onSuccess(j); } catch (e) {}
-          })
-          .catch(err => {
-            btn.disabled = false;
-            status.textContent = 'Upload failed: ' + (err && err.message ? err.message : String(err));
-          });
+        activateResTab(link.dataset.tab);
       });
-    }
+    });
 
-    bindUpload(
-      'upload-posts-form',
-      'upload-posts-file',
-      'upload-posts-btn',
-      'upload-posts-status',
-      '/api/posts/bulk-import',
-      function(result) {
-        // After successful import, reload map data
-        console.log('Posts imported:', result);
-        if (window.location.pathname === '/map' || window.location.pathname === '/') {
-          // If on map page, try to refresh the map
-          try {
-            if (typeof window.reloadMapData === 'function') {
-              window.reloadMapData();
+    /* Hash on load, e.g. /resources#tab-assets */
+    var hash = window.location.hash.replace('#', '');
+    if (hash && document.getElementById(hash)) activateResTab(hash);
+  });
+
+
+  document.addEventListener('DOMContentLoaded', function () {
+
+    /* ── Sub-Tab switching ── */
+    document.querySelectorAll('.res-tab-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('.res-tab-btn').forEach(function (b) { b.classList.remove('active'); });
+        document.querySelectorAll('.res-panel').forEach(function (p) { p.classList.remove('active'); });
+        btn.classList.add('active');
+        var target = document.getElementById(btn.dataset.tab);
+        if (target) target.classList.add('active');
+      });
+    });
+
+    /* ── Sample CSV data ── */
+    var SAMPLES = {
+      'posts': {
+        filename: 'sample_posts.csv',
+        data: 'Pole Number,Lat,Lon,Status,Feeder,Phasing\nP0000000001,11.2398,124.7570,Active,Feeder 1,ABC\nP0000000002,11.2412,124.7583,Active,Feeder 1,A\nP0000000003,11.2425,124.7595,Building/Ongoing,Feeder 2,BC\n'
+      },
+      'transformers': {
+        filename: 'sample_transformers.csv',
+        data: 'From Primary Bus ID,To Secondary Bus ID,kVA Rating,Primary Voltage (kV),Secondary Voltage (kV),Primary Phasing,Secondary Phasing,Installation Type,Connection Type\nP0000000001-T1,P0000000001-S1,25,13.2,0.24,ABC,ABC,Overhead,WYE-WYE\nP0000000002-T1,P0000000002-S1,10,13.2,0.24,A,A,Overhead,DELTA-WYE\n'
+      },
+      'secondary-lines': {
+        filename: 'sample_secondary_lines.csv',
+        data: 'From Bus ID,To Bus ID,Length (m),Phasing,Conductor Type,Conductor Size\nP0000000001-S1,P0000000001-S2,45.5,ABC,ACSR,3/0\nP0000000001-S2,P0000000001-S3,30.2,ABC,ACSR,3/0\n'
+      },
+      'service-drops': {
+        filename: 'sample_service_drops.csv',
+        data: 'From Bus ID,To Customer ID,Phasing,Wire Type,Length (m)\nP0000000001-S2,CUST-0001,A,Cu,12.5\nP0000000001-S2,CUST-0002,B,Cu,14.0\n'
+      },
+      'customers': {
+        filename: 'sample_customers.csv',
+        data: 'Customer ID,Name,Customer Type,Service Voltage,Phase\nCUST-0001,Juan Dela Cruz,Residential,240V,A\nCUST-0002,Maria Santos,Residential,240V,B\nCUST-0003,Leyeco Office,Commercial,240V,ABC\n'
+      },
+      'energy-consumption': {
+        filename: 'sample_energy_consumption.csv',
+        data: 'Customer ID,Billing Period,kWh Consumed,Power Factor\nCUST-0001,2024-01,120.5,0.95\nCUST-0001,2024-02,135.0,0.94\nCUST-0002,2024-01,98.2,0.92\n'
+      },
+      'voltage-regulators': {
+        filename: 'sample_voltage_regulators.csv',
+        data: 'From Bus ID,To Bus ID,Regulated Bus ID,kVA Rating,Voltage Level (kV),Bandwidth (%),Phasing\nP0000000010-T1,P0000000010-T2,P0000000010-REG,167,13.2,2.0,ABC\n'
+      },
+      'shunt-capacitors': {
+        filename: 'sample_shunt_capacitors.csv',
+        data: 'Bus Connected ID,kVAR Rating,Voltage Level (kV),Phasing,Status\nP0000000020-S1,150,0.24,ABC,Active\n'
+      },
+      'shunt-inductors': {
+        filename: 'sample_shunt_inductors.csv',
+        data: 'Bus Connected ID,kVAR Rating,Voltage Level (kV),Phasing,Status\nP0000000030-S1,100,0.24,ABC,Active\n'
+      },
+      'series-inductors': {
+        filename: 'sample_series_inductors.csv',
+        data: 'From Bus ID,To Bus ID,Inductance (mH),Resistance (Ohm),Phasing\nP0000000040-S1,P0000000040-S2,5.5,0.12,ABC\n'
+      }
+    };
+
+    document.querySelectorAll('.btn-sample').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var key = btn.dataset.sample;
+        var s = SAMPLES[key];
+        if (!s) return;
+        var blob = new Blob([s.data], { type: 'text/csv' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url; a.download = s.filename; a.click();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      });
+    });
+
+    /* ── Upload bindings ── */
+    var UPLOAD_MAP = {
+      'posts': { file: 'upload-posts-file', btn: 'upload-posts-btn', status: 'upload-posts-status', url: '/api/posts/bulk-import' },
+      'transformers': { file: 'upload-transformers-file', btn: 'upload-transformers-btn', status: 'upload-transformers-status', url: '/api/transformers/bulk-import' },
+      'secondary-lines': { file: 'upload-secondary-lines-file', btn: 'upload-secondary-lines-btn', status: 'upload-secondary-lines-status', url: '/api/secondary-lines/bulk-import' },
+      'service-drops': { file: 'upload-service-drops-file', btn: 'upload-service-drops-btn', status: 'upload-service-drops-status', url: '/api/secondary-service-drops/bulk-import' },
+      'customers': { file: 'upload-customers-file', btn: 'upload-customers-btn', status: 'upload-customers-status', url: '/api/customers/bulk-import' },
+      'energy-consumption': { file: 'upload-energy-consumption-file', btn: 'upload-energy-consumption-btn', status: 'upload-energy-consumption-status', url: '/api/energy-consumption/bulk-import' },
+      'voltage-regulators': { file: 'upload-voltage-regulators-file', btn: 'upload-voltage-regulators-btn', status: 'upload-voltage-regulators-status', url: '/api/voltage-regulators/bulk-import' },
+      'shunt-capacitors': { file: 'upload-shunt-capacitors-file', btn: 'upload-shunt-capacitors-btn', status: 'upload-shunt-capacitors-status', url: '/api/shunt-capacitors/bulk-import' },
+      'shunt-inductors': { file: 'upload-shunt-inductors-file', btn: 'upload-shunt-inductors-btn', status: 'upload-shunt-inductors-status', url: '/api/shunt-inductors/bulk-import' },
+      'series-inductors': { file: 'upload-series-inductors-file', btn: 'upload-series-inductors-btn', status: 'upload-series-inductors-status', url: '/api/series-inductors/bulk-import' }
+    };
+
+    function doUpload(key) {
+      var cfg = UPLOAD_MAP[key];
+      var fileEl = document.getElementById(cfg.file);
+      var btnEl = document.getElementById(cfg.btn);
+      var statEl = document.getElementById(cfg.status);
+      if (!fileEl || !btnEl || !statEl) return;
+      if (!fileEl.files || !fileEl.files.length) { alert('Please select a file first.'); return; }
+
+      var fd = new FormData();
+      fd.append('file', fileEl.files[0]);
+      btnEl.disabled = true;
+      statEl.style.color = 'var(--primary)';
+      statEl.textContent = 'Uploading…';
+
+      fetch(cfg.url, { method: 'POST', body: fd })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          btnEl.disabled = false;
+          if (j && j.error) {
+            statEl.textContent = '❌ ' + j.error;
+            statEl.style.color = '#dc2626';
+          } else {
+            statEl.textContent = '✅ ' + (j && j.message ? j.message : 'Upload complete.');
+            statEl.style.color = '#059669';
+            fetchHistory();
+            if (key === 'posts') {
+              setTimeout(function () {
+                if (confirm('Posts imported successfully. Go to Map?')) window.location.href = '/';
+              }, 500);
             }
-          } catch (e) {
-            console.warn('Could not reload map:', e);
           }
-        } else {
-          // Show message and optionally redirect to map
-          setTimeout(function() {
-            alert('✅ Data imported successfully! Redirecting to map...');
-            window.location.href = '/';
-          }, 500);
-        }
-      }
-    );
-
-    bindUpload(
-      'upload-connections-form',
-      'upload-connections-file',
-      'upload-connections-btn',
-      'upload-connections-status',
-      '/api/connections/bulk-import'
-    );
-
-    bindUpload(
-      'upload-lines-form',
-      'upload-lines-file',
-      'upload-lines-btn',
-      'upload-lines-status',
-      '/api/distribution-lines/bulk-import',
-      function(result) {
-        console.log('Distribution lines imported:', result);
-        setTimeout(function() {
-          alert('✅ Distribution lines imported. Redirecting to dashboard...');
-          window.location.href = '/dashboard';
-        }, 400);
-      }
-    );
-
-    bindUpload(
-      'upload-transformers-form',
-      'upload-transformers-file',
-      'upload-transformers-btn',
-      'upload-transformers-status',
-      '/api/transformers/bulk-import',
-      function(result) {
-        console.log('Transformers imported:', result);
-        alert('✅ Transformer import complete: ' + (result.message || (result.created + ' created, ' + result.updated + ' updated')));
-      }
-    );
-
-    // Delete all data button handler
-    const deleteBtn = document.getElementById('delete-all-btn');
-    const deleteStatus = document.getElementById('delete-status');
-    if (deleteBtn && deleteStatus) {
-      deleteBtn.addEventListener('click', function() {
-        if (!confirm('⚠️ DELETE ALL DATA?\n\nThis will permanently delete:\n- All posts/poles\n- All connections\n- All network lines\n- All raw coordinates\n\nIDs will reset to 1. This cannot be undone!\n\nOK to confirm?')) {
-          return;
-        }
-        
-        deleteBtn.disabled = true;
-        deleteStatus.textContent = 'Processing...';
-        deleteStatus.style.color = 'var(--text-secondary)';
-
-        fetch('/api/data/delete-all', { 
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
         })
-          .then(r => {
-            if (!r.ok) {
-              return r.json().then(j => {
-                throw new Error(j.message || j.error || 'Server error');
-              });
-            }
-            return r.json();
-          })
-          .then(result => {
-            deleteBtn.disabled = false;
+        .catch(function (err) {
+          btnEl.disabled = false;
+          statEl.textContent = '❌ Failed: ' + (err && err.message ? err.message : String(err));
+          statEl.style.color = '#dc2626';
+        });
+    }
+
+    document.querySelectorAll('.btn-upload-main').forEach(function (btn) {
+      btn.addEventListener('click', function () { doUpload(btn.dataset.form); });
+    });
+
+    /* ── Upload history badges ── */
+    function fetchHistory() {
+      fetch('/api/data/upload-history').then(function (r) { return r.json(); }).then(function (data) {
+        if (!data || data.error) return;
+        var map = {
+          'history-posts': data.posts,
+          'history-transformers': data.transformers,
+          'history-secondary_lines': data.secondary_lines,
+          'history-service_drops': data.service_drops,
+          'history-customers': data.customers,
+          'history-energy_consumption': data.energy_consumption,
+          'history-voltage_regulators': data.voltage_regulators,
+          'history-shunt_capacitors': data.shunt_capacitors,
+          'history-shunt_inductors': data.shunt_inductors,
+          'history-series_inductors': data.series_inductors
+        };
+        Object.keys(map).forEach(function (id) {
+          var el = document.getElementById(id);
+          if (!el) return;
+          var h = map[id];
+          if (h) {
+            el.innerHTML = '<div class="history-badge-inner">✅ <strong>' + h.filename + '</strong><span style="color:#6b7280;margin-left:4px;">' + new Date(h.upload_date).toLocaleDateString() + '</span></div>';
+            el.style.display = 'block';
+          } else {
+            el.style.display = 'none';
+          }
+        });
+      }).catch(function () { });
+    }
+    fetchHistory();
+
+    /* ── Delete All ── */
+    const delBtn = document.getElementById('delete-all-btn');
+    const delStat = document.getElementById('delete-status');
+    const delModal = document.getElementById('delete-all-modal');
+    const delConfirm = document.getElementById('delete-all-confirm');
+    const delCancel = document.getElementById('delete-all-cancel');
+    const delClose = document.getElementById('delete-modal-close');
+
+    if (delBtn && delModal) {
+      delBtn.addEventListener('click', function () {
+        delModal.style.display = 'flex';
+      });
+
+      const closeModal = () => { delModal.style.display = 'none'; };
+
+      delCancel.addEventListener('click', closeModal);
+      delClose.addEventListener('click', closeModal);
+      delModal.addEventListener('click', function (e) {
+        if (e.target === delModal) closeModal();
+      });
+
+      delConfirm.addEventListener('click', function () {
+        closeModal();
+        delBtn.disabled = true;
+        delStat.textContent = 'Deleting…'; delStat.style.color = '#b91c1c';
+        fetch('/api/data/delete-all', { method: 'POST' }).then(function (r) { return r.json(); })
+          .then(function (result) {
+            delBtn.disabled = false;
             if (result.result === 'success') {
-              deleteStatus.textContent = '✅ ' + result.message;
-              deleteStatus.style.color = '#065f46';
-              console.log('Delete successful - ID reset status:', result.id_reset_status);
-              // Clear map if accessible
-              try {
-                if (window.clearAllMapLayers) window.clearAllMapLayers();
-              } catch (e) {}
+              delStat.textContent = '✅ All data deleted.'; delStat.style.color = '#059669';
+              fetchHistory();
             } else {
-              deleteStatus.textContent = '❌ ' + (result.message || result.error || 'Unknown error');
-              deleteStatus.style.color = '#991b1b';
+              delStat.textContent = '❌ Error: ' + (result.message || 'Unknown');
+              delStat.style.color = '#dc2626';
             }
-          })
-          .catch(err => {
-            deleteBtn.disabled = false;
-            deleteStatus.textContent = '❌ ' + err.message;
-            deleteStatus.style.color = '#991b1b';
-            console.error('Delete error:', err);
+          }).catch(function (err) {
+            delBtn.disabled = false;
+            delStat.textContent = '❌ Error: ' + err.message; delStat.style.color = '#dc2626';
           });
       });
     }
+
   });
 </script>
 {% endblock %}
-

@@ -80,7 +80,7 @@ def import_connections_from_csv(csv_file='connections.csv'):
                         # Commit every 100 rows to avoid memory issues
                         if imported % 100 == 0:
                             db.session.commit()
-                            print(f"  ✓ Processed {imported} connections...")
+                            print(f"  Processed {imported} connections...")
                     
                     except Exception as e:
                         print(f"❌ Row {row_num}: {str(e)}")
