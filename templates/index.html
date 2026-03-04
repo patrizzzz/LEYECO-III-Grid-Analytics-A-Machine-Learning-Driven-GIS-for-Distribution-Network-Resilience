@@ -4,41 +4,6 @@
 
 {% block head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
-<style>
-  .map-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 12px;
-  }
-
-  .map-header h1 {
-    margin: 0;
-  }
-
-  #delete-data-btn {
-    background-color: #dc2626;
-    border-color: #dc2626;
-    color: white;
-    padding: 8px 16px;
-    border-radius: 6px;
-    border: 1px solid #dc2626;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 0.95rem;
-  }
-
-  #delete-data-btn:hover {
-    background-color: #b91c1c;
-    border-color: #b91c1c;
-  }
-
-  #delete-data-btn:disabled {
-    background-color: #fecaca;
-    border-color: #fecaca;
-    cursor: not-allowed;
-  }
-</style>
 {% endblock %}
 
 {% block breadcrumb %}
@@ -54,7 +19,9 @@
 
 {% block content %}
 <div class="map-header">
-  <h1>🗺️ Interactive Electrical Post Map</h1>
+  <h1>Electrical Network Map</h1>
+  <div class="map-actions" id="map-actions">
+  </div>
 </div>
 <div id="network-geometry-hint"
   style="display: none; margin-bottom: 8px; padding: 10px 14px; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; font-size: 0.9rem; color: #92400e;">

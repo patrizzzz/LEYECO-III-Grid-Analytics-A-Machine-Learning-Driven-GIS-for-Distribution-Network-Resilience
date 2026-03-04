@@ -194,6 +194,44 @@ class BusPostMapping(db.Model):
         return f"<BusPostMapping bus_id={self.bus_id!r} -> post_id={self.post_id}>"
 
 
+# --- Bus Nodes: physical poles with GPS coordinates (Step 1 upload) ---
+class BusNode(db.Model):
+    """
+    Each row represents one electrical bus on the network.
+    The pole_number links to the physical Post where this bus is located.
+    The lat/lng are cached from the Post for faster spatial queries.
+    """
+    __tablename__ = 'bus_node'
+
+    id              = db.Column(db.Integer, primary_key=True)
+    bus_id          = db.Column(db.String(128), unique=True, nullable=False, index=True)
+    pole_number     = db.Column(db.String(128), index=True) # ID of the physical Post
+    bus_description = db.Column(db.String(128))   # e.g. "Primary Line-Overhead"
+    bus_type        = db.Column(db.String(64))     # "Primary Line-Overhead", "Distribution Transformer", "Secondary Line"
+    nominal_voltage = db.Column(db.Float)          # kV
+    feeder          = db.Column(db.String(64), index=True)
+    lat             = db.Column(db.Float)          # Cached GPS latitude of the physical pole
+    lng             = db.Column(db.Float)          # Cached GPS longitude of the physical pole
+    created_at      = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<BusNode {self.bus_id!r} on Pole {self.pole_number!r}>"
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'bus_id': self.bus_id,
+            'pole_number': self.pole_number,
+            'bus_description': self.bus_description,
+            'bus_type': self.bus_type,
+            'nominal_voltage': self.nominal_voltage,
+            'feeder': self.feeder,
+            'lat': self.lat,
+            'lng': self.lng,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 # --- Distribution Line Segments: electrical line data with technical specifications ---
 class DistributionLineSegment(db.Model):
     """
@@ -319,6 +357,7 @@ class LineConnection(db.Model):
     connection_type = db.Column(db.String(32), nullable=False)  # "Primary_to_Primary", "Primary_to_Transformer", etc.
     feeder = db.Column(db.String(64), index=True)  # Feeder ID (e.g., "F6")
     circuit = db.Column(db.String(64))  # Circuit designation (e.g., "3 Phase")
+    phasing = db.Column(db.String(32))  # Phasing (e.g., "ABCN")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     __table_args__ = (
@@ -336,6 +375,7 @@ class LineConnection(db.Model):
             'connection_type': self.connection_type,
             'feeder': self.feeder,
             'circuit': self.circuit,
+            'phasing': self.phasing,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -399,7 +439,7 @@ class DistributionTransformer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     transformer_id = db.Column(db.String(128), nullable=False, index=True)  # Distribution Transformer ID
     from_primary_bus_id = db.Column(db.String(64), nullable=False, index=True)  # From Primary Bus ID (links to Post)
-    to_secondary_bus_id = db.Column(db.String(64))  # To Secondary Bus ID
+    to_secondary_bus_id = db.Column(db.String(64), index=True)  # To Secondary Bus ID
     primary_phasing = db.Column(db.String(32))
     secondary_phasing = db.Column(db.String(32))
     installation_type = db.Column(db.String(64))  # e.g. Pole-mounted
@@ -453,7 +493,7 @@ class SecondaryServiceDrop(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     service_drop_id = db.Column(db.String(128), index=True) # Secondary Customer Service Drop ID
     from_bus_id = db.Column(db.String(64), index=True)      # From Bus ID
-    to_customer_id = db.Column(db.String(64))               # To Customer ID
+    to_customer_id = db.Column(db.String(64), index=True)               # To Customer ID
     phasing = db.Column(db.String(10))
     installation_type = db.Column(db.String(64))
     length_meters_1 = db.Column(db.Float)                   # Length-1 (meters)
@@ -594,6 +634,8 @@ class Customer(db.Model):
     customer_type = db.Column(db.String(64))
     service_voltage = db.Column(db.String(32))
     phase = db.Column(db.String(32))
+    lat = db.Column(db.Float)
+    lng = db.Column(db.Float)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -604,6 +646,8 @@ class Customer(db.Model):
             'customer_type': self.customer_type,
             'service_voltage': self.service_voltage,
             'phase': self.phase,
+            'lat': self.lat,
+            'lng': self.lng,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 

@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from extensions import db, migrate
 from models import (
-    Post, Meter, LatLongData, BusPostMapping, 
+    Post, Meter, LatLongData, BusPostMapping, BusNode,
     DistributionLineSegment, SecondaryLineSegment, 
     DistributionTransformer, SecondaryServiceDrop, 
     UploadHistory, VoltageRegulator, 
@@ -23,7 +23,8 @@ from utils.csv_importers import (import_posts_from_csv, import_transformers_from
                                 import_secondary_lines_from_csv, import_service_drops_from_csv,
                                 import_voltage_regulators_from_csv, import_shunt_capacitors_from_csv,
                                 import_shunt_inductors_from_csv, import_series_inductors_from_csv,
-                                import_customers_from_csv, import_energy_consumption_from_csv)
+                                import_customers_from_csv, import_energy_consumption_from_csv,
+                                import_bus_nodes_from_csv, import_primary_lines_from_csv)
 
 api_bp = Blueprint('api', __name__)
 
@@ -187,14 +188,23 @@ def api_post_connections(post_id):
 
         # Collect all bus IDs associated with this post
         buses = set()
+        if p.pole_number:
+            buses.add(p.pole_number)
+            try:
+                # Add 'P' prefix variant if not already there
+                if not str(p.pole_number).startswith('P'):
+                    buses.add(f"P{str(p.pole_number).zfill(8)}")
+            except: pass
+
         if p.primary_bus_id: buses.add(p.primary_bus_id)
         if p.sec_bus_id: buses.add(p.sec_bus_id)
         if p.transformer_bus_id: buses.add(p.transformer_bus_id)
         
-        # Also interpret pole number as a potential bus ID (common in some datasets)
-        if p.pole_number:
-            buses.add(p.pole_number)
-            buses.add(f"P{p.pole_number}")
+        # 2. Find any BusNodes that point to this pole
+        from models import BusNode
+        bns = BusNode.query.filter_by(pole_number=p.pole_number).all()
+        for bn in bns:
+            buses.add(bn.bus_id)
 
         if not buses: return jsonify([]), 200
         
@@ -242,48 +252,93 @@ def api_post_connections(post_id):
         # Return empty list on error to avoid breaking UI
 @api_bp.route('/posts/<int:post_id>/service-drops', methods=['GET'])
 def api_post_service_drops(post_id):
+    """
+    Symmetric reverse trace: Post -> [Buses] -> Transformers -> [Secondary BFS] -> Service Drops
+    """
     try:
-        from models import Post, DistributionTransformer, SecondaryLineSegment, SecondaryServiceDrop
+        from models import Post, DistributionTransformer, SecondaryLineSegment, SecondaryServiceDrop, BusNode
         p = Post.query.get(post_id)
         if not p: return jsonify({'count': 0, 'service_drops': []}), 404
 
-        primary_bus_id = p.primary_bus_id or p.pole_number
-        if not primary_bus_id:
-            return jsonify({'count': 0, 'service_drops': []}), 200
+        # 1. Collect all "root" buses associated with this pole
+        root_buses = set()
+        if p.pole_number: root_buses.add(p.pole_number)
+        if p.primary_bus_id: root_buses.add(p.primary_bus_id)
+        if p.sec_bus_id: root_buses.add(p.sec_bus_id)
+        if p.transformer_bus_id: root_buses.add(p.transformer_bus_id)
+        
+        # Also find any BusNodes that point to this pole
+        bns = BusNode.query.filter_by(pole_number=p.pole_number).all()
+        for bn in bns:
+            root_buses.add(bn.bus_id)
 
-        # Reproduce exact logic from main.js map popup (Secondary Service Drop button)
-        transformers = DistributionTransformer.query.filter_by(from_primary_bus_id=primary_bus_id).all()
-        if not transformers:
-            return jsonify({'count': 0, 'service_drops': []}), 200
+        # 2. Find any transformers connected to these root buses
+        transformers = []
+        for b_id in root_buses:
+            candidates = DistributionTransformer.query.filter(
+                DistributionTransformer.from_primary_bus_id == b_id
+            ).all()
+            transformers.extend(candidates)
 
-        transformer = transformers[0]
-        secondary_bus_id = transformer.to_secondary_bus_id
+        # 3. BFS downstream from each transformer's secondary bus
+        all_drops = {}
+        visited_sec_buses = set()
+        
+        for tx in transformers:
+            sec_start = tx.to_secondary_bus_id
+            if not sec_start or sec_start in visited_sec_buses:
+                continue
+                
+            queue = [sec_start]
+            visited_sec_buses.add(sec_start)
+            
+            while queue:
+                curr = queue.pop(0)
+                
+                # A. Check for service drops at this bus
+                drops = SecondaryServiceDrop.query.filter_by(from_bus_id=curr).all()
+                for d in drops:
+                    all_drops[d.id] = d
+                
+                # B. Continue BFS through secondary lines
+                lines = SecondaryLineSegment.query.filter(
+                    (SecondaryLineSegment.from_bus_id == curr) |
+                    (SecondaryLineSegment.to_bus_id == curr)
+                ).all()
+                
+                for line in lines:
+                    nxt = line.from_bus_id if line.to_bus_id == curr else line.to_bus_id
+                    if nxt and nxt not in visited_sec_buses:
+                        visited_sec_buses.add(nxt)
+                        queue.append(nxt)
 
-        if not secondary_bus_id:
-            return jsonify({'count': 0, 'service_drops': []}), 200
+        # 4. Direct check & Secondary endpoint check
+        # Some service drops might be linked directly to a pole's own bus ID 
+        # (skipping the transformer/secondary line hop in the data model)
+        # OR linked to a bus ID that matches the pole number (to_bus_id of a secondary segment)
+        for b_id in root_buses:
+            # Service drops directly from this bus
+            direct_drops = SecondaryServiceDrop.query.filter_by(from_bus_id=b_id).all()
+            for d in direct_drops:
+                all_drops[d.id] = d
+            
+            # Also find secondary lines that end at this 'pole bus'
+            # and look for drops from their starting bus
+            terminating_lines = SecondaryLineSegment.query.filter_by(to_bus_id=b_id).all()
+            for tl in terminating_lines:
+                if tl.from_bus_id:
+                    tl_drops = SecondaryServiceDrop.query.filter_by(from_bus_id=tl.from_bus_id).all()
+                    for d in tl_drops:
+                        all_drops[d.id] = d
 
-        lines = SecondaryLineSegment.query.filter(
-            (SecondaryLineSegment.from_bus_id == secondary_bus_id) |
-            (SecondaryLineSegment.to_bus_id == secondary_bus_id)
-        ).all()
-
-        to_bus_ids = set()
-        for line in lines:
-            if line.to_bus_id:
-                to_bus_ids.add(line.to_bus_id)
-
-        if not to_bus_ids:
-            return jsonify({'count': 0, 'service_drops': []}), 200
-
-        drops = SecondaryServiceDrop.query.filter(SecondaryServiceDrop.from_bus_id.in_(list(to_bus_ids))).all()
-
+        drops_list = list(all_drops.values())
         return jsonify({
-            'count': len(drops),
-            'service_drops': [d.to_dict() for d in drops]
+            'count': len(drops_list),
+            'service_drops': [d.to_dict() for d in drops_list]
         }), 200
 
     except Exception as e:
-        current_app.logger.warning('Failed to fetch service drops for post %s: %s', post_id, e)
+        current_app.logger.error('Failed to fetch service drops for post %s: %s', post_id, e)
         return jsonify({'count': 0, 'service_drops': [], 'error': str(e)}), 500
 
 @api_bp.route('/posts/bulk-import', methods=['POST'])
@@ -308,6 +363,137 @@ def api_posts_bulk_import():
         return jsonify(stats), 200
         
     return jsonify({'error': 'File processing failed'}), 500
+
+@api_bp.route('/primary-lines/bulk-import', methods=['POST'])
+@admin_required
+def api_primary_lines_bulk_import():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if file:
+        stats = import_primary_lines_from_csv(file)
+        if 'error' in stats:
+            return jsonify(stats), 500
+        return jsonify(stats), 200
+    return jsonify({'error': 'File processing failed'}), 500
+
+@api_bp.route('/primary-lines/by-bus/<bus_id>', methods=['GET'])
+def api_primary_lines_by_bus(bus_id):
+    try:
+        if not bus_id:
+            return jsonify({'error': 'Bus ID required'}), 400
+        from models import DistributionLineSegment, BusNode
+        
+        # 1. Try to resolve bus_id if it's a pole number
+        # We check if 'bus_id' matches a recorded pole_number in our BusNode/autoritative node mapping
+        node = BusNode.query.filter_by(pole_number=bus_id).first()
+        lookup_ids = [bus_id]
+        if node:
+            lookup_ids.append(node.bus_id)
+
+        # 2. Query candidates using either the raw ID or the resolved authoritative ID
+        candidates = DistributionLineSegment.query.filter(
+            DistributionLineSegment.from_bus_id.in_(lookup_ids) |
+            DistributionLineSegment.to_bus_id.in_(lookup_ids) |
+            DistributionLineSegment.from_bus_id.endswith(bus_id) | 
+            DistributionLineSegment.to_bus_id.endswith(bus_id)
+        ).all()
+        
+        items = []
+        for c in candidates:
+            # If it's an exact match for one of our lookup IDs, it's a keeper
+            if (c.from_bus_id in lookup_ids) or (c.to_bus_id in lookup_ids):
+                items.append(c)
+                continue
+
+            # Suffix matching logic for backward compatibility/robustness
+            is_match = False
+            for db_bus_id in (c.from_bus_id, c.to_bus_id):
+                if db_bus_id and db_bus_id.endswith(bus_id):
+                    prefix = db_bus_id[:-len(bus_id)]
+                    # Prefix should be empty or only "P" + "0"s
+                    if prefix == "" or (prefix.startswith("P") and prefix[1:].replace("0", "") == ""):
+                        is_match = True
+                        break
+            if is_match:
+                items.append(c)
+
+        # Remove duplicates
+        seen_ids = set()
+        unique_items = []
+        for it in items:
+            if it.id not in seen_ids:
+                unique_items.append(it)
+                seen_ids.add(it.id)
+
+        return jsonify({'count': len(unique_items), 'primary_lines': [x.to_dict() for x in unique_items]})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- Bus Nodes (Step 1: upload bus data → creates all poles with coordinates) ---
+
+@api_bp.route('/bus-nodes/bulk-import', methods=['POST'])
+@admin_required
+def api_bus_nodes_bulk_import():
+    """
+    Step 1 Upload: Bus Data CSV with Bus ID, Bus Description, Nominal Voltage,
+    feeder, latitude, longitude. Creates BusNode + Post records automatically.
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if file:
+        stats = import_bus_nodes_from_csv(file)
+        if 'error' in stats:
+            return jsonify(stats), 500
+        return jsonify({
+            'result': 'success',
+            'message': f"Imported {stats['created']} new poles, updated {stats['updated']} existing. "
+                       f"Skipped {stats['skipped']}.",
+            'stats': stats
+        }), 200
+    return jsonify({'error': 'File processing failed'}), 500
+
+
+@api_bp.route('/bus-nodes', methods=['GET'])
+def api_bus_nodes_list():
+    """Return all bus nodes (paginated). Used by dashboard and map."""
+    try:
+        page     = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 100, type=int)
+        feeder   = request.args.get('feeder', None)
+
+        if page < 1: page = 1
+        if per_page < 1 or per_page > 2000: per_page = 100
+
+        query = BusNode.query
+        if feeder:
+            query = query.filter_by(feeder=feeder)
+        query = query.order_by(BusNode.id.asc())
+
+        total = query.count()
+        nodes = query.offset((page - 1) * per_page).limit(per_page).all()
+        total_pages = (total + per_page - 1) // per_page
+
+        return jsonify({
+            'data': [n.to_dict() for n in nodes],
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total,
+                'total_pages': total_pages,
+                'has_next': page < total_pages,
+                'has_prev': page > 1,
+            }
+        })
+    except Exception as e:
+        current_app.logger.error(f'Error fetching bus nodes: {e}')
+        return jsonify({'error': str(e), 'data': []}), 500
+
 
 @api_bp.route('/transformers/bulk-import', methods=['POST'])
 @admin_required
@@ -389,7 +575,32 @@ def api_user_delete(user_id):
 @api_bp.route('/transformers/by-bus/<bus_id>', methods=['GET'])
 def api_transformers_by_bus(bus_id):
     try:
-        transformers = DistributionTransformer.query.filter_by(from_primary_bus_id=bus_id).all()
+        from models import DistributionTransformer, BusNode
+        if not bus_id:
+            return jsonify({'error': 'Bus ID required'}), 400
+
+        # 1. Resolve pole number to authoritative bus ID
+        node = BusNode.query.filter_by(pole_number=bus_id).first()
+        lookup_ids = [bus_id]
+        if node:
+            lookup_ids.append(node.bus_id)
+
+        # 2. Query candidates
+        # We check for exact matches in lookup_ids OR suffix matches for the original bus_id
+        candidates = DistributionTransformer.query.filter(
+            DistributionTransformer.from_primary_bus_id.in_(lookup_ids) |
+            DistributionTransformer.from_primary_bus_id.endswith(bus_id)
+        ).all()
+        
+        def match_bus_id(query_id, db_id, allowed_list):
+            if not db_id: return False
+            if db_id in allowed_list: return True
+            if not db_id.endswith(query_id): return False
+            prefix = db_id[:-len(query_id)]
+            return prefix == "" or (prefix.startswith("P") and prefix[1:].replace("0", "") == "")
+
+        transformers = [t for t in candidates if match_bus_id(bus_id, t.from_primary_bus_id, lookup_ids)]
+
         return jsonify({
             'bus_id': bus_id,
             'count': len(transformers),
@@ -572,7 +783,7 @@ def api_delete_all_data():
         from models import (Post, DistributionTransformer, SecondaryLineSegment, 
                           DistributionLineSegment, SecondaryServiceDrop, UploadHistory, 
                           VoltageRegulator, ShuntCapacitor, ShuntInductor, SeriesInductor,
-                          Customer, EnergyConsumption, Meter, LatLongData, BusPostMapping, LineConnection)
+                          Customer, EnergyConsumption, Meter, LatLongData, BusPostMapping, LineConnection, BusNode)
         
         # 1. Delete all rows (order matters for foreign keys if any, though most are soft-linked by ID strings)
         num_ec = db.session.query(EnergyConsumption).delete()
@@ -589,6 +800,7 @@ def api_delete_all_data():
         num_latlong = db.session.query(LatLongData).delete()
         num_bus_post = db.session.query(BusPostMapping).delete()
         num_line_conn = db.session.query(LineConnection).delete()
+        num_bus_nodes = db.session.query(BusNode).delete()
         num_posts = db.session.query(Post).delete()
         num_history = db.session.query(UploadHistory).delete() # Clear history log
 
@@ -601,7 +813,7 @@ def api_delete_all_data():
                     'distribution_line_segment', 'secondary_service_drop', 'upload_history', 
                     'voltage_regulator', 'shunt_capacitor', 'shunt_inductor', 'series_inductor',
                     'customer', 'energy_consumption', 'meter', 'latlongdata', 
-                    'bus_post_mapping', 'line_connection'
+                    'bus_post_mapping', 'line_connection', 'bus_node'
                 ]
                 for tbl in tables:
                      db.session.execute(text(f"ALTER TABLE {tbl} AUTO_INCREMENT = 1"))
@@ -613,7 +825,7 @@ def api_delete_all_data():
         
         return jsonify({
             'result': 'success',
-            'message': f"Comprehensive Cleanup: Deleted {num_posts} Posts, {num_transformers} Transformers, {num_cust} Customers, {num_ec} Consumption Records, {num_meters} Meter Readings, and related infrastructure data.",
+            'message': f"Comprehensive Cleanup: Deleted {num_posts} Posts, {num_bus_nodes} Bus Nodes, {num_transformers} Transformers, {num_cust} Customers, {num_ec} Consumption Records, {num_meters} Meter Readings, and related infrastructure data.",
             'reset_status': reset_status
         })
 
@@ -635,7 +847,7 @@ def api_upload_history():
         # Group by file_type, keeping only the most recent one
         latest = {}
         # Pre-initialize keys
-        for k in ['posts', 'transformers', 'secondary_lines', 'service_drops', 'voltage_regulators', 'shunt_capacitors', 'shunt_inductors', 'series_inductors']:
+        for k in ['bus_nodes', 'posts', 'primary_lines', 'transformers', 'secondary_lines', 'service_drops', 'voltage_regulators', 'shunt_capacitors', 'shunt_inductors', 'series_inductors', 'customers', 'energy_consumption']:
             latest[k] = None
 
         for h in history:
@@ -795,40 +1007,98 @@ def find_customer_post_location(customer_id):
         if not ssd or not ssd.from_bus_id:
             return None
 
-        # 2. BFS from the SSD bus to find a DistributionTransformer
-        start_bus = ssd.from_bus_id
-        visited = set([start_bus])
+        # 2. Check if the starting bus itself is a pole or has direct coordinates
+        start_bus = (ssd.from_bus_id or "").strip()
+        
+        # Helper to try finding a post by bus ID or normalized pole number
+        def get_post_by_bus_or_pole(bus_id):
+            if not bus_id: return None
+            bus_id = str(bus_id).strip()
+            
+            # 1. Exact match on primary_bus_id or pole_number
+            p = Post.query.filter((Post.primary_bus_id == bus_id) | (Post.pole_number == bus_id)).first()
+            if p and p.lat and p.lng: return p
+            
+            # 2. Check BusNode mapping for this bus
+            bn = BusNode.query.filter_by(bus_id=bus_id).first()
+            if bn and bn.pole_number:
+                p = Post.query.filter_by(pole_number=bn.pole_number).first()
+                if p and p.lat and p.lng: return p
+            
+            # 3. Fallback: Normalize Bus ID (e.g. P0000000090 -> 90, B000... -> 90)
+            clean_id = bus_id.upper()
+            # Handle common prefixes: P (Pole), B (Bus), S (Secondary)
+            if clean_id.startswith(('P', 'B', 'S')):
+                numeric_part = "".join(filter(str.isdigit, clean_id))
+                if numeric_part:
+                    try:
+                        normalized_pole = str(int(numeric_part))
+                        p = Post.query.filter_by(pole_number=normalized_pole).first()
+                        if p and p.lat and p.lng: return p
+                    except: pass
+            
+            return None
+
+        # 2.5 Try to find the exact pole this bus is on first
+        post = get_post_by_bus_or_pole(start_bus)
+        if post:
+            return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
+
+        # 3. BFS from the SSD bus to find a DistributionTransformer
+        visited = {start_bus}
         queue = [start_bus]
+        dt = None
         
-        # Check if the start_bus itself is directly connected to a transformer
-        dt = DistributionTransformer.query.filter_by(to_secondary_bus_id=start_bus).first()
-        
-        # If not, traverse the secondary line segments
-        while not dt and queue:
-            current_bus = queue.pop(0)
+        while queue:
+            curr = queue.pop(0)
+            
+            # NEW: Immediately check if this bus is a pole before searching for transformer
+            post = get_post_by_bus_or_pole(curr)
+            if post:
+                return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
+            
+            # Check if this bus is connected to a transformer secondary
+            dt = DistributionTransformer.query.filter_by(to_secondary_bus_id=curr).first()
+            if dt:
+                break
+                
+            # Otherwise, find connected secondary lines and continue BFS
             lines = SecondaryLineSegment.query.filter(
-                (SecondaryLineSegment.from_bus_id == current_bus) |
-                (SecondaryLineSegment.to_bus_id == current_bus)
+                (SecondaryLineSegment.from_bus_id == curr) |
+                (SecondaryLineSegment.to_bus_id == curr)
             ).all()
             
             for line in lines:
-                nxt = line.from_bus_id if line.to_bus_id == current_bus else line.to_bus_id
+                nxt = line.from_bus_id if line.to_bus_id == curr else line.to_bus_id
                 if nxt not in visited:
                     visited.add(nxt)
-                    dt = DistributionTransformer.query.filter_by(to_secondary_bus_id=nxt).first()
-                    if dt:
-                        break
                     queue.append(nxt)
 
         if dt and dt.from_primary_bus_id:
-            # 3. Find the Post with matching primary_bus_id
-            post = Post.query.filter_by(primary_bus_id=dt.from_primary_bus_id).first()
-            if not post:
-                # Fallback: Check if the primary bus ID matches a pole number directly
-                post = Post.query.filter_by(pole_number=dt.from_primary_bus_id).first()
+            # 4. Find the Post hosting this transformer (or connected to it via primary lines)
+            start_p_bus = dt.from_primary_bus_id
+            visited_p = {start_p_bus}
+            queue_p = [start_p_bus]
+            
+            while queue_p:
+                curr_p = queue_p.pop(0)
                 
-            if post and post.lat and post.lng:
-                return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
+                # Use our helper for robust matching
+                post = get_post_by_bus_or_pole(curr_p)
+                if post:
+                    return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
+                
+                # Trace primary lines to next buses if not found directly
+                p_lines = DistributionLineSegment.query.filter(
+                    (DistributionLineSegment.from_bus_id == curr_p) |
+                    (DistributionLineSegment.to_bus_id == curr_p)
+                ).all()
+                
+                for pl in p_lines:
+                    nxt_p = pl.from_bus_id if pl.to_bus_id == curr_p else pl.to_bus_id
+                    if nxt_p not in visited_p:
+                        visited_p.add(nxt_p)
+                        queue_p.append(nxt_p)
 
     except Exception as e:
         from flask import current_app
@@ -843,6 +1113,7 @@ def get_customers():
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         q = (request.args.get('q') or '').strip()
+        skip_trace = request.args.get('skip_trace', 'false').lower() == 'true'
 
         if page < 1: page = 1
         if per_page < 1 or per_page > 1000: per_page = 10
@@ -864,9 +1135,12 @@ def get_customers():
         data = []
         for c in items:
             c_dict = c.to_dict()
-            loc = find_customer_post_location(c.customer_id)
-            if loc:
-                c_dict['connected_post'] = loc
+            if not skip_trace:
+                loc = find_customer_post_location(c.customer_id)
+                if loc:
+                    c_dict['connected_post'] = loc
+            else:
+                c_dict['connected_post'] = None
             data.append(c_dict)
 
         return jsonify({
@@ -965,8 +1239,19 @@ def api_shortest_path():
         # Origin: User GPS, Destination: Post GPS
         osm_url = f"https://routing.openstreetmap.de/routed-car/route/v1/driving/{user_lng},{user_lat};{dest_info['lng']},{dest_info['lat']}?overview=full&geometries=geojson"
         
-        response = requests.get(osm_url, timeout=10)
-        
+        try:
+            response = requests.get(osm_url, timeout=5)
+        except requests.exceptions.Timeout:
+            return jsonify({
+                'found': False,
+                'error': 'Road routing service timed out. The map may be too slow to respond.'
+            }), 200
+        except Exception as e:
+            return jsonify({
+                'found': False,
+                'error': f'Failed to connect to routing service: {str(e)}'
+            }), 200
+            
         if response.status_code != 200:
             return jsonify({
                 'found': False,
@@ -1139,4 +1424,35 @@ def export_master_csv():
         mimetype='text/csv',
         headers={'Content-Disposition': 'attachment; filename=master_export.csv'}
     )
+
+
+# ==================== ML Prediction Endpoints ====================
+
+@api_bp.route('/ml/transformer-risk', methods=['GET'])
+def api_ml_transformer_risk():
+    """Run Isolation Forest anomaly detection on transformer data to predict failure risk."""
+    try:
+        from ml_predictor import predict_transformer_risk
+
+        # Try loading from DB first
+        transformers = DistributionTransformer.query.all()
+        if transformers:
+            db_records = [t.to_dict() for t in transformers]
+            result = predict_transformer_risk(source='db', db_records=db_records)
+        else:
+            # Fallback to CSV file
+            import os
+            csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'example2.csv')
+            result = predict_transformer_risk(source='csv', csv_path=csv_path)
+
+        return jsonify(result), 200
+    except Exception as e:
+        current_app.logger.error(f"ML prediction failed: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc() if current_app.debug else None,
+            'predictions': [],
+            'summary': {'total': 0, 'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
+        }), 500
 

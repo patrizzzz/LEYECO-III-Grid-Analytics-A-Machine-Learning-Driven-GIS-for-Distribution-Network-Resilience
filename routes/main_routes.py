@@ -82,3 +82,8 @@ def resources():
 @admin_required
 def distribution_lines():
     return render_template('distribution_lines.html', active_page='distribution_lines')
+
+@main_bp.route('/predictions')
+@login_required
+def predictions():
+    return render_template('predictions.html', active_page='predictions')

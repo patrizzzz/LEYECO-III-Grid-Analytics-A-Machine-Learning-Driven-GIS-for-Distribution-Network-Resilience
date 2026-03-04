@@ -94,17 +94,24 @@ document.addEventListener('DOMContentLoaded', function () {
   // Categories: '1' (Single Phase), '2' (Double Phase), '3' (Three Phase), '0' (Other/Unknown)
   let activePhaseCategories = new Set(['1', '2', '3', '0']);
 
+  // --- Line Type filter state ---
+  let activeLineTypes = new Set(['primary', 'transformer', 'secondary', 'service_drop', 'unknown']);
+
   const _allPostMarkers = []; // keeps references to ALL markers even when removed from layer
+  let feederList = null; // Scoped for applyFeederFilter
 
   function applyFeederFilter() {
-    // Filter posts: remove/add from postsLayer
-    // Show all when: no feeders known, or all feeders are checked (Show All)
-    const showAllFeeds = knownFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
-    // activePhaseCategories covers 1, 2, 3, 0
+    // Show all when: no feeders known, OR "Show All" checkbox is checked, OR we haven't built the UI yet (initial load)
+    const showAllCb = feederList ? feederList.querySelector('.msp-feeder-all input') : null;
+    const showAllFeeds = (knownFeeders.size === 0) || (showAllCb ? showAllCb.checked : true);
+
+    // Engineers want to see "lines only" when posts are hidden.
+    // Virtual nodes and customers are markers, so we hide them if postsLayer is off.
+    const postsVisible = map.hasLayer(postsLayer);
 
     _allPostMarkers.forEach(function (marker) {
       if (!marker._postData) return;
-      const f = marker._postData.feeder || '';
+      const f = String(marker._postData.feeder || '').trim();
       const shouldShowFeeder = showAllFeeds || activeFeeders.has(f);
 
       // For posts, we might not filter by phase strictly unless they have phase data
@@ -119,7 +126,9 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     });
 
-    // Filter network lines: remove/add from networkLinesLayer
+    // Ensure networkLinesLayer is on map so its content is visible
+    if (!map.hasLayer(networkLinesLayer)) networkLinesLayer.addTo(map);
+
     const allLines = [];
     networkLinesLayer.eachLayer(function (layer) { allLines.push(layer); });
     if (!window._hiddenNetworkLines) window._hiddenNetworkLines = [];
@@ -129,7 +138,7 @@ document.addEventListener('DOMContentLoaded', function () {
     allNetLines.forEach(function (layer) {
       if (layer instanceof L.Polyline) {
         // Feeder Check
-        const f = layer._feederName || '';
+        const f = String(layer._feederName || '').trim();
         const isFeederVisible = showAllFeeds || activeFeeders.has(f);
 
         // Phase Check
@@ -152,7 +161,22 @@ document.addEventListener('DOMContentLoaded', function () {
           isPhaseVisible = activePhaseCategories.has(category);
         }
 
-        if (isFeederVisible && isPhaseVisible) {
+        // Line Type Check
+        const lType = layer.lineCategory || 'unknown';
+        const isLineTypeVisible = activeLineTypes.has(lType);
+
+        if (isFeederVisible && isPhaseVisible && isLineTypeVisible) {
+          if (!networkLinesLayer.hasLayer(layer)) networkLinesLayer.addLayer(layer);
+        } else {
+          if (networkLinesLayer.hasLayer(layer)) networkLinesLayer.removeLayer(layer);
+          window._hiddenNetworkLines.push(layer);
+        }
+      } else if (layer instanceof L.Marker) {
+        // Feeder Check for Virtual Nodes / Customers
+        const f = String(layer._feederName || '').trim();
+        const isFeederVisible = showAllFeeds || activeFeeders.has(f);
+
+        if (isFeederVisible && postsVisible) {
           if (!networkLinesLayer.hasLayer(layer)) networkLinesLayer.addLayer(layer);
         } else {
           if (networkLinesLayer.hasLayer(layer)) networkLinesLayer.removeLayer(layer);
@@ -165,37 +189,23 @@ document.addEventListener('DOMContentLoaded', function () {
   // Expose function so it can be called after data loads
   window._refreshFeederList = function () { };
 
-  // --- Unified Map Settings Control ---
-  const mapSettingsControl = L.control({ position: 'topright' });
-  mapSettingsControl.onAdd = function () {
-    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control map-settings-panel');
-    L.DomEvent.disableClickPropagation(container);
-    L.DomEvent.disableScrollPropagation(container);
+  // --- Unified Map Settings (Sidebar) ---
+  const sidebarSettingsContainer = document.getElementById('sidebar-map-settings');
+  const sidebarSettingsWrapper = document.getElementById('sidebar-map-settings-wrapper');
+  const sidebarToggle = document.getElementById('sidebar-map-settings-toggle');
 
-    // State for collapse
-    let collapsed = false;
-
-    // --- Header ---
-    const header = document.createElement('div');
-    header.className = 'msp-header';
-    header.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 -960 960 960" fill="currentColor"><path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z"/></svg>
-      <span>Map Settings</span>
-      <button class="msp-toggle" title="Collapse">▾</button>
-    `;
-
-    const body = document.createElement('div');
-    body.className = 'msp-body';
-    body.style.maxHeight = '400px';
-    body.style.overflowY = 'auto';
-
-    header.querySelector('.msp-toggle').addEventListener('click', function () {
-      collapsed = !collapsed;
-      body.style.display = collapsed ? 'none' : '';
-      this.textContent = collapsed ? '▸' : '▾';
-      container.classList.toggle('msp-collapsed', collapsed);
+  if (sidebarToggle && sidebarSettingsWrapper) {
+    sidebarToggle.addEventListener('click', function (e) {
+      e.preventDefault();
+      const isVisible = sidebarSettingsWrapper.style.display !== 'none';
+      sidebarSettingsWrapper.style.display = isVisible ? 'none' : '';
+      const arrow = sidebarToggle.querySelector('.sidebar-msp-arrow');
+      if (arrow) arrow.classList.toggle('expanded', !isVisible);
     });
+  }
 
+  // Build settings sections inside the sidebar
+  if (sidebarSettingsContainer) {
     // === Section 1: Base Map ===
     const baseSection = document.createElement('div');
     baseSection.className = 'msp-section';
@@ -250,6 +260,9 @@ document.addEventListener('DOMContentLoaded', function () {
       cb.addEventListener('change', function () {
         if (this.checked) { overlays[name].addTo(map); }
         else { map.removeLayer(overlays[name]); }
+
+        // If Posts or Network lines toggle, re-run filter to sync virtual nodes
+        applyFeederFilter();
       });
       const span = document.createElement('span');
       span.textContent = name;
@@ -263,13 +276,16 @@ document.addEventListener('DOMContentLoaded', function () {
     const feederSection = document.createElement('div');
     feederSection.className = 'msp-section';
     feederSection.innerHTML = '<div class="msp-section-title">Feeder Filter</div>';
-    const feederList = document.createElement('div');
+    feederList = document.createElement('div');
     feederList.className = 'msp-option-list msp-feeder-list';
     feederList.innerHTML = '<span class="msp-hint">Loading feeders…</span>';
     feederSection.appendChild(feederList);
 
     // Refresh feeder list after post data is loaded
     window._refreshFeederList = function () {
+      if (!feederList) return;
+      const showAllWasChecked = feederList.querySelector('.msp-feeder-all input') ? feederList.querySelector('.msp-feeder-all input').checked : true;
+
       feederList.innerHTML = '';
       if (knownFeeders.size === 0) {
         feederList.innerHTML = '<span class="msp-hint">No feeders found</span>';
@@ -280,7 +296,7 @@ document.addEventListener('DOMContentLoaded', function () {
       allRow.className = 'msp-option msp-feeder-all';
       const allCb = document.createElement('input');
       allCb.type = 'checkbox';
-      allCb.checked = true;
+      allCb.checked = showAllWasChecked;
       const allSpan = document.createElement('span');
       allSpan.textContent = 'Show All';
       allSpan.style.fontWeight = '600';
@@ -291,12 +307,16 @@ document.addEventListener('DOMContentLoaded', function () {
       const feederCbs = [];
       const sortedFeeders = Array.from(knownFeeders).sort();
       sortedFeeders.forEach(function (fname) {
-        activeFeeders.add(fname);
+        // Automatically activate new feeders if "Show All" is checked
+        if (showAllWasChecked && !activeFeeders.has(fname)) {
+          activeFeeders.add(fname);
+        }
+
         const row = document.createElement('label');
         row.className = 'msp-option';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
-        cb.checked = true;
+        cb.checked = activeFeeders.has(fname);
         cb.dataset.feeder = fname;
         cb.addEventListener('change', function () {
           if (this.checked) { activeFeeders.add(fname); }
@@ -355,6 +375,70 @@ document.addEventListener('DOMContentLoaded', function () {
       phaseList.appendChild(row);
     });
     phaseSection.appendChild(phaseList);
+
+    // === Section 3.6: Line Type Filter ===
+    const lineTypeSection = document.createElement('div');
+    lineTypeSection.className = 'msp-section';
+    lineTypeSection.innerHTML = '<div class="msp-section-title">Line Type Filter</div>';
+    const lineTypeList = document.createElement('div');
+    lineTypeList.className = 'msp-option-list';
+
+    const allLineCb = document.createElement('input');
+    allLineCb.type = 'checkbox';
+    allLineCb.checked = true;
+
+    const allLineRow = document.createElement('label');
+    allLineRow.className = 'msp-option';
+    allLineRow.innerHTML = '<span><strong style="color:#0056b3;">Show All</strong></span>';
+    allLineRow.prepend(allLineCb);
+    lineTypeList.appendChild(allLineRow);
+
+    const lineTypes = [
+      { id: 'primary', label: 'Primary / Distribution Line' },
+      { id: 'secondary', label: 'Secondary Line' }
+    ];
+
+    const ltCheckboxes = [];
+
+    lineTypes.forEach(function (lt) {
+      const row = document.createElement('label');
+      row.className = 'msp-option';
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.linetype = lt.id;
+      cb.checked = activeLineTypes.has(lt.id);
+      ltCheckboxes.push(cb);
+
+      cb.addEventListener('change', function () {
+        if (this.checked) activeLineTypes.add(lt.id);
+        else activeLineTypes.delete(lt.id);
+
+        allLineCb.checked = ltCheckboxes.every(c => c.checked);
+        applyFeederFilter();
+      });
+
+      const span = document.createElement('span');
+      span.textContent = lt.label;
+
+      row.appendChild(cb);
+      row.appendChild(span);
+      lineTypeList.appendChild(row);
+    });
+
+    allLineCb.addEventListener('change', function () {
+      const isChecked = this.checked;
+      ltCheckboxes.forEach(cb => {
+        cb.checked = isChecked;
+        if (isChecked) activeLineTypes.add(cb.dataset.linetype);
+        else activeLineTypes.delete(cb.dataset.linetype);
+      });
+      if (isChecked) activeLineTypes.add('unknown');
+      else activeLineTypes.delete('unknown');
+      applyFeederFilter();
+    });
+
+    lineTypeSection.appendChild(lineTypeList);
 
     // === Section 4: Visualization ===
     const vizSection = document.createElement('div');
@@ -432,17 +516,14 @@ document.addEventListener('DOMContentLoaded', function () {
       updateNetworkLineColors();
     });
 
-    // Assemble
-    body.appendChild(baseSection);
-    body.appendChild(layerSection);
-    body.appendChild(feederSection);
-    body.appendChild(phaseSection);
-    body.appendChild(vizSection);
-    container.appendChild(header);
-    container.appendChild(body);
-    return container;
-  };
-  mapSettingsControl.addTo(map);
+    // Assemble all sections into sidebar settings container
+    sidebarSettingsContainer.appendChild(baseSection);
+    sidebarSettingsContainer.appendChild(layerSection);
+    sidebarSettingsContainer.appendChild(feederSection);
+    sidebarSettingsContainer.appendChild(phaseSection);
+    sidebarSettingsContainer.appendChild(lineTypeSection);
+    sidebarSettingsContainer.appendChild(vizSection);
+  }
 
   // Force Leaflet to measure container and load tiles (fixes blank map)
   function refreshMapSize() {
@@ -474,6 +555,20 @@ document.addEventListener('DOMContentLoaded', function () {
     popupAnchor: [0, -68],
     tooltipAnchor: [0, -44],
     className: 'pole-icon'
+  });
+
+  const customerIcon = L.divIcon({
+    className: '',
+    html: '<div style="background-color:#FF3366; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>',
+    iconSize: [16, 16],
+    iconAnchor: [8, 8]
+  });
+
+  const virtualNodeIcon = L.divIcon({
+    className: '',
+    html: '<div style="background-color:#FF9900; width:10px; height:10px; border-radius:50%; border:2px solid white; box-shadow: 0 0 3px rgba(0,0,0,0.5);"></div>',
+    iconSize: [14, 14],
+    iconAnchor: [7, 7]
   });
 
   // Connection editing state
@@ -522,7 +617,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }, 100);
 
     setTimeout(function () {
-      loadLineConnections();
+      // loadLineConnections(); // DEPRECATED: network-geometry endpoint now handles all connections with filtering support
       loadNetworkGeometry();
     }, 1500);
   }
@@ -735,7 +830,7 @@ document.addEventListener('DOMContentLoaded', function () {
       busToPostMap[p.pole_number] = p; // Primary bus is usually the pole number
     }
     if (p.feeder) {
-      knownFeeders.add(p.feeder);
+      knownFeeders.add(String(p.feeder).trim());
       // Also create aliases for common bus naming patterns
       if (p.primary_bus_id) {
         busToPostMap[p.primary_bus_id] = p;
@@ -827,11 +922,34 @@ document.addEventListener('DOMContentLoaded', function () {
         primaryLineBtn.onclick = function () {
           const postId = primaryLineBtn.getAttribute('data-post-id');
           if (!postId) return;
+
           fetch('/api/posts/' + postId)
             .then(function (r) { return r.json(); })
-            .then(function (data) {
-              if (data && data.error) return;
-              showPrimaryLineOverheadModal(data);
+            .then(function (postData) {
+              if (postData && postData.error) return;
+
+              var poleId = postData.pole_number;
+              if (!poleId) {
+                showNoticeModal('Info', 'No pole ID found for this post to fetch primary line data.');
+                return;
+              }
+
+              fetch('/api/primary-lines/by-bus/' + encodeURIComponent(poleId))
+                .then(function (r) { return r.json(); })
+                .then(function (result) {
+                  if (result && result.error) {
+                    showNoticeModal('Error', 'Error: ' + result.error);
+                    return;
+                  }
+                  if (!result.primary_lines || result.primary_lines.length === 0) {
+                    showNoticeModal('Info', 'No primary line found connected to Pole ID: ' + poleId);
+                    return;
+                  }
+                  showPrimaryLineOverheadModal(result.primary_lines[0]);
+                })
+                .catch(function (err) {
+                  showNoticeModal('Error', 'Failed to load primary line data: ' + (err && err.message ? err.message : String(err)));
+                });
             })
             .catch(function () { });
         };
@@ -848,12 +966,12 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (r) { return r.json(); })
             .then(function (postData) {
               if (postData && postData.error) return;
-              var busId = postData.primary_bus_id || postData.pole_number;
-              if (!busId) {
-                showNoticeModal('Info', 'No primary bus ID found for this post');
+              var poleId = postData.pole_number;
+              if (!poleId) {
+                showNoticeModal('Info', 'No pole ID found for this post');
                 return;
               }
-              fetch('/api/transformers/by-bus/' + encodeURIComponent(busId))
+              fetch('/api/transformers/by-bus/' + encodeURIComponent(poleId))
                 .then(function (r) { return r.json(); })
                 .then(function (result) {
                   if (result && result.error) {
@@ -943,109 +1061,31 @@ document.addEventListener('DOMContentLoaded', function () {
         };
       }
 
-      // Secondary Service Drop button: fetch drops via Secondary Line's to_bus_id
+      // Secondary Service Drop button: fetch drops directly via unified backend endpoint
       const serviceDropBtn = popupEl.querySelector('.service-drop-btn');
       if (serviceDropBtn) {
         serviceDropBtn.onclick = function () {
           const postId = serviceDropBtn.getAttribute('data-post-id');
           if (!postId) return;
 
-          // 1. Get Post Details to find Primary Bus ID
-          fetch('/api/posts/' + postId)
+          fetch('/api/posts/' + postId + '/service-drops')
             .then(function (r) { return r.json(); })
-            .then(function (postData) {
-              if (postData && postData.error) return;
-
-              var primaryBusId = postData.primary_bus_id || postData.pole_number;
-              if (!primaryBusId) {
-                showNoticeModal('Info', 'No primary bus ID found for this post.');
+            .then(function (result) {
+              if (result && result.error) {
+                showNoticeModal('Error', 'Failed to load service drops: ' + result.error);
                 return;
               }
-
-              // 2. Find Transformer connected to this Primary Bus
-              fetch('/api/transformers/by-bus/' + encodeURIComponent(primaryBusId))
-                .then(function (r) { return r.json(); })
-                .then(function (transResult) {
-                  if (transResult && transResult.error) {
-                    console.warn('Transformer fetch error:', transResult.error);
-                    showNoticeModal('Info', 'No transformer found. Service drops require a transformer connection.');
-                    return;
-                  }
-
-                  if (!transResult.transformers || transResult.transformers.length === 0) {
-                    showNoticeModal('Info', 'No transformer found for bus ID: ' + primaryBusId);
-                    return;
-                  }
-
-                  // 3. Get Secondary Bus ID from the transformer
-                  var transformer = transResult.transformers[0];
-                  var secondaryBusId = transformer.to_secondary_bus_id;
-
-                  if (!secondaryBusId) {
-                    showNoticeModal('Info', 'Transformer has no Secondary Bus ID defined.');
-                    return;
-                  }
-
-                  // 4. Fetch Secondary Lines using the Transformer's Secondary Bus ID
-                  fetch('/api/secondary-lines/by-bus/' + encodeURIComponent(secondaryBusId))
-                    .then(function (r) { return r.json(); })
-                    .then(function (linesResult) {
-                      if (linesResult && linesResult.error) {
-                        showNoticeModal('Error', 'Error fetching secondary lines: ' + linesResult.error);
-                        return;
-                      }
-
-                      if (!linesResult.secondary_lines || linesResult.secondary_lines.length === 0) {
-                        showNoticeModal('Info', 'No secondary lines found for this transformer.');
-                        return;
-                      }
-
-                      // 5. Collect all to_bus_id values from secondary lines
-                      var toBusIds = [];
-                      linesResult.secondary_lines.forEach(function (line) {
-                        if (line.to_bus_id && toBusIds.indexOf(line.to_bus_id) === -1) {
-                          toBusIds.push(line.to_bus_id);
-                        }
-                      });
-
-                      if (toBusIds.length === 0) {
-                        showNoticeModal('Info', 'No valid bus IDs found in secondary lines.');
-                        return;
-                      }
-
-                      // 6. Fetch service drops for each to_bus_id and combine results
-                      var allDrops = [];
-                      var fetchPromises = toBusIds.map(function (busId) {
-                        return fetch('/api/secondary-service-drops/by-bus/' + encodeURIComponent(busId))
-                          .then(function (r) { return r.json(); })
-                          .then(function (result) {
-                            if (result && result.service_drops) {
-                              allDrops = allDrops.concat(result.service_drops);
-                            }
-                          });
-                      });
-
-                      Promise.all(fetchPromises).then(function () {
-                        showServiceDropModal({
-                          count: allDrops.length,
-                          service_drops: allDrops
-                        });
-                      }).catch(function (err) {
-                        showNoticeModal('Error', 'Failed to load service drops: ' + (err.message || String(err)));
-                      });
-
-                    })
-                    .catch(function (err) {
-                      showNoticeModal('Error', 'Failed to load secondary lines: ' + (err.message || String(err)));
-                    });
-
-                })
-                .catch(function (err) {
-                  showNoticeModal('Error', 'Failed to check for transformer: ' + (err.message || String(err)));
-                });
+              if (!result || !result.service_drops || result.service_drops.length === 0) {
+                showNoticeModal('Info', 'No service drops found for this post.');
+                return;
+              }
+              showServiceDropModal({
+                count: result.count || result.service_drops.length,
+                service_drops: result.service_drops
+              });
             })
             .catch(function (err) {
-              console.error('Post details fetch failed:', err);
+              showNoticeModal('Error', 'Failed to load service drops: ' + (err.message || String(err)));
             });
         };
       }
@@ -1300,18 +1340,38 @@ document.addEventListener('DOMContentLoaded', function () {
     return circle;
   }
 
-  // Load canonical posts (filtered to PH)
-  fetch('/api/posts?in_ph=1&per_page=1000')
-    .then(r => {
-      if (!r.ok) throw new Error(`API error: ${r.status}`);
-      return r.json();
-    })
-    .then(response => {
-      console.log('Posts API response:', response);
+  // Load canonical posts (filtered to PH) by iterating through all pages
+  async function fetchAllPosts(inPh = 1) {
+    let allPosts = [];
+    let page = 1;
+    let totalPages = 1;
 
-      // Handle both old array format and new paginated format
-      const posts = Array.isArray(response) ? response : (response.data || []);
-      console.log('Posts to render on map:', posts.length, posts);
+    try {
+      while (page <= totalPages) {
+        let response = await fetch(`/api/posts?in_ph=${inPh}&per_page=1000&page=${page}`);
+        if (!response.ok) throw new Error(`API error: ${response.status}`);
+        let json = await response.json();
+
+        let postsBatch = Array.isArray(json) ? json : (json.data || []);
+        allPosts = allPosts.concat(postsBatch);
+
+        if (json.pagination) {
+          totalPages = json.pagination.total_pages || 1;
+        } else {
+          break; // Not paginated response
+        }
+        page++;
+      }
+      return allPosts;
+    } catch (err) {
+      console.error('Failed to fetch all posts:', err);
+      return allPosts;
+    }
+  }
+
+  function loadPosts() {
+    fetchAllPosts(1).then(posts => {
+      console.log('Posts to render on map:', posts.length);
 
       if (!posts || posts.length === 0) {
         console.warn('No posts found - map may appear empty');
@@ -1327,7 +1387,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
       });
 
-      console.log(`Added ${addedCount} markers to posts layer`);
+      console.log(`Added \${addedCount} markers to posts layer`);
 
       // Add postsLayer to map by default
       postsLayer.addTo(map);
@@ -1363,8 +1423,19 @@ document.addEventListener('DOMContentLoaded', function () {
           }, 250);
         }
       } catch (e) { console.error('Error in target post handling:', e); }
+
+      // Ensure postsLayer is on map so applyFeederFilter sees it as visible
+      if (!map.hasLayer(postsLayer)) postsLayer.addTo(map);
+
+      // Ensure new feeders from posts are reflected in UI and filter
+      if (typeof window._refreshFeederList === 'function') window._refreshFeederList();
+      applyFeederFilter();
     })
-    .catch(err => console.error('Failed to load posts:', err));
+      .catch(err => console.error('Failed to load posts:', err));
+  }
+
+  // Initial load
+  loadPosts();
 
   // Load raw latlongdata layer
   fetch('/api/latlongdata')
@@ -1525,6 +1596,15 @@ document.addEventListener('DOMContentLoaded', function () {
         for (var j = 0; j < lines.length; j++) {
           if (used[j]) continue;
           var s = lines[j];
+
+          // CRITICAL: Only chain if metadata matches (prevent "consumption" of different line types)
+          if (s.connection_type !== pathMeta.connection_type ||
+            s.phasing !== pathMeta.phasing ||
+            s.circuit !== pathMeta.circuit ||
+            s.feeder !== pathMeta.feeder) {
+            continue;
+          }
+
           var s1 = [parseFloat(s.lat1), parseFloat(s.lng1)];
           var s2 = [parseFloat(s.lat2), parseFloat(s.lng2)];
           if (samePoint(head[0], head[1], s1[0], s1[1])) { points.push(s2); pathMeta.segments++; pathMeta.to_bus = s.to_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
@@ -1562,43 +1642,127 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
           if (hintEl) { hintEl.style.display = 'none'; }
         }
-        // Chain segments into continuous paths so the network draws as connected lines, not many separate straight segments
-        var paths = chainSegmentsIntoPaths(lines);
-        paths.forEach(function (pathObj) {
-          var points = pathObj.points;
-          var meta = pathObj.meta;
+        // Instead of chaining segments (which merges metadata), 
+        // we render each segment individually to match the CSV records exactly.
+        lines.forEach(function (line) {
+          var points = [[line.lat1, line.lng1], [line.lat2, line.lng2]];
+          var meta = line;
           if (points.length < 2) return;
           var connType = meta.connection_type || '';
           var color = getLineColor(meta.circuit, meta.phasing);
           var weight = 2;
           var dash = null;
-          if (connType.indexOf('Primary_to_Primary') !== -1) { weight = 3; }
-          else if (connType === 'Distribution_Line') { weight = 3; }
-          else if (connType.indexOf('Primary_to_Transformer') !== -1) { weight = 2.5; }
-          else if (connType.indexOf('Transformer_to_Secondary') !== -1) { weight = 2; }
-          else if (connType === 'Primary_to_Secondary') { weight = 2.5; }
-          else if (connType === 'Secondary_Line') { weight = 2; }
+          var lineCat = 'unknown'; // specific category for the UI filters
+
+          // prioritized categorization based on user technical terminology (P = Primary/Distribution, DT = Transformer, S = Secondary)
+          var fromB = String(meta.from_bus || '').toUpperCase();
+          var toB = String(meta.to_bus || '').toUpperCase();
+
+          // Priority categorization: check explicit connection type first
+          if (connType.indexOf('Transformer') !== -1 || connType === 'Primary_to_Transformer') {
+            weight = 3;
+            lineCat = 'transformer';
+            color = '#f59e0b'; // Bold Transformer Gold
+          }
+          else if (connType.indexOf('Secondary') !== -1 || (connType.indexOf('Line') !== -1 && connType.indexOf('Secondary') !== -1)) {
+            weight = 2;
+            lineCat = 'secondary';
+          }
+          else if (connType.indexOf('Customer') !== -1 || connType.indexOf('Service_Drop') !== -1 || connType === 'Secondary_to_Customer') {
+            weight = 2;
+            lineCat = 'service_drop';
+            dash = '3, 4';
+          }
+          else if (connType.indexOf('Primary') !== -1 || connType === 'Distribution_Line') {
+            weight = 3;
+            lineCat = 'primary';
+          }
+          // Fallback to ID prefixes if type is ambiguous
+          else if (fromB.startsWith('DT') || toB.startsWith('DT') || connType.indexOf('transformer') !== -1) {
+            weight = 3;
+            lineCat = 'transformer';
+            color = '#f59e0b';
+          }
+          else if (fromB.startsWith('S') || toB.startsWith('S')) {
+            weight = 2;
+            lineCat = 'secondary';
+          }
+          else if (fromB.startsWith('P') || toB.startsWith('P')) {
+            weight = 3;
+            lineCat = 'primary';
+          }
+          else {
+            lineCat = 'primary'; // Fallback
+          }
+
           var poly = L.polyline(points, { color: color, weight: weight, opacity: 0.8, dashArray: dash, lineJoin: 'round', lineCap: 'round' });
 
-          // Store circuit type and phasing for dynamic styling on layer change
+          // Store tags for dynamic styling and filtering
           poly.circuitType = meta.circuit;
           poly.phasingType = meta.phasing;
-          poly._feederName = meta.feeder || '';
-          if (meta.feeder) knownFeeders.add(meta.feeder);
+          poly.lineCategory = lineCat;
+          poly._feederName = String(meta.feeder || '').trim();
+          if (meta.feeder) knownFeeders.add(String(meta.feeder).trim());
 
           var lenStr = (meta.length_meters != null && !Number.isNaN(meta.length_meters))
             ? '<br>Length: ' + Number(meta.length_meters).toFixed(2) + ' m'
             : '';
           var segStr = meta.segments > 1 ? ' (' + meta.segments + ' segments)' : '';
-          var popup = '<strong>' + (connType.replace(/_/g, ' \u2192 ') || 'Network') + segStr + '</strong><br>From: ' + (meta.from_bus || '') + ' \u2192 To: ' + (meta.to_bus || '') + '<br>Feeder: ' + (meta.feeder || '') + ' | Circuit: ' + (meta.circuit || '') + ' | Phasing: ' + (meta.phasing || 'N/A') + lenStr;
+
+          // Use friendly label for the popup title based on category
+          var friendlyTitle = 'Network';
+          if (lineCat === 'primary') friendlyTitle = 'Primary / Distribution Line';
+          else if (lineCat === 'secondary') friendlyTitle = 'Secondary Line';
+          else if (lineCat === 'service_drop') friendlyTitle = 'Service Drop';
+          else if (lineCat === 'transformer') friendlyTitle = 'Distribution Transformer';
+          else friendlyTitle = connType.replace(/_/g, ' \u2192 ') || 'Network';
+
+          var popup = '<strong>' + friendlyTitle + segStr + '</strong><br>From: ' + (meta.from_bus || '') + ' \u2192 To: ' + (meta.to_bus || '') + '<br>Feeder: ' + (meta.feeder || '') + ' | Circuit: ' + (meta.circuit || '') + ' | Phasing: ' + (meta.phasing || 'N/A') + lenStr;
           poly.bindPopup(popup);
           poly.addTo(networkLinesLayer);
         });
         networkLinesLayer.addTo(map);
-        // Refresh the feeder filter UI after network lines are loaded
+
+        // --- Render Virtual Nodes & Customers ---
+        var nodesForMap = data.nodes || [];
+        var nodesDrawn = 0;
+        nodesForMap.forEach(function (n) {
+          if (n.feature_type === 'virtual_node' || n.feature_type === 'customer') {
+            var lat = parseFloat(n.lat);
+            var lng = parseFloat(n.lng);
+            if (Number.isNaN(lat) || Number.isNaN(lng)) return;
+
+            var iconToUse = (n.feature_type === 'customer') ? customerIcon : virtualNodeIcon;
+            var labelType = (n.feature_type === 'customer') ? 'Customer' : 'Virtual Node';
+            var title = n.pole_number || (labelType + ' at ' + lat.toFixed(4) + ',' + lng.toFixed(4));
+
+            var marker = L.marker([lat, lng], { title: title, icon: iconToUse });
+            marker._feederName = String(n.feeder || '').trim();
+            if (n.feeder) knownFeeders.add(String(n.feeder).trim());
+
+            var popupContent = '<strong>' + labelType + '</strong><br>ID: ' + (n.pole_number || 'N/A') + '<br>Feeder: ' + (n.feeder || 'N/A');
+            if (n.feature_type === 'customer' && n.customer_name) {
+              popupContent += '<br>Name: ' + n.customer_name;
+            }
+            marker.bindPopup(popupContent);
+            marker.bindTooltip(title, { permanent: false, direction: 'top' });
+
+            marker.addTo(networkLinesLayer);
+            nodesDrawn++;
+          }
+        });
+        if (nodesDrawn > 0) {
+          console.log('Network geometry: Rendered ' + nodesDrawn + ' virtual/customer nodes.');
+        }
+        // -----------------------------------------
+
+        // Refresh the feeder filter UI after network lines are loaded FIRST
         if (typeof window._refreshFeederList === 'function') window._refreshFeederList();
+
+        // Final pass to apply all active filters (feeders, phases, and Post visibility logic for technical markers)
+        applyFeederFilter();
         var totalM = stats.total_length_meters != null ? stats.total_length_meters : 0;
-        console.log('Network geometry: ' + lines.length + ' segments chained into ' + paths.length + ' paths (nodes: ' + (stats.nodes || 0) + ', total length: ' + (typeof totalM === 'number' ? totalM.toFixed(2) : totalM) + ' m)');
+        console.log('Network geometry: Rendered ' + lines.length + ' segments (nodes: ' + (stats.nodes || 0) + ', total length: ' + (typeof totalM === 'number' ? totalM.toFixed(2) : totalM) + ' m)');
       })
       .catch(function (err) { console.warn('Network geometry load failed:', err); });
   }
@@ -1607,7 +1771,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // Load connections after posts are loaded
   setTimeout(function () {
     console.log('Calling loadLineConnections after posts...');
-    loadLineConnections();
+    // loadLineConnections(); // DEPRECATED: redundant with network-geometry
     loadNetworkGeometry();
   }, 1000);
 
@@ -1781,6 +1945,9 @@ document.addEventListener('DOMContentLoaded', function () {
   // --- Primary line-overhead modal (post technical data) ---
   var _primaryLineOverheadModal = null;
   var PRIMARY_LINE_OVERHEAD_FIELDS = [
+    { key: 'segment_id', label: 'Segment ID' },
+    { key: 'from_bus_id', label: 'From Pole ID' },
+    { key: 'to_bus_id', label: 'To Pole ID' },
     { key: 'length_meters', label: 'Length (m)' },
     { key: 'conductor_unit', label: 'Conductor unit' },
     { key: 'system_grounding_type', label: 'System grounding type' },
@@ -2075,6 +2242,9 @@ document.addEventListener('DOMContentLoaded', function () {
       '    <h3 class="result-modal-title">Secondary Service Drops</h3>',
       '    <button class="modal-close service-drop-close" aria-label="Close">✕</button>',
       '  </div>',
+      '  <div class="modal-search-container" style="padding: 12px 16px; border-bottom: 1px solid var(--border);">',
+      '    <input type="text" class="service-drop-search" placeholder="Search by Customer ID, Drop ID, or Phase..." style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 0.9rem;">',
+      '  </div>',
       '  <div class="modal-body result-modal-body service-drop-body enhanced-body" style="max-height: 60vh; overflow-y: auto; padding: 12px 16px;">',
       '    <div class="service-drop-content"></div>',
       '  </div>',
@@ -2094,14 +2264,19 @@ document.addEventListener('DOMContentLoaded', function () {
     var m = createServiceDropModal();
     var contentDiv = m.querySelector('.service-drop-content');
     var title = m.querySelector('.result-modal-title');
+    var searchInput = m.querySelector('.service-drop-search');
 
     title.textContent = 'Service Drops (' + (data.count || 0) + ')';
-    contentDiv.innerHTML = '';
+    searchInput.value = ''; // Reset search on open
 
-    if (!data.service_drops || data.service_drops.length === 0) {
-      contentDiv.innerHTML = '<div class="info-card" style="text-align:center; color:var(--text-secondary);">No service drops found for this bus.</div>';
-    } else {
-      data.service_drops.forEach(function (drop, idx) {
+    const renderDrops = (filteredDrops) => {
+      contentDiv.innerHTML = '';
+      if (!filteredDrops || filteredDrops.length === 0) {
+        contentDiv.innerHTML = '<div class="info-card" style="text-align:center; color:var(--text-secondary); padding: 20px;">No matching service drops found.</div>';
+        return;
+      }
+
+      filteredDrops.forEach(function (drop, idx) {
         var card = document.createElement('div');
         card.className = 'info-card';
 
@@ -2109,10 +2284,10 @@ document.addEventListener('DOMContentLoaded', function () {
         var header = document.createElement('div');
         header.className = 'info-card-header';
 
-        var title = document.createElement('div');
-        title.className = 'info-card-title';
-        title.textContent = 'Drop #' + (idx + 1) + (drop.service_drop_id ? ' (' + drop.service_drop_id + ')' : '');
-        header.appendChild(title);
+        var cardTitle = document.createElement('div');
+        cardTitle.className = 'info-card-title';
+        cardTitle.textContent = 'Drop #' + (idx + 1) + (drop.service_drop_id ? ' (' + drop.service_drop_id + ')' : '');
+        header.appendChild(cardTitle);
 
         if (drop.to_customer_id) {
           var cBtn = document.createElement('button');
@@ -2151,7 +2326,19 @@ document.addEventListener('DOMContentLoaded', function () {
         card.appendChild(grid);
         contentDiv.appendChild(card);
       });
-    }
+    };
+
+    renderDrops(data.service_drops);
+
+    searchInput.oninput = function () {
+      var query = searchInput.value.toLowerCase().trim();
+      var filtered = data.service_drops.filter(function (d) {
+        return (d.to_customer_id && d.to_customer_id.toLowerCase().includes(query)) ||
+          (d.service_drop_id && d.service_drop_id.toLowerCase().includes(query)) ||
+          (d.phasing && d.phasing.toLowerCase().includes(query));
+      });
+      renderDrops(filtered);
+    };
 
     m.style.display = 'flex';
     m.tabIndex = -1;
@@ -2911,27 +3098,28 @@ document.addEventListener('DOMContentLoaded', function () {
     </div>
   `;
 
-  // Append search icon to the map header (aligned with title on the right)
-  var mapHeader = document.querySelector('.map-header');
-  if (!mapHeader) {
-    // Fallback: create header if it doesn't exist
-    mapHeader = document.createElement('div');
-    mapHeader.className = 'map-header';
-    mapEl.parentElement.insertBefore(mapHeader, mapEl);
+  // Append search tools to the map-actions container
+  var mapActions = document.getElementById('map-actions');
+  if (!mapActions) {
+    // Fallback if index.html hasn't been updated or in other pages
+    var mapHeader = document.querySelector('.map-header');
+    if (mapHeader) {
+      mapActions = document.createElement('div');
+      mapActions.className = 'map-actions';
+      mapActions.id = 'map-actions';
+      mapHeader.appendChild(mapActions);
+    }
   }
 
-  mapHeader.style.position = 'relative';
-  mapHeader.style.zIndex = '2000';
+  if (mapActions) {
+    // Clear any existing content (like ghost elements or old buttons)
+    mapActions.innerHTML = '';
 
-  var searchWrapper = document.createElement('div');
-  searchWrapper.style.cssText = 'position:absolute;top:0;right:10px;height:100%;display:flex;align-items:center;z-index:1001;';
-  searchWrapper.innerHTML = searchIconHTML;
-  mapHeader.appendChild(searchWrapper);
-
-  // Append expanded bar to header (absolute positioning within header)
-  var expandedBarWrapper = document.createElement('div');
-  expandedBarWrapper.innerHTML = expandedBarHTML;
-  mapHeader.appendChild(expandedBarWrapper);
+    var searchContainer = document.createElement('div');
+    searchContainer.className = 'expandable-search-container';
+    searchContainer.innerHTML = searchIconHTML + expandedBarHTML;
+    mapActions.appendChild(searchContainer);
+  }
 
   // Append route result to body
   var routeResultWrapper = document.createElement('div');
@@ -3015,7 +3203,7 @@ document.addEventListener('DOMContentLoaded', function () {
     customerSearchSuggestions.classList.add('active');
 
     customerSearchTimeout = setTimeout(function () {
-      fetch('/api/customers?q=' + encodeURIComponent(query) + '&per_page=5')
+      fetch('/api/customers?q=' + encodeURIComponent(query) + '&per_page=5&skip_trace=true')
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (!data.data || data.data.length === 0) {
@@ -3122,13 +3310,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
           // Zoom to customer location
           map.setView([lat, lng], 17);
-        }
 
-        // AUTO-TRIGGER ROUTE FINDING
-        findRouteToCustomer(customerId).finally(function () {
-          customerSearchSuggestions.classList.remove('active');
-          searchClearBtn.classList.add('active'); // Show clear button
-        });
+          // AUTO-TRIGGER ROUTE FINDING
+          findRouteToCustomer(customerId).finally(function () {
+            customerSearchSuggestions.classList.remove('active');
+            searchClearBtn.classList.add('active'); // Show clear button
+          });
+        } else {
+          // Customer found but no post linked
+          customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error" style="padding: 12px; text-align: center; color: #f59e0b;">⚠️ Customer found but no connected pole on map</div>';
+          setTimeout(function () {
+            customerSearchSuggestions.classList.remove('active');
+            searchClearBtn.classList.add('active');
+          }, 3000);
+        }
       })
       .catch(function (err) {
         console.error('Error fetching customer location:', err);
@@ -3164,8 +3359,12 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
 
+      // Show specific geolocation status
+      showRouteStatus('info', '⏳ Waiting for GPS permission...');
+
       navigator.geolocation.getCurrentPosition(
         function (pos) {
+          showRouteStatus('info', '✅ GPS location acquired. Calculating route...');
           var lat = pos.coords.latitude;
           var lng = pos.coords.longitude;
 

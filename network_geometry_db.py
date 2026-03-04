@@ -142,60 +142,6 @@ def build_primary_segments(posts):
     return segments
 
 
-def build_primary_to_transformer_edges(posts):
-    """
-    When Primary Bus ID and Transformer Bus ID both exist on a record,
-    draw a connection. Geometry: same pole → same coordinates (stored only).
-    """
-    edges = []
-    for p in posts:
-        if not p.get("primary_bus_id") or not p.get("transformer_bus_id"):
-            continue
-        lat, lng = p["lat"], p["lng"]
-        edges.append(
-            {
-                "lat1": lat,
-                "lng1": lng,
-                "lat2": lat,
-                "lng2": lng,
-                "from_pole": p.get("pole_number"),
-                "to_pole": p.get("pole_number"),
-                "from_bus": p["primary_bus_id"],
-                "to_bus": p["transformer_bus_id"],
-                "feeder": p.get("feeder"),
-                "circuit": p.get("circuit"),
-                "connection_type": "Primary_to_Transformer",
-            }
-        )
-    return edges
-
-
-def build_transformer_to_secondary_edges(posts):
-    """
-    When Transformer Bus ID and Sec. Bus ID both exist on a record,
-    draw a connection. Geometry: same pole → same coordinates (stored only).
-    """
-    edges = []
-    for p in posts:
-        if not p.get("transformer_bus_id") or not p.get("sec_bus_id"):
-            continue
-        lat, lng = p["lat"], p["lng"]
-        edges.append(
-            {
-                "lat1": lat,
-                "lng1": lng,
-                "lat2": lat,
-                "lng2": lng,
-                "from_pole": p.get("pole_number"),
-                "to_pole": p.get("pole_number"),
-                "from_bus": p["transformer_bus_id"],
-                "to_bus": p["sec_bus_id"],
-                "feeder": p.get("feeder"),
-                "circuit": p.get("circuit"),
-                "connection_type": "Transformer_to_Secondary",
-            }
-        )
-    return edges
 
 
 def build_all_edges(session, Post):
@@ -204,10 +150,7 @@ def build_all_edges(session, Post):
     Returns (list of line dicts, list of node dicts).
     """
     posts = get_posts_with_coords(session, Post)
-    primary = build_primary_segments(posts)
-    p2t = build_primary_to_transformer_edges(posts)
-    t2s = build_transformer_to_secondary_edges(posts)
-    lines = primary + p2t + t2s
+    lines = build_primary_segments(posts)
 
     nodes = []
     seen = set()
@@ -241,19 +184,21 @@ def lines_to_geojson(lines, nodes):
     features = []
 
     for n in nodes:
+        props = {
+            "feature_type": n.get("feature_type") or "node",
+            "pole_number": n.get("pole_number"),
+            "customer_identifier": n.get("customer_identifier"),
+            "post_id": n.get("id"),
+            "feeder": n.get("feeder"),
+            "circuit": n.get("circuit"),
+            "primary_bus_id": n.get("primary_bus_id"),
+            "transformer_bus_id": n.get("transformer_bus_id"),
+            "sec_bus_id": n.get("sec_bus_id"),
+        }
         features.append(
             {
                 "type": "Feature",
-                "properties": {
-                    "feature_type": "node",
-                    "pole_number": n.get("pole_number"),
-                    "post_id": n.get("id"),
-                    "feeder": n.get("feeder"),
-                    "circuit": n.get("circuit"),
-                    "primary_bus_id": n.get("primary_bus_id"),
-                    "transformer_bus_id": n.get("transformer_bus_id"),
-                    "sec_bus_id": n.get("sec_bus_id"),
-                },
+                "properties": props,
                 "geometry": {
                     "type": "Point",
                     "coordinates": [n["lng"], n["lat"]],
@@ -289,8 +234,12 @@ def lines_to_geojson(lines, nodes):
     return {"type": "FeatureCollection", "features": features}
 
 
-def _add_edge(lines, bus_to_coord, from_bus, to_bus, connection_type, feeder=None, circuit=None, phasing=None, processed_edges=None):
-    """Append one line to `lines` if both bus IDs resolve to coordinates. Uses bus_to_coord for lookup."""
+def _add_edge(lines, bus_to_coord, from_bus, to_bus, connection_type, feeder=None, circuit=None, phasing=None, processed_edges=None, used_buses=None):
+    """
+    Append one line to `lines` if both bus IDs resolve to coordinates. 
+    Uses bus_to_coord for lookup.
+    Includes a safety filter to prevent "stretched" lines > 1km (secondary) or 10km (primary).
+    """
     from_bus = (from_bus or "").strip()
     to_bus = (to_bus or "").strip()
     if not from_bus or not to_bus:
@@ -308,6 +257,24 @@ def _add_edge(lines, bus_to_coord, from_bus, to_bus, connection_type, feeder=Non
     b = bus_to_coord.get(to_bus)
     if not a or not b:
         return
+
+    # Length filter
+    dist = _haversine_meters(a["lat"], a["lng"], b["lat"], b["lng"])
+    if dist is not None:
+        # Stricter for secondary lines, more lenient for primary
+        max_dist = 1000 # 1km for secondary
+        if connection_type in ("Primary_to_Primary", "Distribution_Line", "Primary_Line", "Primary_to_Transformer"):
+            max_dist = 10000 # 10km for primary
+        
+        if dist > max_dist:
+            # Skip "stretching" lines that occur due to bus ID reuse or bad GPS
+            return
+
+    # Success: Add to lines and mark buses as used
+    if used_buses is not None:
+        used_buses.add(from_bus)
+        used_buses.add(to_bus)
+
     lines.append({
         "lat1": a["lat"],
         "lng1": a["lng"],
@@ -321,6 +288,7 @@ def _add_edge(lines, bus_to_coord, from_bus, to_bus, connection_type, feeder=Non
         "circuit": (circuit or "").strip() or a.get("circuit") or b.get("circuit"),
         "phasing": (phasing or "").strip() or None,
         "connection_type": connection_type,
+        "length_meters": round(dist, 2) if dist is not None else None
     })
 
 
@@ -352,12 +320,55 @@ def get_network_geometry(app):
             from models import Post
             from extensions import db
 
-            # Build bus → coordinate lookup from posts so every From/To resolves to (lat, lng).
-            # Register primary_bus_id, sec_bus_id, transformer_bus_id, and pole_number so
-            # lines like "P0000000100-72M → P0000000100-72Q" connect one coordinates to another.
+            # Build bus → coordinate lookup from BusNode and Post.
+            # BusNode is the authoritative source for coordinates in the bus-first architecture.
             bus_to_coord = {}
             nodes = []
             seen_node = set()
+
+            # 1. Load from BusNode first (authoritative electrical location)
+            try:
+                from models import BusNode, Post
+                # We join BusNode with Post to guarantee we get the latest physical coordinates
+                # even if the cached lat/lng on BusNode isn't synced yet.
+                query = db.session.query(BusNode, Post).outerjoin(Post, Post.pole_number == BusNode.pole_number)
+                for bn, post in query.all():
+                    # Prioritize live post coordinates over cached bus coordinates
+                    lat = post.lat if post and _valid_coord(post.lat, post.lng) else bn.lat
+                    lng = post.lng if post and _valid_coord(post.lat, post.lng) else bn.lng
+                    
+                    if getattr(bn, 'pole_number', None):
+                        pole_no = bn.pole_number
+                    else:
+                         pole_no = bn.bus_id
+                         
+                    if not _valid_coord(lat, lng):
+                        continue
+                        
+                    coord = {
+                        "lat": float(lat),
+                        "lng": float(lng),
+                        "feeder": (bn.feeder or "").strip() or None,
+                        "circuit": None, # BusNode doesn't have circuit yet
+                        "pole_number": pole_no,
+                    }
+                    bus_to_coord[bn.bus_id.strip()] = coord
+                    key = (coord["lat"], coord["lng"], coord["pole_number"])
+                    if key not in seen_node:
+                        seen_node.add(key)
+                        nodes.append({
+                            "bus_node_id": bn.id,
+                            "pole_number": pole_no,
+                            "lat": coord["lat"],
+                            "lng": coord["lng"],
+                            "feeder": coord["feeder"],
+                            "primary_bus_id": bn.bus_id,
+                            "feature_type": "node"
+                        })
+            except Exception as e:
+                app.logger.warning("Loading BusNode coords failed: %s", e)
+
+            # 2. Complement with Post data (for secondary buses and legacy records)
             posts = db.session.query(Post).all()
             for p in posts:
                 if not _valid_coord(p.lat, p.lng):
@@ -372,7 +383,11 @@ def get_network_geometry(app):
                 for bus_attr in ("primary_bus_id", "sec_bus_id", "transformer_bus_id", "pole_number"):
                     bus_val = getattr(p, bus_attr, None)
                     if bus_val and str(bus_val).strip():
-                        bus_to_coord[str(bus_val).strip()] = coord
+                        # Don't overwrite BusNode entries if they exist
+                        b_key = str(bus_val).strip()
+                        if b_key not in bus_to_coord:
+                            bus_to_coord[b_key] = coord
+                
                 key = (coord["lat"], coord["lng"], coord.get("pole_number"))
                 if key not in seen_node:
                     seen_node.add(key)
@@ -388,9 +403,40 @@ def get_network_geometry(app):
                         "sec_bus_id": (getattr(p, "sec_bus_id", None) or "").strip() or None,
                     })
 
+            # 3. Complement with Customer coordinates (for Service Drops)
+            try:
+                from models import Customer
+                customers = db.session.query(Customer).filter(Customer.lat.isnot(None), Customer.lng.isnot(None)).all()
+                for cust in customers:
+                    if not _valid_coord(cust.lat, cust.lng):
+                        continue
+                    coord = {
+                        "lat": float(cust.lat),
+                        "lng": float(cust.lng),
+                        "customer_name": cust.name,
+                    }
+                    # Map both customer_id if possible, prioritizing customer_id as the 'bus ID'
+                    if cust.customer_id:
+                        bus_to_coord[str(cust.customer_id).strip()] = coord
+                    
+                    # Also collect as nodes for map markers if desired
+                    key = (coord["lat"], coord["lng"], f"CUST:{cust.customer_id}")
+                    if key not in seen_node:
+                        seen_node.add(key)
+                        nodes.append({
+                            "customer_id": cust.id,
+                            "customer_identifier": cust.customer_id,
+                            "lat": coord["lat"],
+                            "lng": coord["lng"],
+                            "feature_type": "customer",
+                        })
+            except Exception as e:
+                app.logger.warning("Loading Customer coords failed: %s", e)
+
             # All lines come only from explicit from/to data (no inferred structure)
             lines = []
             processed_edges = set() # Track added edges to prevent duplicates (e.g. LineConnection overwriting DistributionLineSegment)
+            used_buses = set()      # Track which bus IDs are actually used by lines to ensure they have markers
 
             # 0. Augment bus_to_coord with transformer secondary buses that might not be on the post record directly
             # If a transformer is at PrimaryBus X (Which has coords), then SecondaryBus Y is typically at the same location.
@@ -413,17 +459,10 @@ def get_network_geometry(app):
             try:
                 from models import DistributionLineSegment
                 for seg in db.session.query(DistributionLineSegment).all():
-                    _add_edge(lines, bus_to_coord, seg.from_bus_id, seg.to_bus_id, "Distribution_Line", phasing=seg.phasing, processed_edges=processed_edges)
+                    _add_edge(lines, bus_to_coord, seg.from_bus_id, seg.to_bus_id, "Distribution_Line", phasing=seg.phasing, processed_edges=processed_edges, used_buses=used_buses)
             except Exception as e:
                 app.logger.warning("DistributionLineSegment in network geometry: %s", e)
 
-            # 2. Distribution transformers (from_primary_bus_id → to_secondary_bus_id)
-            try:
-                from models import DistributionTransformer
-                for t in db.session.query(DistributionTransformer).all():
-                    _add_edge(lines, bus_to_coord, t.from_primary_bus_id, t.to_secondary_bus_id, "Primary_to_Secondary", phasing=t.primary_phasing, processed_edges=processed_edges)
-            except Exception as e:
-                app.logger.warning("DistributionTransformer in network geometry: %s", e)
 
             # 3. Secondary line segments (from_bus_id → to_bus_id)
             try:
@@ -431,32 +470,64 @@ def get_network_geometry(app):
                 for sl in db.session.query(SecondaryLineSegment).all():
                     _add_edge(
                         lines, bus_to_coord, sl.from_bus_id, sl.to_bus_id, "Secondary_Line",
-                        feeder=sl.feeder, circuit=sl.circuit, phasing=sl.phasing, processed_edges=processed_edges
+                        feeder=sl.feeder, circuit=sl.circuit, phasing=sl.phasing, processed_edges=processed_edges, used_buses=used_buses
                     )
             except Exception as e:
                 app.logger.warning("SecondaryLineSegment in network geometry: %s", e)
 
-            # 4. Line connections (from_bus → to_bus)
+            # 4. Secondary Service Drops (from_bus_id → to_customer_id)
+            try:
+                from models import SecondaryServiceDrop
+                for sd in db.session.query(SecondaryServiceDrop).all():
+                    _add_edge(
+                        lines, bus_to_coord, sd.from_bus_id, sd.to_customer_id, "Secondary_to_Customer",
+                        phasing=sd.phasing, processed_edges=processed_edges, used_buses=used_buses
+                    )
+            except Exception as e:
+                app.logger.warning("SecondaryServiceDrop in network geometry: %s", e)
+
+            # 5. Line connections (from_bus → to_bus)
             try:
                 from models import LineConnection
-                for conn in db.session.query(LineConnection).all():
+                for conn in db.session.query(LineConnection).filter(
+                    LineConnection.connection_type.notin_(['Primary_to_Transformer', 'Transformer_to_Secondary'])
+                ).all():
                     _add_edge(
                         lines, bus_to_coord, conn.from_bus, conn.to_bus,
                         conn.connection_type or "Line_Connection",
-                        feeder=conn.feeder, circuit=conn.circuit, processed_edges=processed_edges
+                        feeder=conn.feeder, circuit=conn.circuit, phasing=getattr(conn, 'phasing', None),
+                        processed_edges=processed_edges, used_buses=used_buses
                     )
             except Exception as e:
                 app.logger.warning("LineConnection in network geometry: %s", e)
 
-            # Compute length (meters) for each line and total
+            # Final Node Pass: Ensure all used bus IDs have markers, even virtual ones
+            for bus_id in used_buses:
+                coord = bus_to_coord.get(bus_id)
+                if not coord:
+                    continue
+                
+                # Use normalized key for seen_node check
+                key = (coord["lat"], coord["lng"], bus_id)
+                if key not in seen_node:
+                    seen_node.add(key)
+                    node_data = {
+                        "pole_number": bus_id,
+                        "lat": coord["lat"],
+                        "lng": coord["lng"],
+                        "feeder": coord.get("feeder"),
+                        "feature_type": "virtual_node"
+                    }
+                    # If it's a customer, label it so
+                    if bus_id.startswith("CUST:") or "customer_name" in coord:
+                         node_data["feature_type"] = "customer"
+                    
+                    nodes.append(node_data)
+
+            # Stats and total length calculation
             total_length_m = 0.0
             for line in lines:
-                m = _haversine_meters(
-                    line.get("lat1"), line.get("lng1"),
-                    line.get("lat2"), line.get("lng2"),
-                )
-                line["length_meters"] = round(m, 2) if m is not None else None
-                if line["length_meters"] is not None:
+                if line.get("length_meters") is not None:
                     total_length_m += line["length_meters"]
 
             geojson = lines_to_geojson(lines, nodes)
