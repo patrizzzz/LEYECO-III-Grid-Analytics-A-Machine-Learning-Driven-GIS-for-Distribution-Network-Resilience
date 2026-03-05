@@ -94,7 +94,7 @@ def api_posts():
         
         total = query.count()
         db_posts = query.offset((page - 1) * per_page).limit(per_page).all()
-        posts = [{"id": p.id, "name": p.name, "lat": p.lat, "lng": p.lng, "status": p.status} for p in db_posts]
+        posts = [{"id": p.id, "name": p.name, "lat": p.lat, "lng": p.lng, "status": p.status, "kva_rating": p.kva_rating, "pole_number": p.pole_number} for p in db_posts]
         
         total_pages = (total + per_page - 1) // per_page
         

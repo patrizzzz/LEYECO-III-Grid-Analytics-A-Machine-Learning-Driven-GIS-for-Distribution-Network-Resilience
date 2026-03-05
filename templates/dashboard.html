@@ -1144,10 +1144,12 @@
         rows.forEach(row => {
           const id = row.querySelector('td:nth-child(1)')?.textContent || '';
           const name = row.querySelector('td:nth-child(2)')?.textContent || '';
+          const feeder = row.querySelector('td:nth-child(3)')?.textContent || '';
           const status = row.querySelector('td:nth-child(5)')?.textContent || '';
 
           const match = id.toLowerCase().includes(query) ||
             name.toLowerCase().includes(query) ||
+            feeder.toLowerCase().includes(query) ||
             status.toLowerCase().includes(query);
 
           row.style.display = match ? '' : 'none';

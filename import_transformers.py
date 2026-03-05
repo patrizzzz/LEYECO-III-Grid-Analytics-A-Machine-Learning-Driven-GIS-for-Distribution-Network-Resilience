@@ -1,46 +1,59 @@
 #!/usr/bin/env python3
 """
 Command-line importer for distribution transformers (example2.csv style).
-Creates/updates `DistributionTransformer` records and attempts to create
-`LineConnection` entries linking the transformer's `from_primary_bus_id`
-to its `to_secondary_bus_id` where possible (links to `Post` via primary_bus_id).
+Creates/updates `DistributionTransformer` records and updates the linked `Post`.
+Also creates `LineConnection` entries for the transformer.
 
-Usage: python import_transformers.py example2.csv
+Compatible with CSVs having newlines in headers like `example2.csv`.
 """
 
-import csv
 import sys
+import pandas as pd
 from pathlib import Path
 from app import app, db
 from models import DistributionTransformer, Post, LineConnection
 
 
 def normalize_column_name(name):
-    if not name:
+    """Normalize column name for flexible matching, handling newlines and extra spaces."""
+    if not name or pd.isna(name):
         return ''
+    normalized = str(name).strip().lower()
+    # Replace any whitespace sequence (including newlines) with a single underscore
     import re
-    # collapse any whitespace (spaces, newlines, tabs) to single underscore
-    return re.sub(r"\s+", "_", str(name).strip().lower())
+    normalized = re.sub(r"\s+", "_", normalized)
+    # Remove special chars but keep underscores
+    normalized = normalized.replace('(', '').replace(')', '').replace('-', '_').replace('%', 'pct')
+    # Remove consecutive underscores
+    while '__' in normalized:
+        normalized = normalized.replace('__', '_')
+    return normalized.strip('_')
 
 
-def find_value(row, choices):
-    """Flexible lookup in a CSV row (dict) using multiple possible header names."""
-    if not row:
+def sanitize_float(value):
+    """Convert value to float, return None if invalid or NaN."""
+    import math
+    if value is None or (isinstance(value, float) and math.isnan(value)):
         return None
-    targets = [normalize_column_name(c) for c in choices]
-    for k, v in row.items():
-        if normalize_column_name(k) in targets:
-            return str(v).strip() if v is not None else None
-    return None
-
-
-def sanitize_float(v):
-    if v is None or str(v).strip() == '':
+    s = str(value).strip()
+    if s == '' or s.lower() == 'nan':
         return None
+    s = s.replace(',', '')
     try:
-        return float(v)
-    except Exception:
+        f = float(s)
+        if math.isnan(f):
+            return None
+        return f
+    except (ValueError, AttributeError, TypeError):
         return None
+
+
+def sanitize_string(value):
+    """Convert value to string, return None if invalid or nan"""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    s = str(value).strip()
+    return s if s and s.lower() != 'nan' else None
 
 
 def import_transformers(csv_file):
@@ -49,107 +62,148 @@ def import_transformers(csv_file):
         print(f"File not found: {csv_file}")
         return
 
-    with open(p, 'r', encoding='utf-8') as fh:
-        reader = csv.DictReader(fh)
-        rows = list(reader)
-
-    if not rows:
-        print('No data rows found in file')
-        return
-
-    created = 0
-    updated = 0
-    skipped = 0
-    errors = []
-
     with app.app_context():
-        for i, row in enumerate(rows, start=2):
-            try:
-                transformer_id = find_value(row, ['Transformer ID', 'Distribution Transformer ID', 'transformer_id', 'distribution transformer id']) or ''
-                from_bus = find_value(row, ['From Primary Bus ID', 'From_Primary_Bus_ID', 'from_primary_bus_id', 'from bus id', 'from_bus_id']) or ''
-                to_bus = find_value(row, ['To Secondary Bus ID', 'To_Secondary_Bus_ID', 'to_secondary_bus_id', 'to bus id', 'to_bus_id']) or ''
-
-                if not transformer_id or not from_bus:
-                    skipped += 1
-                    errors.append({'row': i, 'error': 'transformer_id and from_primary_bus_id required'})
-                    continue
-
-                def get_str(names):
-                    return find_value(row, names)
-
-                def get_float(names):
-                    return sanitize_float(find_value(row, names))
-
-                data = {
-                    'transformer_id': transformer_id,
-                    'from_primary_bus_id': from_bus,
-                    'to_secondary_bus_id': get_str(['To Secondary Bus ID', 'to_secondary_bus_id', 'to bus id']),
-                    'primary_phasing': get_str(['Primary Phasing', 'primary_phasing']),
-                    'secondary_phasing': get_str(['Secondary Phasing', 'secondary_phasing']),
-                    'installation_type': get_str(['Installation Type', 'installation_type']),
-                    'no_dts_in_bank': (lambda x: int(x) if x and str(x).strip().isdigit() else None)(find_value(row, ['No. DTs in Bank', 'No DTs in Bank', 'no_dts_in_bank'])),
-                    'connection': get_str(['Connection', 'connection']),
-                    'kva_rating': get_float(['kVA Rating', 'KVA Rating', 'kva_rating']),
-                    'primary_voltage_kv': get_float(['Primary Voltage Rating(kV)', 'Primary Voltage Rating (kV)', 'primary_voltage_kv']),
-                    'secondary_voltage_kv': get_float(['Secondary Voltage Rating (kV)', 'secondary_voltage_kv']),
-                    'primary_tap_kv': get_float(['Primary Tap Voltage (kV)', 'primary_tap_kv']),
-                    'secondary_tap_kv': get_float(['Secondary Tap Voltage (kV)', 'secondary_tap_kv']),
-                    'pct_z': get_float(['%Z', 'pct_z']),
-                    'xr_ratio': get_float(['X/R Ratio', 'xr_ratio']),
-                    'no_load_loss_kw': get_float(['No-Load Loss (kW)', 'no_load_loss_kw']),
-                    'exciting_current_pct': get_float(['Exciting Current (%)', 'exciting_current_pct']),
-                }
-
-                # Upsert transformer
-                existing = DistributionTransformer.query.filter_by(transformer_id=transformer_id, from_primary_bus_id=from_bus).first()
-                if existing:
-                    for k, v in data.items():
-                        if v is not None:
-                            setattr(existing, k, v)
-                    updated += 1
-                else:
-                    new = DistributionTransformer(**{k: v for k, v in data.items() if v is not None})
-                    db.session.add(new)
-                    created += 1
-
-                # If there's a to_bus value, try to create a LineConnection linking them
-                if data.get('to_secondary_bus_id'):
-                    from_bus_val = from_bus
-                    to_bus_val = data.get('to_secondary_bus_id')
-
-                    # Prefer using the post's primary_bus_id if a Post exists matching from_bus
-                    post = Post.query.filter((Post.primary_bus_id == from_bus) | (Post.pole_number == from_bus)).first()
-                    if post and post.primary_bus_id:
-                        from_bus_val = post.primary_bus_id
-
-                    # Avoid duplicates - unique constraint handled in model but check first
-                    existing_conn = LineConnection.query.filter_by(from_bus=from_bus_val, to_bus=to_bus_val, connection_type='Transformer').first()
-                    if not existing_conn:
-                        conn = LineConnection(from_bus=from_bus_val, to_bus=to_bus_val, connection_type='Transformer', feeder=None, circuit=None)
-                        db.session.add(conn)
-
-                # periodically flush
-                if (created + updated) % 100 == 0:
-                    db.session.flush()
-
-            except Exception as e:
-                errors.append({'row': i, 'error': str(e)})
-                db.session.rollback()
+        print("=" * 80)
+        print("IMPORTING DISTRIBUTION TRANSFORMERS")
+        print("=" * 80)
+        print()
 
         try:
-            db.session.commit()
-        except Exception as e:
-            print('Database commit failed:', e)
-            db.session.rollback()
+            # Read CSV with flexible encoding
+            df = pd.read_csv(csv_file, encoding='utf-8-sig')
+            
+            # Normalize all column names
+            original_columns = df.columns.tolist()
+            df.columns = [normalize_column_name(c) for c in df.columns]
+            
+            print(f"Loaded {len(df)} rows from {csv_file}")
+            print()
 
-    print(f"Done. Created: {created}, Updated: {updated}, Skipped: {skipped}, Errors: {len(errors)}")
-    if errors:
-        for e in errors[:10]:
-            print('  -', e)
+            created = 0
+            updated = 0
+            post_updates = 0
+            skipped = 0
+            errors = 0
+
+            for idx, row in df.iterrows():
+                try:
+                    # Map field variations
+                    transformer_id = sanitize_string(
+                        row.get('distribution_transformer_id') or 
+                        row.get('transformer_id') or 
+                        row.get('transformer_id_num')
+                    )
+                    
+                    from_bus = sanitize_string(
+                        row.get('from_primary_bus_id') or 
+                        row.get('from_bus_id') or 
+                        row.get('primary_bus_id')
+                    )
+                    
+                    if not transformer_id or not from_bus:
+                        skipped += 1
+                        continue
+
+                    to_bus = sanitize_string(
+                        row.get('to_secondary_bus_id') or 
+                        row.get('to_bus_id') or 
+                        row.get('secondary_bus_id')
+                    )
+
+                    data = {
+                        'transformer_id': transformer_id,
+                        'from_primary_bus_id': from_bus,
+                        'to_secondary_bus_id': to_bus,
+                        'primary_phasing': sanitize_string(row.get('primary_phasing')),
+                        'secondary_phasing': sanitize_string(row.get('secondary_phasing')),
+                        'installation_type': sanitize_string(row.get('installation_type')),
+                        'no_dts_in_bank': (lambda x: int(x) if x is not None and str(x).replace('.0','').isdigit() else None)(sanitize_float(row.get('no_dts_in_bank'))),
+                        'connection': sanitize_string(row.get('connection')),
+                        'kva_rating': sanitize_float(row.get('kva_rating')),
+                        'primary_voltage_kv': sanitize_float(row.get('primary_voltage_ratingkv')),
+                        'secondary_voltage_kv': sanitize_float(row.get('secondary_voltage_rating_kv')),
+                        'primary_tap_kv': sanitize_float(row.get('primary_tap_voltage_kv')),
+                        'secondary_tap_kv': sanitize_float(row.get('secondary_tap_voltage_kv')),
+                        'pct_z': sanitize_float(row.get('pctz')),
+                        'xr_ratio': sanitize_float(row.get('x/r_ratio')),
+                        'no_load_loss_kw': sanitize_float(row.get('no_load_loss_kw')),
+                        'exciting_current_pct': sanitize_float(row.get('exciting_current_pct')),
+                    }
+
+                    # 1. Upsert DistributionTransformer
+                    existing = DistributionTransformer.query.filter_by(
+                        transformer_id=transformer_id, 
+                        from_primary_bus_id=from_bus
+                    ).first()
+                    
+                    if existing:
+                        for k, v in data.items():
+                            if v is not None:
+                                setattr(existing, k, v)
+                        updated += 1
+                    else:
+                        new_dt = DistributionTransformer(**{k: v for k, v in data.items() if v is not None})
+                        db.session.add(new_dt)
+                        created += 1
+
+                    # 2. Update linked Post record with summary data
+                    # This ensures the pole info modal shows transformer data
+                    post = Post.query.filter(
+                        (Post.primary_bus_id == from_bus) | 
+                        (Post.pole_number == from_bus)
+                    ).first()
+                    
+                    if post:
+                        if data['kva_rating'] is not None:
+                            post.kva_rating = data['kva_rating']
+                        if data['primary_phasing'] is not None:
+                            post.transformer_phasing = data['primary_phasing']
+                        post.transformer_bus_id = transformer_id
+                        post_updates += 1
+
+                    # 3. Create LineConnection linking Primary to Secondary Side
+                    if to_bus:
+                        # Normalize from_bus to use the post's primary_bus_id if possible
+                        from_bus_val = post.primary_bus_id if (post and post.primary_bus_id) else from_bus
+                        
+                        existing_conn = LineConnection.query.filter_by(
+                            from_bus=from_bus_val, 
+                            to_bus=to_bus, 
+                            connection_type='Transformer'
+                        ).first()
+                        
+                        if not existing_conn:
+                            conn = LineConnection(
+                                from_bus=from_bus_val, 
+                                to_bus=to_bus, 
+                                connection_type='Transformer'
+                            )
+                            db.session.add(conn)
+
+                    if (created + updated) % 50 == 0:
+                        db.session.flush()
+
+                except Exception as e:
+                    errors += 1
+                    print(f"  ⚠️  Row {idx + 2}: {str(e)}")
+
+            db.session.commit()
+            print()
+            print("=" * 80)
+            print("IMPORT COMPLETE")
+            print("=" * 80)
+            print(f"  Created:      {created}")
+            print(f"  Updated:      {updated}")
+            print(f"  Post Updates: {post_updates}")
+            print(f"  Skipped:      {skipped}")
+            print(f"  Errors:       {errors}")
+            print()
+
+        except Exception as e:
+            print(f"Import failed: {str(e)}")
+            db.session.rollback()
 
 
 if __name__ == '__main__':
-    csv_file = 'example2.csv'
-    if len(sys.argv) > 1:
-        csv_file = sys.argv[1]
+    csv_file = sys.argv[1] if len(sys.argv) > 1 else 'example2.csv'
     import_transformers(csv_file)

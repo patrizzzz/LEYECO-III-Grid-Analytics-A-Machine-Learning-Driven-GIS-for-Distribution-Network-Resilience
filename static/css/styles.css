@@ -2203,79 +2203,35 @@ body.dark-theme .btn-icon:not(.delete-post):hover img {
   font-weight: 600 !important;
 }
 
-/* Map Settings Panel */
-.map-settings-panel {
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e2e8f0);
-  border-radius: 10px !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.06);
+/* Sidebar Map Settings */
+.sidebar-map-settings {
+  padding: 4px 8px 8px;
+  max-height: 60vh;
+  overflow-y: auto;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
-  color: var(--text-primary, #1e293b);
-  width: 220px;
-  overflow: hidden;
-  transition: box-shadow 0.2s;
 }
 
-.map-settings-panel:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.13), 0 2px 6px rgba(0, 0, 0, 0.08);
+.sidebar-map-settings::-webkit-scrollbar {
+  width: 4px;
 }
 
-.map-settings-panel.msp-collapsed {
-  width: auto;
-  min-width: 140px;
+.sidebar-map-settings::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 2px;
 }
 
-/* Header */
-.msp-header {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 12px;
-  background: linear-gradient(135deg, var(--primary, #3b82f6), var(--primary-dark, #2563eb));
-  color: #fff;
-  font-weight: 700;
-  font-size: 0.82rem;
-  letter-spacing: 0.02em;
-  border-bottom: none;
+/* Arrow rotation for toggle */
+.sidebar-msp-arrow {
+  transition: transform 0.2s ease;
 }
 
-.msp-header svg {
-  opacity: 0.9;
-  flex-shrink: 0;
+.sidebar-msp-arrow.expanded {
+  transform: rotate(90deg);
 }
 
-.msp-header span {
-  flex: 1;
-}
-
-.msp-toggle {
-  background: rgba(255, 255, 255, 0.18);
-  border: none;
-  color: #fff;
-  font-size: 0.85rem;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s;
-  line-height: 1;
-}
-
-.msp-toggle:hover {
-  background: rgba(255, 255, 255, 0.32);
-}
-
-/* Body */
-.msp-body {
-  padding: 0;
-}
-
-/* Sections */
+/* Sections inside sidebar settings */
 .msp-section {
-  padding: 8px 12px 6px;
+  padding: 8px 6px 6px;
   border-bottom: 1px solid var(--border, #e2e8f0);
 }
 
@@ -2284,29 +2240,29 @@ body.dark-theme .btn-icon:not(.delete-post):hover img {
 }
 
 .msp-section-title {
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-secondary, #64748b);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 /* Option rows */
 .msp-option-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .msp-option {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   padding: 3px 4px;
-  border-radius: 5px;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-primary, #334155);
   transition: background 0.12s;
@@ -2320,8 +2276,8 @@ body.dark-theme .btn-icon:not(.delete-post):hover img {
 .msp-option input[type="checkbox"],
 .msp-option input[type="radio"] {
   accent-color: var(--primary, #3b82f6);
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   margin: 0;
   cursor: pointer;
   flex-shrink: 0;
@@ -2335,7 +2291,7 @@ body.dark-theme .btn-icon:not(.delete-post):hover img {
 
 /* Feeder filter list: scrollable when many feeders */
 .msp-feeder-list {
-  max-height: 130px;
+  max-height: 120px;
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -2351,12 +2307,12 @@ body.dark-theme .btn-icon:not(.delete-post):hover img {
 
 .msp-feeder-all {
   border-bottom: 1px solid var(--border, #e2e8f0);
-  padding-bottom: 4px;
+  padding-bottom: 3px;
   margin-bottom: 2px;
 }
 
 .msp-hint {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--text-secondary, #94a3b8);
   font-style: italic;
   padding: 2px 4px;
@@ -2366,22 +2322,22 @@ body.dark-theme .btn-icon:not(.delete-post):hover img {
 .msp-color-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 2px 0 6px;
+  gap: 6px;
+  padding: 2px 0 4px;
 }
 
 .msp-color-label {
   flex: 1;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: var(--text-primary, #334155);
 }
 
 .msp-color-input {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border: 2px solid var(--border, #e2e8f0);
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 0;
   cursor: pointer;
   background: transparent;
@@ -2397,7 +2353,7 @@ body.dark-theme .btn-icon:not(.delete-post):hover img {
   border: none;
   color: var(--text-secondary, #94a3b8);
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   padding: 2px 4px;
   border-radius: 3px;
   transition: color 0.12s, background 0.12s;
@@ -2413,26 +2369,20 @@ body.dark-theme .btn-icon:not(.delete-post):hover img {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   background: var(--primary, #3b82f6);
   color: #fff;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   font-weight: 700;
   cursor: help;
   flex-shrink: 0;
 }
 
 /* Dark theme overrides */
-body.dark-theme .map-settings-panel {
-  background: var(--surface);
-  border-color: var(--border);
+body.dark-theme .sidebar-map-settings {
   color: var(--text-primary);
-}
-
-body.dark-theme .msp-header {
-  background: linear-gradient(135deg, #1e40af, #1d4ed8);
 }
 
 body.dark-theme .msp-option:hover {
@@ -3001,18 +2951,19 @@ body.dark-theme .msp-color-input {
   right: 0;
   background: var(--surface);
   border: 1.5px solid var(--border);
-  border-top: 1px solid var(--border);
-  border-radius: 0 0 8px 8px;
-  max-height: 240px;
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  max-height: 280px;
   overflow-y: auto;
-  z-index: 1001;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  margin-top: 0;
-  transition: opacity 0.25s ease-out, transform 0.25s ease-out, visibility 0.25s ease-out;
+  z-index: 2005;
+  box-shadow: var(--shadow-xl);
+  margin-top: -1px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
   transform: translateY(-10px);
+  backdrop-filter: blur(8px);
 }
 
 .customer-search-suggestions.active {
@@ -3023,11 +2974,11 @@ body.dark-theme .msp-color-input {
 }
 
 .customer-search-item {
-  padding: var(--space-10) var(--space-12);
+  padding: var(--space-12) var(--space-16);
   cursor: pointer;
   border-bottom: 1px solid var(--border-light);
   font-size: var(--fs-sm);
-  transition: all 0.25s ease-out;
+  transition: all 0.2s ease;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -3038,20 +2989,19 @@ body.dark-theme .msp-color-input {
 }
 
 .customer-search-item:hover:not(.customer-search-loading):not(.customer-search-empty):not(.customer-search-error) {
-  background-color: var(--surface-hover);
-  padding-left: var(--space-14);
-  transform: translateX(4px);
+  background-color: var(--primary-glow);
+  padding-left: 20px;
 }
 
 .customer-search-item:focus {
   outline: none;
-  background-color: var(--surface-hover);
-  box-shadow: inset 2px 0 0 var(--primary);
+  background-color: var(--primary-glow);
+  box-shadow: inset 4px 0 0 var(--primary);
 }
 
 .customer-search-item-id {
-  font-weight: var(--fw-semibold);
-  color: var(--text-primary);
+  font-weight: var(--fw-bold);
+  color: var(--primary);
   font-size: var(--fs-sm);
 }
 
@@ -3061,36 +3011,28 @@ body.dark-theme .msp-color-input {
   margin-top: 0;
 }
 
-/* Search states */
-.customer-search-loading {
-  color: var(--text-secondary);
-  justify-content: center;
-  cursor: default;
-  animation: pulse 1.5s ease-in-out infinite;
+/* Map Header Actions Container */
+.map-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-12);
 }
 
-@keyframes pulse {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.6;
-  }
+.map-header h1 {
+  margin: 0;
 }
 
-.customer-search-empty {
-  color: var(--text-secondary);
-  justify-content: center;
-  cursor: default;
+.map-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
 }
 
-.customer-search-error {
-  color: #b91c1c;
-  justify-content: center;
-  cursor: default;
+.expandable-search-container {
+  display: flex;
+  align-items: center;
+  position: relative;
 }
 
 /* Expandable Search Icon & Bar */
@@ -3098,8 +3040,7 @@ body.dark-theme .msp-color-input {
   display: flex;
   align-items: center;
   position: relative;
-  height: 44px;
-  contain: layout style paint;
+  z-index: 1002;
 }
 
 .search-icon-btn {
@@ -3146,32 +3087,33 @@ body.dark-theme .msp-color-input {
 .search-bar-expanded {
   position: absolute;
   top: 0;
-  right: 60px;
+  right: 0;
   background: var(--surface);
   border: 1.5px solid var(--border);
-  border-right: none;
-  border-radius: 8px 0 0 8px;
-  padding: var(--space-8) var(--space-12);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
-  width: 300px;
-  z-index: 1000;
-  backdrop-filter: blur(4px);
-  height: 100%;
+  border-radius: var(--radius-md);
+  padding: 0;
+  box-shadow: var(--shadow-lg);
+  width: 0;
+  max-width: 320px;
+  z-index: 1001;
+  overflow: hidden;
+  height: 44px;
   display: flex;
   align-items: center;
-  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  will-change: transform, opacity;
+  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateX(30px);
 }
 
 .search-bar-expanded.active {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transform: translateX(0);
+  width: 320px;
+  padding-right: 44px;
+  /* Make overflow visible when active so dropdown suggestions aren't clipped */
+  overflow: visible;
 }
 
 .search-bar-expanded .top-search-input {
@@ -3213,7 +3155,8 @@ body.dark-theme .msp-color-input {
 
 .search-clear-btn {
   position: absolute;
-  right: 12px;
+  right: 48px;
+  /* Move left to avoid overlap with the expansion toggle button */
   background: transparent;
   border: none;
   font-size: 18px;
@@ -3243,13 +3186,7 @@ body.dark-theme .msp-color-input {
   display: none;
 }
 
-/* Top-Right Search Bar */
-.top-search-container {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
-}
-
+/* Expanded Search Input specific overrides (moved back from top-search-container) */
 .top-search-input {
   width: 100%;
   padding: var(--space-10) var(--space-12);

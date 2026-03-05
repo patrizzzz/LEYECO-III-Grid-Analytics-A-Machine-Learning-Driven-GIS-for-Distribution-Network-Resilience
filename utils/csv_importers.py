@@ -424,6 +424,15 @@ def import_transformers_from_csv(csv_file):
                     )
                     db.session.add(conn)
                     existing_connections[conn_key] = conn
+
+            # --- Sync to Post Table for Map Visualization ---
+            if t.from_primary_bus_id:
+                # We reuse existing_posts from previous imports if possible, but here we'll pull fresh or use a local cache
+                # For simplicity and to avoid pre-loading 10k poles, we'll do a quick lookup
+                p = Post.query.filter((Post.pole_number == t.from_primary_bus_id) | (Post.primary_bus_id == t.from_primary_bus_id)).first()
+                if p:
+                    p.kva_rating = t.kva_rating
+                    p.transformer_bus_id = t.from_primary_bus_id
             
         except Exception as e:
             stats['errors'].append(f"Row {row_idx}: {str(e)}")

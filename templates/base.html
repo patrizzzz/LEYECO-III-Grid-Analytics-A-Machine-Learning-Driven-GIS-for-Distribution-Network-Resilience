@@ -61,6 +61,26 @@
                 <span class="text">Map</span>
               </a>
             </li>
+            {% if (active_page or '') == 'map' %}
+            <li class="sidebar__item" style="height: auto;">
+              <a class="sidebar__link" href="#" id="sidebar-map-settings-toggle" data-tooltip="Map Settings"
+                style="padding-left: 1rem; border-left: 2px solid transparent;">
+                <span class="icon" style="opacity: 0.5;">
+                  <svg width="14" height="14" fill="currentColor" viewBox="0 -960 960 960">
+                    <path
+                      d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z" />
+                  </svg>
+                </span>
+                <span class="text" style="font-size: 0.8rem;">Map Settings</span>
+                <span class="text sidebar-msp-arrow" style="font-size: 0.7rem; margin-left: auto;">▸</span>
+              </a>
+            </li>
+            <li class="sidebar__item" style="height: auto; display: none;" id="sidebar-map-settings-wrapper">
+              <div id="sidebar-map-settings" class="sidebar-map-settings">
+                <!-- Content injected by main.js -->
+              </div>
+            </li>
+            {% endif %}
             <li class="sidebar__item">
               <a class="sidebar__link {{ 'is-active' if (active_page or '') == 'dashboard' else '' }}" href="/dashboard"
                 data-tooltip="Electrical Post Data">
@@ -96,6 +116,20 @@
               </a>
             </li>
             {% endif %}
+            <li class="sidebar__item">
+              <a class="sidebar__link {{ 'is-active' if (active_page or '') == 'predictions' else '' }}"
+                href="/predictions" data-tooltip="ML Predictions">
+                <span class="icon">
+                  <svg width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                    <path
+                      d="M7 2.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v2.379l1.854-1.854a.5.5 0 1 1 .707.707L9.207 5.586l1.854 1.854a.5.5 0 0 1-.707.707L8.5 6.293V8.5a.5.5 0 0 1-1 0V6.293L5.646 8.147a.5.5 0 1 1-.707-.707L6.793 5.586 4.939 3.732a.5.5 0 1 1 .707-.707L7.5 4.879V2.5z" />
+                    <path d="M2 14V2h1v11h11v1H2z" />
+                    <path d="M2 13.5a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-11a.5.5 0 0 1-.5-.5z" />
+                  </svg>
+                </span>
+                <span class="text">ML Predictions</span>
+              </a>
+            </li>
           </ul>
 
           {% if current_user and (current_user.role or '')|lower == 'admin' %}
@@ -128,33 +162,113 @@
               </a>
             </li>
             {% if (active_page or '') == 'resources' %}
+            <!-- Infrastructure accordion -->
             <li class="sidebar__item" style="height: auto;">
-              <a class="sidebar__link res-nav-sub" href="#" data-tab="tab-infrastructure" data-tooltip="Infrastructure"
-                style="padding-left: 1rem; border-left: 2px solid transparent;">
+              <a class="sidebar__link res-cat-toggle" href="#" data-cat="cat-infrastructure"
+                data-tooltip="Infrastructure" style="padding-left: 1rem; border-left: 2px solid transparent;">
                 <span class="icon" style="opacity: 0.5; font-size: 14px;">🗼</span>
                 <span class="text" style="font-size: 0.8rem;">Infrastructure</span>
+                <span class="text res-cat-arrow" style="font-size: 0.65rem; margin-left: auto;">▸</span>
               </a>
             </li>
+            <li class="sidebar__item res-cat-items" id="cat-infrastructure" style="height: auto; display: none;">
+              <div style="padding: 2px 0 4px 1.6rem;">
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-posts"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">📍</span><span class="text">Poles (Step
+                    1)</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-bus-nodes"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">🗺️</span><span class="text">Bus Nodes (Step
+                    2)</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-primary-lines"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">📍</span><span class="text">Primary Lines (Step
+                    3)</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-transformers"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">⚡</span><span
+                    class="text">Transformers</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-secondary-lines"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">〰️</span><span class="text">Secondary
+                    Lines</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-service-drops"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">🏠</span><span class="text">Service
+                    Drops</span></a>
+              </div>
+            </li>
+            <!-- Customer Data accordion -->
             <li class="sidebar__item" style="height: auto;">
-              <a class="sidebar__link res-nav-sub" href="#" data-tab="tab-customers" data-tooltip="Customer Data"
+              <a class="sidebar__link res-cat-toggle" href="#" data-cat="cat-customers" data-tooltip="Customer Data"
                 style="padding-left: 1rem; border-left: 2px solid transparent;">
                 <span class="icon" style="opacity: 0.5; font-size: 14px;">👥</span>
                 <span class="text" style="font-size: 0.8rem;">Customer Data</span>
+                <span class="text res-cat-arrow" style="font-size: 0.65rem; margin-left: auto;">▸</span>
               </a>
             </li>
+            <li class="sidebar__item res-cat-items" id="cat-customers" style="height: auto; display: none;">
+              <div style="padding: 2px 0 4px 1.6rem;">
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-customers"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">👥</span><span
+                    class="text">Customers</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-energy-consumption"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">⚡</span><span class="text">Energy
+                    Consumption</span></a>
+              </div>
+            </li>
+            <!-- Assets accordion -->
             <li class="sidebar__item" style="height: auto;">
-              <a class="sidebar__link res-nav-sub" href="#" data-tab="tab-assets" data-tooltip="Assets"
+              <a class="sidebar__link res-cat-toggle" href="#" data-cat="cat-assets" data-tooltip="Assets"
                 style="padding-left: 1rem; border-left: 2px solid transparent;">
                 <span class="icon" style="opacity: 0.5; font-size: 14px;">⚙️</span>
                 <span class="text" style="font-size: 0.8rem;">Assets</span>
+                <span class="text res-cat-arrow" style="font-size: 0.65rem; margin-left: auto;">▸</span>
               </a>
             </li>
+            <li class="sidebar__item res-cat-items" id="cat-assets" style="height: auto; display: none;">
+              <div style="padding: 2px 0 4px 1.6rem;">
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-voltage-regulators"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">⚙️</span><span class="text">Voltage
+                    Regulators</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-shunt-capacitors"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">🔋</span><span class="text">Shunt
+                    Capacitors</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-shunt-inductors"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">🔌</span><span class="text">Shunt
+                    Inductors</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-series-inductors"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">🔗</span><span class="text">Series
+                    Inductors</span></a>
+              </div>
+            </li>
+            <!-- Export & Danger accordion -->
             <li class="sidebar__item" style="height: auto;">
-              <a class="sidebar__link res-nav-sub" href="#" data-tab="tab-export" data-tooltip="Export & Danger"
+              <a class="sidebar__link res-cat-toggle" href="#" data-cat="cat-export" data-tooltip="Export &amp; Danger"
                 style="padding-left: 1rem; border-left: 2px solid transparent;">
                 <span class="icon" style="opacity: 0.5; font-size: 14px;">📤</span>
-                <span class="text" style="font-size: 0.8rem;">Export & Danger</span>
+                <span class="text" style="font-size: 0.8rem;">Export &amp; Danger</span>
+                <span class="text res-cat-arrow" style="font-size: 0.65rem; margin-left: auto;">▸</span>
               </a>
+            </li>
+            <li class="sidebar__item res-cat-items" id="cat-export" style="height: auto; display: none;">
+              <div style="padding: 2px 0 4px 1.6rem;">
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-export"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">📊</span><span class="text">Master CSV
+                    Export</span></a>
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-danger"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">⚠️</span><span class="text">Delete All
+                    Data</span></a>
+              </div>
             </li>
             {% endif %}
           </ul>

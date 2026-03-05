@@ -1,0 +1,5 @@
+﻿Verifying trace for customer: 2020140010
+Starting at Bus: S000090-0000011
+FOUND DT: DT0000000090U at dist 5 (Bus DT0000000090)
+  Primary Bus: P0000000090
+Final Result: ID=184, Name=Pole 184

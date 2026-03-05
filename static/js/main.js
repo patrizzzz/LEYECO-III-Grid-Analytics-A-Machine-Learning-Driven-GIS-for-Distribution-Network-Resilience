@@ -97,6 +97,9 @@ document.addEventListener('DOMContentLoaded', function () {
   // --- Line Type filter state ---
   let activeLineTypes = new Set(['primary', 'transformer', 'secondary', 'service_drop', 'unknown']);
 
+  // --- Transformer filter state ---
+  let activeTransformersOnly = false;
+
   const _allPostMarkers = []; // keeps references to ALL markers even when removed from layer
   let feederList = null; // Scoped for applyFeederFilter
 
@@ -114,10 +117,11 @@ document.addEventListener('DOMContentLoaded', function () {
       const f = String(marker._postData.feeder || '').trim();
       const shouldShowFeeder = showAllFeeds || activeFeeders.has(f);
 
-      // For posts, we might not filter by phase strictly unless they have phase data
-      // Assume posts show if feeder is active. If needed, we can check post phasing.
-      // But typically phase filtering applies more to lines.
-      const shouldShow = shouldShowFeeder;
+      // Transformer Filter
+      const hasTransformer = marker._postData.kva_rating != null && marker._postData.kva_rating !== '';
+      const shouldShowTransformer = !activeTransformersOnly || hasTransformer;
+
+      const shouldShow = shouldShowFeeder && shouldShowTransformer;
 
       if (shouldShow) {
         if (!postsLayer.hasLayer(marker)) postsLayer.addLayer(marker);
@@ -440,6 +444,29 @@ document.addEventListener('DOMContentLoaded', function () {
 
     lineTypeSection.appendChild(lineTypeList);
 
+    // === Section 3.7: Transformer Filter ===
+    const transFilterSection = document.createElement('div');
+    transFilterSection.className = 'msp-section';
+    transFilterSection.innerHTML = '<div class="msp-section-title">Analysis Filters</div>';
+    const transFilterList = document.createElement('div');
+    transFilterList.className = 'msp-option-list';
+
+    const transRow = document.createElement('label');
+    transRow.className = 'msp-option';
+    const transCb = document.createElement('input');
+    transCb.type = 'checkbox';
+    transCb.checked = activeTransformersOnly;
+    transCb.addEventListener('change', function () {
+      activeTransformersOnly = this.checked;
+      applyFeederFilter();
+    });
+    const transSpan = document.createElement('span');
+    transSpan.innerHTML = 'Show Transformers Only <img src="/static/img/transformer_pole.svg" style="width:14px;height:14px;vertical-align:middle;margin-left:4px;">';
+    transRow.appendChild(transCb);
+    transRow.appendChild(transSpan);
+    transFilterList.appendChild(transRow);
+    transFilterSection.appendChild(transFilterList);
+
     // === Section 4: Visualization ===
     const vizSection = document.createElement('div');
     vizSection.className = 'msp-section';
@@ -522,6 +549,7 @@ document.addEventListener('DOMContentLoaded', function () {
     sidebarSettingsContainer.appendChild(feederSection);
     sidebarSettingsContainer.appendChild(phaseSection);
     sidebarSettingsContainer.appendChild(lineTypeSection);
+    sidebarSettingsContainer.appendChild(transFilterSection);
     sidebarSettingsContainer.appendChild(vizSection);
   }
 
@@ -555,6 +583,15 @@ document.addEventListener('DOMContentLoaded', function () {
     popupAnchor: [0, -68],
     tooltipAnchor: [0, -44],
     className: 'pole-icon'
+  });
+
+  const transformerPoleIcon = L.icon({
+    iconUrl: '/static/img/transformer_pole.svg',
+    iconSize: [60, 80],
+    iconAnchor: [30, 72],
+    popupAnchor: [0, -72],
+    tooltipAnchor: [0, -55],
+    className: 'pole-icon transformer-pole-icon'
   });
 
   const customerIcon = L.divIcon({
@@ -778,7 +815,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         <div id="General-${p.id}" class="tab-content" style="display: block;">
             <div class="popup-post-details">
-              <strong>${(p.name || 'Post ' + p.id).replace(/</g, '&lt;')}</strong><br>
+              <strong>${(p.name || 'Post ' + p.id).replace(/</g, '&lt;')}</strong>${(p.kva_rating != null && p.kva_rating !== '') ? ' <img src="/static/img/transformer_pole.svg" style="width:18px;height:18px;vertical-align:middle;margin-left:4px;" title="Transformer Pole">' : ''}<br>
               Feeder: ${(p.feeder || 'N/A').replace(/</g, '&lt;')}<br>
               Status: ${(p.status || 'N/A').replace(/</g, '&lt;')}<br>
               Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>
@@ -815,8 +852,18 @@ document.addEventListener('DOMContentLoaded', function () {
       </div>
     `;
 
-    const marker = L.marker([lat, lng], { title: p.name || `Post ${p.id}`, icon: poleIcon })
+    const hasTransformer = p.kva_rating != null && p.kva_rating !== '';
+    const currentIcon = hasTransformer ? transformerPoleIcon : poleIcon;
+
+    let tooltipHtml = `ID: ${p.id}`;
+    if (hasTransformer) {
+      tooltipHtml += ` <img src="/static/img/transformer_pole.svg" style="width:18px;height:24px;vertical-align:middle;margin-left:4px;" title="Transformer Pole">`;
+    }
+
+    const marker = L.marker([lat, lng], { title: p.name || `Post ${p.id}`, icon: currentIcon })
       .bindPopup(popupHtml, { maxWidth: 400, minWidth: 280 });
+
+    marker.bindTooltip(tooltipHtml, { permanent: false, direction: 'top' });
 
     // Store post data on marker for later access (connections, etc.)
     marker._postData = p;
@@ -837,8 +884,7 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     }
 
-    // Bind tooltip but control open/close to avoid overlapping tooltips
-    marker.bindTooltip(`ID: ${p.id}`, { permanent: false, direction: 'top' });
+    // Also store in lookup maps for connection drawing
     marker.addTo(layer);
     _allPostMarkers.push(marker);
 
@@ -1251,7 +1297,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 kvaDisplay = data.kva_rating;
               }
 
-              let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong><br>`;
+              let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong>${(data.kva_rating != null && data.kva_rating !== '') ? ' <img src="/static/img/transformer_pole.svg" style="width:18px;height:18px;vertical-align:middle;margin-left:4px;" title="Transformer Pole">' : ''}<br>`;
               infoHtml += `Pole Number: ${data.pole_number || '—'}<br>`;
               infoHtml += `Status: ${data.status || 'N/A'}<br>`;
               infoHtml += `Feeder: ${data.feeder || '—'}<br>`;

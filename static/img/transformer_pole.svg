@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="60" height="80" viewBox="0 0 60 80" fill="none">
+  <!-- Pole -->
+  <rect x="28" y="5" width="4" height="70" rx="1" fill="#3d3d3d" />
+  
+  <!-- Primary Crossarm -->
+  <rect x="15" y="15" width="30" height="3" rx="1" fill="#3d3d3d" />
+  <!-- Insulators -->
+  <rect x="18" y="11" width="2" height="4" rx="1" fill="#999" />
+  <rect x="29" y="11" width="2" height="4" rx="1" fill="#999" />
+  <rect x="40" y="11" width="2" height="4" rx="1" fill="#999" />
+
+  <!-- Transformer Tank (The "Visualization") -->
+  <!-- Cylinder -->
+  <rect x="10" y="24" width="18" height="26" rx="4" fill="#bdc3c7" stroke="#333" stroke-width="1.5" />
+  <!-- Lid -->
+  <rect x="8" y="22" width="22" height="3" rx="1.5" fill="#7f8c8d" />
+  <!-- Cooling fins/lines -->
+  <line x1="14" y1="28" x2="14" y2="46" stroke="#95a5a6" stroke-width="1" />
+  <line x1="19" y1="28" x2="19" y2="46" stroke="#95a5a6" stroke-width="1" />
+  <line x1="24" y1="28" x2="24" y2="46" stroke="#95a5a6" stroke-width="1" />
+  
+  <!-- Bushings/Terminals on top -->
+  <path d="M14 22 L14 16" stroke="#333" stroke-width="2" stroke-linecap="round" />
+  <path d="M24 22 L24 16" stroke="#333" stroke-width="2" stroke-linecap="round" />
+
+  <!-- Secondary Crossarm (lower) -->
+  <rect x="20" y="55" width="20" height="3" rx="1" fill="#3d3d3d" />
+  
+  <!-- Base Anchor Dot (Visual reference on map) -->
+  <circle cx="30" cy="72" r="6" fill="#007bff" stroke="white" stroke-width="2" />
+  <circle cx="30" cy="72" r="2.5" fill="white" />
+</svg>
