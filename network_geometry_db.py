@@ -554,9 +554,9 @@ def get_network_geometry(app):
 
 def build_topology_graph(app):
     """
-    Builds an adjacency list graph of the electrical network using explicit edges.
-    Returns:
-        graph: dict mapping bus_id -> list of connected bus_ids
+    Builds an UNDIRECTED adjacency list graph of the electrical network.
+    Used by general feeder tracing (sidebar, etc.).
+    Returns: dict mapping bus_id -> list of connected bus_ids
     """
     from collections import defaultdict
     graph = defaultdict(set)
@@ -569,21 +569,20 @@ def build_topology_graph(app):
                 from_b, to_b = (seg.from_bus_id or "").strip(), (seg.to_bus_id or "").strip()
                 if from_b and to_b:
                     graph[from_b].add(to_b)
-                    graph[to_b].add(from_b) # undirected for general connectivity
+                    graph[to_b].add(from_b)
 
             for sl in db.session.query(SecondaryLineSegment).all():
                 from_b, to_b = (sl.from_bus_id or "").strip(), (sl.to_bus_id or "").strip()
                 if from_b and to_b:
                     graph[from_b].add(to_b)
                     graph[to_b].add(from_b)
-                    
+
             for sd in db.session.query(SecondaryServiceDrop).all():
                 from_b, to_b = (sd.from_bus_id or "").strip(), str(sd.to_customer_id or "").strip()
                 if from_b and to_b:
                     graph[from_b].add(to_b)
                     graph[to_b].add(from_b)
 
-            # Bridge primary and secondary networks via Transformers
             from models import DistributionTransformer
             for tx in db.session.query(DistributionTransformer).all():
                 from_b, to_b = (tx.from_primary_bus_id or "").strip(), (tx.to_secondary_bus_id or "").strip()
@@ -604,6 +603,83 @@ def build_topology_graph(app):
             app.logger.exception("build_topology_graph failed: %s", e)
             return {}
 
+
+def build_directed_topology_graph(app):
+    """
+    Builds a DIRECTED adjacency list graph of the electrical network.
+    Models power flow direction: Substation → Primary Lines → Transformers →
+    Secondary Lines → Service Drops → Customers.
+
+    Only adds edges in the from_bus → to_bus direction (not the reverse).
+    Used by outage simulation to accurately identify downstream-only impact.
+    Returns: dict mapping bus_id -> list of downstream bus_ids
+    """
+    from collections import defaultdict
+    graph = defaultdict(set)
+    with app.app_context():
+        try:
+            from models import DistributionLineSegment, SecondaryLineSegment, \
+                               SecondaryServiceDrop, LineConnection, DistributionTransformer
+            from extensions import db
+
+            # Primary distribution lines: directed from→to (power flows downstream)
+            for seg in db.session.query(DistributionLineSegment).all():
+                from_b = (seg.from_bus_id or "").strip()
+                to_b   = (seg.to_bus_id or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)   # one-way: power flows →
+
+            # Transformer bridge: primary side → secondary side
+            for tx in db.session.query(DistributionTransformer).all():
+                from_b = (tx.from_primary_bus_id or "").strip()
+                to_b   = (tx.to_secondary_bus_id or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)   # one-way: primary → secondary
+
+            # Secondary lines: directed from→to
+            all_sec_lines = db.session.query(SecondaryLineSegment).all()
+            sec_line_from_buses = {(sl.from_bus_id or "").strip() for sl in all_sec_lines}
+
+            for sl in all_sec_lines:
+                from_b = (sl.from_bus_id or "").strip()
+                to_b   = (sl.to_bus_id or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)   # one-way
+
+            # Suffix-mismatch bridge: some transformers store secondary bus as
+            # "DT0000000108-24A" but secondary lines use "DT0000000108-24" (no suffix).
+            # Add a bridge edge so BFS can continue downstream.
+            for tx in db.session.query(DistributionTransformer).all():
+                sec_b = (tx.to_secondary_bus_id or "").strip()
+                if not sec_b:
+                    continue
+                # Strip trailing uppercase letters to get base ID
+                base_b = sec_b.rstrip('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+                if base_b != sec_b and base_b in sec_line_from_buses:
+                    graph[sec_b].add(base_b)  # bridge: DT...-24A → DT...-24
+
+            # Service drops: bus → customer (terminal nodes)
+            for sd in db.session.query(SecondaryServiceDrop).all():
+                from_b = (sd.from_bus_id or "").strip()
+                to_b   = str(sd.to_customer_id or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)   # one-way: bus → customer
+
+            # Line connections (exclude transformer connections already handled)
+            for conn in db.session.query(LineConnection).filter(
+                LineConnection.connection_type.notin_(['Primary_to_Transformer', 'Transformer_to_Secondary'])
+            ).all():
+                from_b = (conn.from_bus or "").strip()
+                to_b   = (conn.to_bus or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)   # one-way
+
+            return {k: list(v) for k, v in graph.items()}
+        except Exception as e:
+            app.logger.exception("build_directed_topology_graph failed: %s", e)
+            return {}
+
+
 def trace_feeder_bfs(app, start_bus_id):
     """
     Performs standard Breadth First Search (BFS) to compute feeder topology.
@@ -620,11 +696,44 @@ def trace_feeder_bfs(app, start_bus_id):
     while queue:
         node = queue.pop(0) # dequeue
         visited.append(node)
-        
+
         neighbors = graph.get(node, [])
         for n in neighbors:
             if n not in visited_set:
                 visited_set.add(n)
                 queue.append(n)
-                
+
     return visited
+
+
+def trace_downstream_bfs(app, start_bus_ids):
+    """
+    Performs DIRECTED BFS from a given set of buses, following only downstream edges.
+    Used for outage simulation: returns all bus/customer IDs that would lose
+    power if the starting points are disconnected.
+    Returns a set of visited downstream bus_ids.
+    """
+    graph = build_directed_topology_graph(app)
+    if not start_bus_ids:
+        return set()
+
+    # Normalize single starting ID to a list
+    if isinstance(start_bus_ids, str):
+        start_bus_ids = [start_bus_ids]
+
+    visited_set = set()
+    queue = []
+
+    for sid in start_bus_ids:
+        if sid and sid in graph:
+            visited_set.add(sid)
+            queue.append(sid)
+
+    while queue:
+        node = queue.pop(0)
+        for neighbor in graph.get(node, []):
+            if neighbor not in visited_set:
+                visited_set.add(neighbor)
+                queue.append(neighbor)
+
+    return visited_set

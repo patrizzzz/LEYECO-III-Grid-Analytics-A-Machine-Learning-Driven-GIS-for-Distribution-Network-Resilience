@@ -4,23 +4,38 @@ import os
 from datetime import datetime
 from extensions import db
 from models import Post, DistributionTransformer, SecondaryServiceDrop, Customer, EnergyConsumption
-from network_geometry_db import build_topology_graph, trace_feeder_bfs
+from network_geometry_db import build_topology_graph, trace_feeder_bfs, trace_downstream_bfs
 
 def calculate_outage_impact(start_bus_id):
     """
     Calculates the impact of an outage starting from a specific bus node.
+    Uses DIRECTED BFS starting from all bus IDs associated with the local pole 
+    to ensure both primary and secondary impacts are captured.
     Returns:
     """
     from flask import current_app
-    from models import Post
+    from models import Post, BusNode
 
-    # Resolve pole number to primary_bus_id if needed
+    # 1. Resolve starting point to a Post and collect all associated bus IDs
     post = Post.query.filter((Post.primary_bus_id == start_bus_id) | (Post.pole_number == start_bus_id)).first()
-    actual_start_bus = post.primary_bus_id if post else start_bus_id
+    
+    root_buses = set()
+    if post:
+        if post.pole_number: root_buses.add(post.pole_number)
+        if post.primary_bus_id: root_buses.add(post.primary_bus_id)
+        if getattr(post, 'sec_bus_id', None): root_buses.add(post.sec_bus_id)
+        if getattr(post, 'transformer_bus_id', None): root_buses.add(post.transformer_bus_id)
+        
+        # Also find any BusNodes that point to this pole
+        bns = BusNode.query.filter_by(pole_number=post.pole_number).all()
+        for bn in bns:
+            root_buses.add(bn.bus_id)
+    else:
+        # Fallback if no post is found
+        root_buses.add(start_bus_id)
 
-    # 1. Trace entire downstream network from start_bus
-    graph = build_topology_graph(current_app)
-    downstream_buses = trace_feeder_bfs(current_app, actual_start_bus)
+    # 2. Trace DOWNSTREAM-ONLY network from all root buses using directed graph
+    downstream_buses = trace_downstream_bfs(current_app, list(root_buses))
     
     if not downstream_buses:
         return {
@@ -117,21 +132,29 @@ def calculate_transformer_load_stress():
     # Optimization: Bulk load all required data to avoid thousands of individual queries
     from collections import defaultdict
     
-    # 1. Map Secondary Bus -> Service Drops
+    # 1. Adjacency list for Secondary Lines (undirected for BFS)
+    adj = defaultdict(list)
+    from models import SecondaryLineSegment
+    for line in SecondaryLineSegment.query.all():
+        f_id = (line.from_bus_id or "").strip()
+        t_id = (line.to_bus_id or "").strip()
+        if f_id and t_id:
+            adj[f_id].append(t_id)
+            adj[t_id].append(f_id)
+
+    # 2. Map Bus ID -> Service Drops
     drops_by_bus = defaultdict(list)
     for sd in SecondaryServiceDrop.query.all():
         if sd.from_bus_id:
             drops_by_bus[sd.from_bus_id.strip()].append(sd)
             
-    # 2. Map Customer ID -> Type
+    # 3. Map Customer ID -> Type
     cust_type_map = {c.customer_id: (c.customer_type or 'RES1') for c in Customer.query.all()}
     
-    # 3. Map Customer ID -> Latest Consumption (simulated "latest" by loading all if needed, but here we assume one record per customer for proto)
-    # In a real system, we'd use a more specialized query, but for 13k records this is fine.
+    # 4. Map Customer ID -> Latest Consumption
     all_consump = EnergyConsumption.query.all()
     consump_map = defaultdict(float)
     for ec in all_consump:
-        # Simple policy: overwrite with latest (assumes query order is stable or we don't care for proto)
         consump_map[ec.customer_id] = float(ec.kwh_consumed or 0)
 
     results = []
@@ -145,7 +168,24 @@ def calculate_transformer_load_stress():
         sec_bus_id = (trans.to_secondary_bus_id or "").strip()
         if not sec_bus_id: continue
 
-        service_drops = drops_by_bus.get(sec_bus_id, [])
+        # --- BFS to find all downstream service drops ---
+        service_drops = []
+        visited = {sec_bus_id}
+        queue = [sec_bus_id]
+        
+        while queue:
+            curr = queue.pop(0)
+            
+            # Find drops at this bus
+            if curr in drops_by_bus:
+                service_drops.extend(drops_by_bus[curr])
+            
+            # Traverse lines
+            for nxt in adj.get(curr, []):
+                if nxt not in visited:
+                    visited.add(nxt)
+                    queue.append(nxt)
+        # --- End BFS ---
         
         hourly_totals = np.zeros(24)
         for sd in service_drops:
@@ -182,6 +222,7 @@ def calculate_transformer_load_stress():
             'capacity_kva': kva,
             'capacity_kw': round(float(capacity_kw), 2),
             'utilization_percent': round(float(utilization), 2),
+            'customer_count': len(service_drops),
             'load_status': status
         })
 
@@ -205,6 +246,10 @@ def get_grid_health_analytics():
         
     db_records = [t.to_dict() for t in transformers]
     ml_results = predict_transformer_risk(source='db', db_records=db_records)
+
+    # Compute average kVA for the criticality formula
+    total_kva = sum(t.kva_rating or 0 for t in transformers)
+    avg_kva = max(total_kva / len(transformers), 1.0) if transformers else 1.0
     
     # 3. Merge results — keep ALL original ML fields and add load stress data
     combined_details = []
@@ -214,14 +259,61 @@ def get_grid_health_analytics():
         
         # Start with all ML prediction fields (rank, transformer_id, kva_rating, etc.)
         merged = dict(ml_pred)
-        # Add load stress fields
-        merged['utilization_percent'] = stress.get('utilization_percent', 0)
-        merged['load_status'] = stress.get('load_status', 'Unknown')
-        merged['health_index'] = round(( (100 - ml_pred['risk_score']) + (100 - max(0, stress.get('utilization_percent', 0)-100)) ) / 2, 1)
-        combined_details.append(merged)
         
+        # Add load stress fields
+        util_pct = stress.get('utilization_percent', 0)
+        cust_count = stress.get('customer_count', 0)
+        kva = ml_pred.get('kva_rating', 0) or 0
+        
+        merged['utilization_percent'] = util_pct
+        merged['customer_count'] = cust_count
+        merged['load_status'] = stress.get('load_status', 'Unknown')
+        
+        # Impact Scoring Refinements:
+        # 1. Normalized & Clamped Utilization (e.g. 1.2 for 120%, max 1.5)
+        u_clamped = min(util_pct, 150) / 100.0
+        
+        # 2. Criticality Score: customers * utilization * (kva / avg_kva)
+        criticality = cust_count * u_clamped * (kva / avg_kva)
+        
+        # 3. Final Impact Score: ML Risk * Criticality
+        risk_factor = (ml_pred.get('risk_score', 0) / 100.0)
+        impact_score = risk_factor * criticality
+        
+        merged['criticality_score'] = round(float(criticality), 2)
+        merged['impact_score'] = round(float(impact_score), 2)
+        
+        # 4. Categorize Risk Levels based on Impact Score
+        if impact_score >= 25:
+            merged['risk_level'] = 'Critical'
+        elif impact_score >= 10:
+            merged['risk_level'] = 'High'
+        elif impact_score >= 5:
+            merged['risk_level'] = 'Medium'
+        else:
+            merged['risk_level'] = 'Low'
+            
+        merged['health_index'] = round(( (100 - ml_pred['risk_score']) + (100 - max(0, util_pct-100)) ) / 2, 1)
+        combined_details.append(merged)
+    
+    # 4. Sort by Impact Score Descending
+    combined_details.sort(key=lambda x: x['impact_score'], reverse=True)
+    
+    # 5. Assign Impact Rank
+    for i, item in enumerate(combined_details):
+        item['impact_rank'] = i + 1
+        
+    # 6. Re-calculate Summary based on Impact-based Categorization
+    summary = {
+        'total': len(combined_details),
+        'critical': sum(1 for r in combined_details if r['risk_level'] == 'Critical'),
+        'high': sum(1 for r in combined_details if r['risk_level'] == 'High'),
+        'medium': sum(1 for r in combined_details if r['risk_level'] == 'Medium'),
+        'low': sum(1 for r in combined_details if r['risk_level'] == 'Low'),
+    }
+
     return {
-        'summary': ml_results.get('summary', {}),
+        'summary': summary,
         'details': combined_details,
         'model_info': ml_results.get('model_info', {}),
         'timestamp': datetime.utcnow().isoformat()

@@ -132,19 +132,6 @@
             </li>
           </ul>
 
-          <ul class="sidebar__list list--grid-health">
-            <li class="sidebar__item item--heading">
-              <h2 class="sidebar__item--heading">Grid Health</h2>
-            </li>
-            <li class="sidebar__item"
-              style="height: auto; padding: 10px 16px; background: var(--surface-raised); border-radius: var(--radius-md); margin: 0 12px 12px 12px; border: 1px solid var(--border);">
-              <div id="sidebar-grid-analytics">
-                <div style="padding:10px; font-size:0.8rem; color:var(--text-muted); text-align:center;">
-                  ⏳ Loading grid health...
-                </div>
-              </div>
-            </li>
-          </ul>
 
           {% if current_user and (current_user.role or '')|lower == 'admin' %}
           <ul class="sidebar__list list--secondary">

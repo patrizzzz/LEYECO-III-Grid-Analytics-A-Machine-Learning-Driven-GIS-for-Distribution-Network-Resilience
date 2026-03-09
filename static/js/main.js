@@ -547,16 +547,6 @@ document.addEventListener('DOMContentLoaded', function () {
       updateNetworkLineColors();
     });
 
-    // === Section 5: Grid Health Analytics ===
-    const analyticsSection = document.createElement('div');
-    analyticsSection.className = 'msp-section';
-    analyticsSection.innerHTML = '<div class="msp-section-title">Grid Health Analytics</div>';
-    const analyticsList = document.createElement('div');
-    analyticsList.className = 'msp-option-list';
-    analyticsList.id = 'sidebar-grid-analytics';
-    analyticsList.innerHTML = '<span class="msp-hint">Loading analytics...</span>';
-    analyticsSection.appendChild(analyticsList);
-
     // Assemble all sections into sidebar settings container
     sidebarSettingsContainer.appendChild(baseSection);
     sidebarSettingsContainer.appendChild(layerSection);
@@ -565,7 +555,6 @@ document.addEventListener('DOMContentLoaded', function () {
     sidebarSettingsContainer.appendChild(lineTypeSection);
     sidebarSettingsContainer.appendChild(transFilterSection);
     sidebarSettingsContainer.appendChild(vizSection);
-    sidebarSettingsContainer.appendChild(analyticsSection);
   }
 
   // Force Leaflet to measure container and load tiles (fixes blank map)
@@ -861,10 +850,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
       healthHtml = `
         <div class="popup-health-summary" style="margin: 8px 0; padding: 8px; background: rgba(0,0,0,0.03); border-radius: 6px; border-left: 3px solid ${borderCol};">
-          <div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">Transformer Health</div>
-          ${riskInfo ? `<div style="font-size:0.75rem;">ML Risk: <strong>${riskInfo.risk_level}</strong> (${(riskInfo.risk_score * 100).toFixed(1)}%)</div>` : ''}
-          ${stressInfo ? `<div style="font-size:0.75rem;">Load: <strong>${stressInfo.status}</strong> (${stressInfo.load_kva.toFixed(1)} kVA)</div>` : ''}
-          ${(!riskInfo && !stressInfo) ? '<div style="font-size:0.75rem; color:var(--success);">Status: Healthy / Normal</div>' : ''}
+          <div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">
+            ${riskInfo ? `Impact Rank: #${riskInfo.impact_rank}` : 'Transformer Health'}
+          </div>
+          ${riskInfo ? `
+            <div style="font-size:0.75rem;">Impact Level: <strong style="color:${borderCol}">${riskInfo.risk_level}</strong></div>
+            <div style="font-size:0.75rem;">Impact Score: <strong>${riskInfo.impact_score}</strong></div>
+            <div style="font-size:0.75rem;">Customers Served: <strong>${riskInfo.customer_count || 0}</strong></div>
+            <div style="font-size:0.75rem; margin-top:4px; opacity:0.8;">Technical Anomaly Risk: ${riskInfo.risk_score}%</div>
+            <div style="font-size:0.75rem; opacity:0.8;">Load: ${riskInfo.load_status} (${riskInfo.utilization_percent}%)</div>
+          ` : (stressInfo ? `
+            <div style="font-size:0.75rem;">Load: <strong>${stressInfo.load_status}</strong> (${stressInfo.utilization_percent}%)</div>
+          ` : '<div style="font-size:0.75rem; color:var(--success);">Status: Healthy / Normal</div>')}
         </div>
       `;
     }
