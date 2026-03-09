@@ -551,3 +551,72 @@ def get_network_geometry(app):
             app.logger.exception("get_network_geometry failed: %s", e)
             empty_result["error"] = str(e)
             return empty_result
+
+def build_topology_graph(app):
+    """
+    Builds an adjacency list graph of the electrical network using explicit edges.
+    Returns:
+        graph: dict mapping bus_id -> list of connected bus_ids
+    """
+    from collections import defaultdict
+    graph = defaultdict(set)
+    with app.app_context():
+        try:
+            from models import DistributionLineSegment, SecondaryLineSegment, SecondaryServiceDrop, LineConnection
+            from extensions import db
+
+            for seg in db.session.query(DistributionLineSegment).all():
+                from_b, to_b = (seg.from_bus_id or "").strip(), (seg.to_bus_id or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)
+                    graph[to_b].add(from_b) # undirected for general connectivity
+
+            for sl in db.session.query(SecondaryLineSegment).all():
+                from_b, to_b = (sl.from_bus_id or "").strip(), (sl.to_bus_id or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)
+                    graph[to_b].add(from_b)
+                    
+            for sd in db.session.query(SecondaryServiceDrop).all():
+                from_b, to_b = (sd.from_bus_id or "").strip(), str(sd.to_customer_id or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)
+                    graph[to_b].add(from_b)
+
+            for conn in db.session.query(LineConnection).filter(
+                LineConnection.connection_type.notin_(['Primary_to_Transformer', 'Transformer_to_Secondary'])
+            ).all():
+                from_b, to_b = (conn.from_bus or "").strip(), (conn.to_bus or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)
+                    graph[to_b].add(from_b)
+
+            return {k: list(v) for k, v in graph.items()}
+        except Exception as e:
+            app.logger.exception("build_topology_graph failed: %s", e)
+            return {}
+
+def trace_feeder_bfs(app, start_bus_id):
+    """
+    Performs standard Breadth First Search (BFS) to compute feeder topology.
+    Returns a list of visited bus_ids in BFS order.
+    """
+    graph = build_topology_graph(app)
+    if not start_bus_id or start_bus_id not in graph:
+        return []
+
+    visited = []
+    queue = [start_bus_id]
+    visited_set = {start_bus_id}
+
+    while queue:
+        node = queue.pop(0) # dequeue
+        visited.append(node)
+        
+        neighbors = graph.get(node, [])
+        for n in neighbors:
+            if n not in visited_set:
+                visited_set.add(n)
+                queue.append(n)
+                
+    return visited

@@ -100,6 +100,10 @@ document.addEventListener('DOMContentLoaded', function () {
   // --- Transformer filter state ---
   let activeTransformersOnly = false;
 
+  // --- Analysis Cache ---
+  window._mlRiskMap = {};
+  window._loadStressMap = {};
+
   const _allPostMarkers = []; // keeps references to ALL markers even when removed from layer
   let feederList = null; // Scoped for applyFeederFilter
 
@@ -543,6 +547,16 @@ document.addEventListener('DOMContentLoaded', function () {
       updateNetworkLineColors();
     });
 
+    // === Section 5: Grid Health Analytics ===
+    const analyticsSection = document.createElement('div');
+    analyticsSection.className = 'msp-section';
+    analyticsSection.innerHTML = '<div class="msp-section-title">Grid Health Analytics</div>';
+    const analyticsList = document.createElement('div');
+    analyticsList.className = 'msp-option-list';
+    analyticsList.id = 'sidebar-grid-analytics';
+    analyticsList.innerHTML = '<span class="msp-hint">Loading analytics...</span>';
+    analyticsSection.appendChild(analyticsList);
+
     // Assemble all sections into sidebar settings container
     sidebarSettingsContainer.appendChild(baseSection);
     sidebarSettingsContainer.appendChild(layerSection);
@@ -551,6 +565,7 @@ document.addEventListener('DOMContentLoaded', function () {
     sidebarSettingsContainer.appendChild(lineTypeSection);
     sidebarSettingsContainer.appendChild(transFilterSection);
     sidebarSettingsContainer.appendChild(vizSection);
+    sidebarSettingsContainer.appendChild(analyticsSection);
   }
 
   // Force Leaflet to measure container and load tiles (fixes blank map)
@@ -805,6 +820,55 @@ document.addEventListener('DOMContentLoaded', function () {
     const lng = parseFloat(p.lng);
     if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
+    const hasTransformer = p.kva_rating != null && p.kva_rating !== '';
+    const currentIcon = hasTransformer ? transformerPoleIcon : poleIcon;
+
+    let tooltipHtml = `ID: ${p.id}`;
+    let healthClass = '';
+    let riskInfo = null;
+    let stressInfo = null;
+    let healthHtml = '';
+
+    if (hasTransformer) {
+      tooltipHtml += ` <img src="/static/img/transformer_pole.svg" style="width:18px;height:24px;vertical-align:middle;margin-left:4px;" title="Transformer Pole">`;
+
+      // Look up analysis data using various possible IDs
+      const lookupIds = [p.pole_number, p.primary_bus_id, p.id];
+      for (const id of lookupIds) {
+        if (!id) continue;
+        if (window._mlRiskMap && window._mlRiskMap[id]) riskInfo = window._mlRiskMap[id];
+        if (window._loadStressMap && window._loadStressMap[id]) stressInfo = window._loadStressMap[id];
+      }
+
+      if (riskInfo) {
+        const rl = (riskInfo.risk_level || '').toLowerCase();
+        if (rl === 'critical') healthClass = 'health-critical';
+        else if (rl === 'high') healthClass = 'health-high';
+        else healthClass = 'health-normal';
+      } else if (stressInfo) {
+        const st = (stressInfo.status || '').toLowerCase();
+        if (st === 'overloaded') healthClass = 'health-critical';
+        else if (st === 'high load') healthClass = 'health-high';
+        else healthClass = 'health-normal';
+      } else {
+        healthClass = 'health-normal';
+      }
+
+      // Build Health Info HTML with color-coded border
+      let borderCol = 'var(--success)';
+      if (healthClass === 'health-critical') borderCol = 'var(--danger)';
+      else if (healthClass === 'health-high') borderCol = 'var(--warning)';
+
+      healthHtml = `
+        <div class="popup-health-summary" style="margin: 8px 0; padding: 8px; background: rgba(0,0,0,0.03); border-radius: 6px; border-left: 3px solid ${borderCol};">
+          <div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">Transformer Health</div>
+          ${riskInfo ? `<div style="font-size:0.75rem;">ML Risk: <strong>${riskInfo.risk_level}</strong> (${(riskInfo.risk_score * 100).toFixed(1)}%)</div>` : ''}
+          ${stressInfo ? `<div style="font-size:0.75rem;">Load: <strong>${stressInfo.status}</strong> (${stressInfo.load_kva.toFixed(1)} kVA)</div>` : ''}
+          ${(!riskInfo && !stressInfo) ? '<div style="font-size:0.75rem; color:var(--success);">Status: Healthy / Normal</div>' : ''}
+        </div>
+      `;
+    }
+
     const popupHtml = `
       <div class="post-popup-container">
         <div class="post-popup-tabs">
@@ -821,46 +885,51 @@ document.addEventListener('DOMContentLoaded', function () {
               Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>
               ID: ${p.id}
             </div>
-            <div class="popup-connect-actions" style="margin-bottom:4px;">
-                <button class="btn btn-outline btn-street-view" data-lat="${lat}" data-lng="${lng}" data-post-id="${p.id}" title="Open Street View at this location">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 -960 960 960" fill="currentColor" style="vertical-align:middle;margin-right:4px;"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q27-35 43.5-76t22.5-86H640v40q0 33 23.5 56.5T720-306v42Z"/></svg>
+            ${healthHtml}
+            <div class="popup-connect-actions">
+                <button class="btn btn-outline btn-street-view" data-lat="${lat}" data-lng="${lng}" data-post-id="${p.id}" title="Open Street View">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="14" width="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q27-35 43.5-76t22.5-86H640v40q0 33 23.5 56.5T720-306v42Z"/></svg>
                   Street View
                 </button>
-            </div>
-             <div class="popup-connect-actions">
-                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}">Primary line-overhead</button>
-                <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Distribution Transformer</button>
+                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}">Primary overhead</button>
+                <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Dist. Transformer</button>
+                <button class="btn btn-secondary trace-downstream-btn" data-bus-id="${p.primary_bus_id || p.pole_number}">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="14" width="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-120 300-300l56-56 124 124 124-124 56 56-180 180ZM240-240v-480h480v480H240Zm80-80h320v-320H320v320Zm-80-480h480-480Z"/></svg>
+                  Trace
+                </button>
+                <button class="btn btn-danger simulate-outage-btn" data-bus-id="${p.primary_bus_id || p.pole_number}">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="14" width="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-80 310-250l57-57 113 113 113-113 57 57-170 170Zm0-160L310-410l57-57 113 113 113-113 57 57-170 170Zm0-160L310-570l113-113L310-796l57-57 170 170-170 171-57-57 113-113-113-113 113-113 113 113Zm0-160-57-57 57-57 57 57-57 57Z"/></svg>
+                  Outage
+                </button>
             </div>
         </div>
 
         <div id="Connections-${p.id}" class="tab-content" style="display: none;">
              <div class="popup-connect-actions">
-                <button class="btn btn-outline secondary-lines-btn" data-post-id="${p.id}">Secondary Lines</button>
-                <button class="btn btn-outline service-drop-btn" data-post-id="${p.id}">Secondary Service Drop</button>
-                <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connected Lines</button>
+                <button class="btn btn-outline secondary-lines-btn" data-post-id="${p.id}">Sec. Lines</button>
+                <button class="btn btn-outline service-drop-btn" data-post-id="${p.id}">Service Drop</button>
+                <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connections</button>
             </div>
         </div>
 
         <div id="Assets-${p.id}" class="tab-content" style="display: none;">
-            <div class="popup-connect-actions grid-actions">
-              <button class="btn btn-outline voltage-regulator-btn" data-post-id="${p.id}">Voltage Regulator</button>
-              <button class="btn btn-outline shunt-capacitor-btn" data-post-id="${p.id}">Shunt Capacitor</button>
-              <button class="btn btn-outline shunt-inductor-btn" data-post-id="${p.id}">Shunt Inductor</button>
-              <button class="btn btn-outline series-inductor-btn" data-post-id="${p.id}">Series Inductor</button>
+            <div class="popup-connect-actions">
+              <button class="btn btn-outline voltage-regulator-btn" data-post-id="${p.id}">Regulator</button>
+              <button class="btn btn-outline shunt-capacitor-btn" data-post-id="${p.id}">Capacitor</button>
+              <button class="btn btn-outline shunt-inductor-btn" data-post-id="${p.id}">Inductor</button>
+              <button class="btn btn-outline series-inductor-btn" data-post-id="${p.id}">Inductor</button>
             </div>
         </div>
       </div>
     `;
 
-    const hasTransformer = p.kva_rating != null && p.kva_rating !== '';
-    const currentIcon = hasTransformer ? transformerPoleIcon : poleIcon;
-
-    let tooltipHtml = `ID: ${p.id}`;
-    if (hasTransformer) {
-      tooltipHtml += ` <img src="/static/img/transformer_pole.svg" style="width:18px;height:24px;vertical-align:middle;margin-left:4px;" title="Transformer Pole">`;
+    const markerOptions = { title: p.name || `Post ${p.id}`, icon: currentIcon };
+    if (healthClass) {
+      // We append the health class to the icon's class list
+      markerOptions.className = (markerOptions.className || '') + ' ' + healthClass;
     }
 
-    const marker = L.marker([lat, lng], { title: p.name || `Post ${p.id}`, icon: currentIcon })
+    const marker = L.marker([lat, lng], markerOptions)
       .bindPopup(popupHtml, { maxWidth: 400, minWidth: 280 });
 
     marker.bindTooltip(tooltipHtml, { permanent: false, direction: 'top' });
@@ -1136,6 +1205,71 @@ document.addEventListener('DOMContentLoaded', function () {
         };
       }
 
+      // Trace Downstream button: use BFS topology engine
+      const traceBtn = popupEl.querySelector('.trace-downstream-btn');
+      if (traceBtn) {
+        traceBtn.onclick = function () {
+          const busId = traceBtn.getAttribute('data-bus-id');
+          if (!busId) return;
+
+          traceBtn.textContent = 'Tracing...';
+          traceBtn.disabled = true;
+
+          fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId))
+            .then(r => r.json())
+            .then(res => {
+              traceBtn.textContent = 'Trace Downstream';
+              traceBtn.disabled = false;
+
+              if (res.error) {
+                showNoticeModal('Error', 'Trace failed: ' + res.error);
+                return;
+              }
+
+              if (res.visited_buses && res.visited_buses.length > 0) {
+                highlightFeederTrace(res.visited_buses);
+                showNoticeModal('Trace Complete', `BFS traced <strong>${res.count}</strong> downstream nodes from <strong>${busId}</strong>. Trace is now highlighted on map.`);
+              } else {
+                showNoticeModal('Info', 'No downstream nodes found from this point.');
+              }
+            })
+            .catch(err => {
+              traceBtn.textContent = 'Trace Downstream';
+              traceBtn.disabled = false;
+              showNoticeModal('Error', 'Trace request failed.');
+            });
+        };
+      }
+
+      // Simulate Outage button
+      const outageBtn = popupEl.querySelector('.simulate-outage-btn');
+      if (outageBtn) {
+        outageBtn.onclick = function () {
+          const busId = outageBtn.getAttribute('data-bus-id');
+          if (!busId) return;
+
+          outageBtn.textContent = 'Analyzing...';
+          outageBtn.disabled = true;
+
+          fetch('/api/network/simulate-outage?start_bus=' + encodeURIComponent(busId))
+            .then(r => r.json())
+            .then(res => {
+              outageBtn.textContent = 'Simulate Outage';
+              outageBtn.disabled = false;
+              if (res.error) {
+                showNoticeModal('Error', 'Analysis failed: ' + res.error);
+                return;
+              }
+              showOutageImpactModal(res, busId);
+            })
+            .catch(err => {
+              outageBtn.textContent = 'Simulate Outage';
+              outageBtn.disabled = false;
+              showNoticeModal('Error', 'Request failed.');
+            });
+        };
+      }
+
       // Show Connected Lines Button
       const showConnectionsBtn = popupEl.querySelector('.btn-show-connections');
       if (showConnectionsBtn) {
@@ -1302,7 +1436,29 @@ document.addEventListener('DOMContentLoaded', function () {
               infoHtml += `Status: ${data.status || 'N/A'}<br>`;
               infoHtml += `Feeder: ${data.feeder || '—'}<br>`;
               infoHtml += `kVA Rating: ${kvaDisplay}<br>`;
-              infoHtml += `Coordinates: ${latText}, ${lngText}<br>`;
+
+              // Injection of Analysis Data
+              const id = data.pole_number || data.primary_bus_id;
+              const r = window._mlRiskMap[id];
+              const s = window._loadStressMap[id];
+
+              if (r) {
+                const color = r.risk_level === 'Critical' ? '#ef4444' : (r.risk_level === 'High' ? '#f59e0b' : '#22c55e');
+                infoHtml += `<div style="margin-top:8px; padding:6px; border-radius:6px; background:rgba(0,0,0,0.03); border-left:4px solid ${color};">`;
+                infoHtml += `<strong style="color:${color}; font-size:0.8rem;">PREDICTIVE RISK: ${r.risk_level}</strong><br>`;
+                infoHtml += `<span style="font-size:0.75rem;">Score: ${r.risk_score.toFixed(4)}</span>`;
+                infoHtml += `</div>`;
+              }
+
+              if (s) {
+                const color = s.status === 'Overloaded' ? '#ef4444' : (s.status === 'High Load' ? '#f59e0b' : '#22c55e');
+                infoHtml += `<div style="margin-top:4px; padding:6px; border-radius:6px; background:rgba(0,0,0,0.03); border-left:4px solid ${color};">`;
+                infoHtml += `<strong style="color:${color}; font-size:0.8rem;">LOAD FLOW: ${s.status}</strong><br>`;
+                infoHtml += `<span style="font-size:0.75rem;">Peak: ${s.peak_load_kw.toFixed(2)} kW (${s.utilization_pct.toFixed(1)}%)</span>`;
+                infoHtml += `</div>`;
+              }
+
+              infoHtml += `<div style="margin-top:8px; font-size:0.8rem; color:var(--text-secondary);">Coordinates: ${latText}, ${lngText}</div>`;
               if (detailsEl) detailsEl.innerHTML = infoHtml;
             });
           }).catch(() => { });
@@ -1416,13 +1572,41 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function loadPosts() {
-    fetchAllPosts(1).then(posts => {
+    console.log('🔄 Loading posts and analysis data...');
+
+    // Fetch all analysis data in parallel with posts
+    Promise.all([
+      fetchAllPosts(1),
+      fetch('/api/ml/transformer-risk').then(r => r.json()).catch(() => ({})),
+      fetch('/api/ml/transformer-load-stress').then(r => r.json()).catch(() => ({}))
+    ]).then(([posts, mlResults, loadResults]) => {
+      // Index ML Risk data for fast lookup
+      window._mlRiskMap = {};
+      if (mlResults.predictions) {
+        mlResults.predictions.forEach(r => {
+          const key = r.transformer_id || r.id || r.bus_id;
+          if (key) window._mlRiskMap[key] = r;
+        });
+      }
+
+      // Index Load Flow data
+      window._loadStressMap = {};
+      if (loadResults.predictions) {
+        loadResults.predictions.forEach(s => {
+          const key = s.transformer_id || s.bus_id;
+          if (key) window._loadStressMap[key] = s;
+        });
+      }
+
       console.log('Posts to render on map:', posts.length);
 
       if (!posts || posts.length === 0) {
-        console.warn('No posts found - map may appear empty');
+        showMapError('No post data available to display.');
+        return;
       }
 
+      // Update sidebar analytics after data is loaded
+      updateGridAnalytics();
       let addedCount = 0;
       posts.forEach(p => {
         if (p && p.lat && p.lng) {
@@ -3556,5 +3740,138 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     }
   });
+
+  /**
+   * Highlights a set of buses found during a feeder trace.
+   * Applies the 'active' class to markers and updates their z-index.
+   */
+  function highlightFeederTrace(busIds) {
+    if (!busIds || !Array.isArray(busIds)) return;
+
+    console.log('🌟 Highlighting feeder trace:', busIds.length, 'nodes');
+
+    // Clear previous highlights first (remove 'active' class from all)
+    _allPostMarkers.forEach(m => {
+      const el = m.getElement();
+      if (el) {
+        L.DomUtil.removeClass(el, 'active');
+      }
+    });
+
+    let highlightedCount = 0;
+    busIds.forEach(bid => {
+      // Try various bus ID formats to find the post
+      const post = busToPostMap[bid] || poleToPostMap[bid];
+      if (post && postMarkers[post.id]) {
+        const marker = postMarkers[post.id];
+        const el = marker.getElement();
+        if (el) {
+          L.DomUtil.addClass(el, 'active');
+          highlightedCount++;
+        }
+      }
+    });
+
+    console.log(`✅ Successfully highlighted ${highlightedCount} markers on map.`);
+  }
+
+  /**
+   * Updates the global grid analytics stats in the sidebar.
+   */
+  function updateGridAnalytics() {
+    const el = document.getElementById('sidebar-grid-analytics');
+    if (!el) return;
+
+    const mlRisks = Object.values(window._mlRiskMap || {});
+    const loadStresses = Object.values(window._loadStressMap || {});
+
+    const criticalCount = mlRisks.filter(r => r.risk_level === 'Critical').length;
+    const highRiskCount = mlRisks.filter(r => r.risk_level === 'High').length;
+    const overloadedCount = loadStresses.filter(s => s.status === 'Overloaded').length;
+    const highLoadCount = loadStresses.filter(s => s.status === 'High Load').length;
+
+    let html = '';
+
+    // ML Stats
+    html += `<div style="margin-bottom:8px;">
+                <div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:4px;">ML Predicted Risks:</div>
+                <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
+                    <span style="color:var(--danger); font-weight:600;">Critical: ${criticalCount}</span>
+                    <span style="color:var(--warning); font-weight:600;">High: ${highRiskCount}</span>
+                </div>
+             </div>`;
+
+    // Load Stats
+    html += `<div>
+                <div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:4px;">Load Flow Stress:</div>
+                <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
+                    <span style="color:var(--danger); font-weight:600;">Overloaded: ${overloadedCount}</span>
+                    <span style="color:var(--warning); font-weight:600;">High Load: ${highLoadCount}</span>
+                </div>
+             </div>`;
+
+    if (criticalCount + highRiskCount + overloadedCount + highLoadCount === 0) {
+      html = '<div style="padding:10px; font-size:0.8rem; color:var(--text-muted); text-align:center;">Network 100% Healthy</div>';
+    }
+
+    el.innerHTML = html;
+  }
+
+  /**
+   * Displays a detailed modal with Outage Simulation results.
+   */
+  function showOutageImpactModal(data, startBus) {
+    let html = `
+        <div class="outage-summary" style="margin-bottom:16px; padding:12px; background:var(--danger-light); border-radius:8px; border-left:4px solid var(--danger);">
+            <div style="font-size:1.1rem; font-weight:700; color:var(--danger-dark);">Potential Outage Detected</div>
+            <div style="font-size:0.9rem; color:var(--text-secondary);">Root Point: ${startBus}</div>
+        </div>
+        
+        <div class="stats-row" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+            <div class="stat-card" style="padding:10px;">
+                <div class="stat-value" style="font-size:1.5rem;">${data.total_customers}</div>
+                <div class="stat-label">Affected Customers</div>
+            </div>
+            <div class="stat-card" style="padding:10px;">
+                <div class="stat-value" style="font-size:1.5rem;">${data.total_load_kwh}</div>
+                <div class="stat-label">Est. Load Loss (kWh)</div>
+            </div>
+        </div>
+
+        <div style="margin-bottom:8px;"><strong>Downstream Topology Data:</strong></div>
+        <ul style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
+            <li>Nodes in outage zone: ${data.downstream_bus_count}</li>
+            <li>Transformers offline: ${data.affected_transformer_ids.length}</li>
+        </ul>
+    `;
+
+    if (data.customer_details && data.customer_details.length > 0) {
+      html += `<div style="margin-bottom:8px;"><strong>Impacted Customers List:</strong></div>
+                <div style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:6px;">
+                    <table style="width:100%; font-size:0.8rem; border-collapse:collapse;">
+                        <thead style="background:var(--surface-secondary); position:sticky; top:0;">
+                            <tr>
+                                <th style="padding:4px 8px; text-align:left; border-bottom:1px solid var(--border);">Name</th>
+                                <th style="padding:4px 8px; text-align:right; border-bottom:1px solid var(--border);">Load (kWh)</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+      data.customer_details.sort((a, b) => b.load_kwh - a.load_kwh).forEach(c => {
+        html += `<tr>
+                        <td style="padding:4px 8px; border-bottom:1px solid var(--divider);">${c.name || c.customer_id}</td>
+                        <td style="padding:4px 8px; border-bottom:1px solid var(--divider); text-align:right;">${c.load_kwh.toFixed(2)}</td>
+                    </tr>`;
+      });
+
+      html += `</tbody></table></div>`;
+    } else {
+      html += `<div style="padding:12px; text-align:center; color:var(--text-muted); border:1px dashed var(--border); border-radius:6px;">
+                    No customer impact detected for this point.
+                </div>`;
+    }
+
+    showNoticeModal('Outage Impact Analysis', html);
+  }
 
 });

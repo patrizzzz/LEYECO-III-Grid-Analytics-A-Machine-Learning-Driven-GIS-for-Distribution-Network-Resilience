@@ -253,89 +253,19 @@ def api_post_connections(post_id):
 @api_bp.route('/posts/<int:post_id>/service-drops', methods=['GET'])
 def api_post_service_drops(post_id):
     """
-    Symmetric reverse trace: Post -> [Buses] -> Transformers -> [Secondary BFS] -> Service Drops
+    Get service drops for a post via decentralized service layer logic.
     """
     try:
-        from models import Post, DistributionTransformer, SecondaryLineSegment, SecondaryServiceDrop, BusNode
-        p = Post.query.get(post_id)
-        if not p: return jsonify({'count': 0, 'service_drops': []}), 404
-
-        # 1. Collect all "root" buses associated with this pole
-        root_buses = set()
-        if p.pole_number: root_buses.add(p.pole_number)
-        if p.primary_bus_id: root_buses.add(p.primary_bus_id)
-        if p.sec_bus_id: root_buses.add(p.sec_bus_id)
-        if p.transformer_bus_id: root_buses.add(p.transformer_bus_id)
-        
-        # Also find any BusNodes that point to this pole
-        bns = BusNode.query.filter_by(pole_number=p.pole_number).all()
-        for bn in bns:
-            root_buses.add(bn.bus_id)
-
-        # 2. Find any transformers connected to these root buses
-        transformers = []
-        for b_id in root_buses:
-            candidates = DistributionTransformer.query.filter(
-                DistributionTransformer.from_primary_bus_id == b_id
-            ).all()
-            transformers.extend(candidates)
-
-        # 3. BFS downstream from each transformer's secondary bus
-        all_drops = {}
-        visited_sec_buses = set()
-        
-        for tx in transformers:
-            sec_start = tx.to_secondary_bus_id
-            if not sec_start or sec_start in visited_sec_buses:
-                continue
-                
-            queue = [sec_start]
-            visited_sec_buses.add(sec_start)
-            
-            while queue:
-                curr = queue.pop(0)
-                
-                # A. Check for service drops at this bus
-                drops = SecondaryServiceDrop.query.filter_by(from_bus_id=curr).all()
-                for d in drops:
-                    all_drops[d.id] = d
-                
-                # B. Continue BFS through secondary lines
-                lines = SecondaryLineSegment.query.filter(
-                    (SecondaryLineSegment.from_bus_id == curr) |
-                    (SecondaryLineSegment.to_bus_id == curr)
-                ).all()
-                
-                for line in lines:
-                    nxt = line.from_bus_id if line.to_bus_id == curr else line.to_bus_id
-                    if nxt and nxt not in visited_sec_buses:
-                        visited_sec_buses.add(nxt)
-                        queue.append(nxt)
-
-        # 4. Direct check & Secondary endpoint check
-        # Some service drops might be linked directly to a pole's own bus ID 
-        # (skipping the transformer/secondary line hop in the data model)
-        # OR linked to a bus ID that matches the pole number (to_bus_id of a secondary segment)
-        for b_id in root_buses:
-            # Service drops directly from this bus
-            direct_drops = SecondaryServiceDrop.query.filter_by(from_bus_id=b_id).all()
-            for d in direct_drops:
-                all_drops[d.id] = d
-            
-            # Also find secondary lines that end at this 'pole bus'
-            # and look for drops from their starting bus
-            terminating_lines = SecondaryLineSegment.query.filter_by(to_bus_id=b_id).all()
-            for tl in terminating_lines:
-                if tl.from_bus_id:
-                    tl_drops = SecondaryServiceDrop.query.filter_by(from_bus_id=tl.from_bus_id).all()
-                    for d in tl_drops:
-                        all_drops[d.id] = d
-
-        drops_list = list(all_drops.values())
+        from analysis_services import get_service_drops_for_post
+        drops_list = get_service_drops_for_post(post_id)
         return jsonify({
             'count': len(drops_list),
             'service_drops': [d.to_dict() for d in drops_list]
         }), 200
+
+    except Exception as e:
+        current_app.logger.error('Failed to fetch service drops for post %s: %s', post_id, e)
+        return jsonify({'count': 0, 'service_drops': [], 'error': str(e)}), 500
 
     except Exception as e:
         current_app.logger.error('Failed to fetch service drops for post %s: %s', post_id, e)
@@ -712,11 +642,36 @@ def api_line_connections():
 
 @api_bp.route('/network-geometry', methods=['GET'])
 def api_network_geometry():
-    """Return network geometry (lines and nodes) for map rendering."""
+    """Return network geometry (lines and nodes) for map rendering, enriched with health data."""
     try:
         from network_geometry_db import get_network_geometry
-        # Pass current_app as the app context
+        from analysis_services import get_grid_health_analytics
+        
+        # 1. Get Geometry
         data = get_network_geometry(current_app)
+        
+        # 2. Get Health Data (ML + Stress)
+        try:
+            health = get_grid_health_analytics()
+            health_map = {h['transformer_id']: h for h in health.get('details', [])}
+            
+            # 3. Enrich GeoJSON features (transformer nodes) with health data
+            for feat in data['geojson']['features']:
+                props = feat['properties']
+                # Search for transformer_bus_id or pole_number in health map
+                # (Trans ID typically matches one of these)
+                tid = props.get('transformer_bus_id') or props.get('pole_number')
+                if tid and tid in health_map:
+                    h_info = health_map[tid]
+                    props['risk_level'] = h_info['risk_level']
+                    props['risk_score'] = h_info['risk_score']
+                    props['load_status'] = h_info['load_status']
+                    props['health_index'] = h_info['health_index']
+            
+            data['grid_health_summary'] = health.get('summary', {})
+        except Exception as e:
+            current_app.logger.warning(f"Health enrichment failed: {e}")
+            
         return jsonify(data)
     except Exception as e:
         current_app.logger.error(f"Error fetching network geometry: {e}")
@@ -995,117 +950,7 @@ def api_energy_consumption_bulk_import():
         return jsonify(stats), 200
     return jsonify({'error': 'File processing failed'}), 500
 
-def find_customer_post_location(customer_id):
-    """
-    Traces the electrical network to find a customer's connected post.
-    Chain: Customer → SSD(to_customer_id) → [BFS through SecondaryLineSegment] → DistributionTransformer → Post(primary_bus_id)
-    Returns dict with lat, lng, id, name if found, else None.
-    """
-    try:
-        # 1. Find the SecondaryServiceDrop for this customer
-        ssd = SecondaryServiceDrop.query.filter_by(to_customer_id=customer_id).first()
-        if not ssd or not ssd.from_bus_id:
-            return None
-
-        # 2. Check if the starting bus itself is a pole or has direct coordinates
-        start_bus = (ssd.from_bus_id or "").strip()
-        
-        # Helper to try finding a post by bus ID or normalized pole number
-        def get_post_by_bus_or_pole(bus_id):
-            if not bus_id: return None
-            bus_id = str(bus_id).strip()
-            
-            # 1. Exact match on primary_bus_id or pole_number
-            p = Post.query.filter((Post.primary_bus_id == bus_id) | (Post.pole_number == bus_id)).first()
-            if p and p.lat and p.lng: return p
-            
-            # 2. Check BusNode mapping for this bus
-            bn = BusNode.query.filter_by(bus_id=bus_id).first()
-            if bn and bn.pole_number:
-                p = Post.query.filter_by(pole_number=bn.pole_number).first()
-                if p and p.lat and p.lng: return p
-            
-            # 3. Fallback: Normalize Bus ID (e.g. P0000000090 -> 90, B000... -> 90)
-            clean_id = bus_id.upper()
-            # Handle common prefixes: P (Pole), B (Bus), S (Secondary)
-            if clean_id.startswith(('P', 'B', 'S')):
-                numeric_part = "".join(filter(str.isdigit, clean_id))
-                if numeric_part:
-                    try:
-                        normalized_pole = str(int(numeric_part))
-                        p = Post.query.filter_by(pole_number=normalized_pole).first()
-                        if p and p.lat and p.lng: return p
-                    except: pass
-            
-            return None
-
-        # 2.5 Try to find the exact pole this bus is on first
-        post = get_post_by_bus_or_pole(start_bus)
-        if post:
-            return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
-
-        # 3. BFS from the SSD bus to find a DistributionTransformer
-        visited = {start_bus}
-        queue = [start_bus]
-        dt = None
-        
-        while queue:
-            curr = queue.pop(0)
-            
-            # NEW: Immediately check if this bus is a pole before searching for transformer
-            post = get_post_by_bus_or_pole(curr)
-            if post:
-                return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
-            
-            # Check if this bus is connected to a transformer secondary
-            dt = DistributionTransformer.query.filter_by(to_secondary_bus_id=curr).first()
-            if dt:
-                break
-                
-            # Otherwise, find connected secondary lines and continue BFS
-            lines = SecondaryLineSegment.query.filter(
-                (SecondaryLineSegment.from_bus_id == curr) |
-                (SecondaryLineSegment.to_bus_id == curr)
-            ).all()
-            
-            for line in lines:
-                nxt = line.from_bus_id if line.to_bus_id == curr else line.to_bus_id
-                if nxt not in visited:
-                    visited.add(nxt)
-                    queue.append(nxt)
-
-        if dt and dt.from_primary_bus_id:
-            # 4. Find the Post hosting this transformer (or connected to it via primary lines)
-            start_p_bus = dt.from_primary_bus_id
-            visited_p = {start_p_bus}
-            queue_p = [start_p_bus]
-            
-            while queue_p:
-                curr_p = queue_p.pop(0)
-                
-                # Use our helper for robust matching
-                post = get_post_by_bus_or_pole(curr_p)
-                if post:
-                    return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
-                
-                # Trace primary lines to next buses if not found directly
-                p_lines = DistributionLineSegment.query.filter(
-                    (DistributionLineSegment.from_bus_id == curr_p) |
-                    (DistributionLineSegment.to_bus_id == curr_p)
-                ).all()
-                
-                for pl in p_lines:
-                    nxt_p = pl.from_bus_id if pl.to_bus_id == curr_p else pl.to_bus_id
-                    if nxt_p not in visited_p:
-                        visited_p.add(nxt_p)
-                        queue_p.append(nxt_p)
-
-    except Exception as e:
-        from flask import current_app
-        current_app.logger.error(f"Error tracing post location for customer {customer_id}: {e}")
-        return None
-
-    return None
+from analysis_services import find_customer_post_location
 
 @api_bp.route('/customers', methods=['GET'])
 def get_customers():
@@ -1432,20 +1277,16 @@ def export_master_csv():
 def api_ml_transformer_risk():
     """Run Isolation Forest anomaly detection on transformer data to predict failure risk."""
     try:
-        from ml_predictor import predict_transformer_risk
-
-        # Try loading from DB first
-        transformers = DistributionTransformer.query.all()
-        if transformers:
-            db_records = [t.to_dict() for t in transformers]
-            result = predict_transformer_risk(source='db', db_records=db_records)
-        else:
-            # Fallback to CSV file
-            import os
-            csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'example2.csv')
-            result = predict_transformer_risk(source='csv', csv_path=csv_path)
-
-        return jsonify(result), 200
+        from analysis_services import get_grid_health_analytics
+        result = get_grid_health_analytics()
+        # Remap 'details' -> 'predictions' for frontend compatibility
+        response = {
+            'predictions': result.get('details', result.get('predictions', [])),
+            'summary': result.get('summary', {}),
+            'model_info': result.get('model_info', {}),
+            'timestamp': result.get('timestamp', ''),
+        }
+        return jsonify(response), 200
     except Exception as e:
         current_app.logger.error(f"ML prediction failed: {e}")
         import traceback
@@ -1456,3 +1297,68 @@ def api_ml_transformer_risk():
             'summary': {'total': 0, 'critical': 0, 'high': 0, 'medium': 0, 'low': 0}
         }), 500
 
+@api_bp.route('/ml/transformer-load-stress', methods=['GET'])
+def api_transformer_load_stress():
+    """Run load flow calculations to determine transformer stress levels."""
+    try:
+        from analysis_services import calculate_transformer_load_stress
+        results = calculate_transformer_load_stress()
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(results),
+            'predictions': results
+        }), 200
+    except Exception as e:
+        current_app.logger.error(f"Load stress calculation failed: {e}")
+        import traceback
+        return jsonify({
+            'error': str(e),
+            'traceback': traceback.format_exc() if current_app.debug else None,
+            'predictions': []
+        }), 500
+
+@api_bp.route('/network/trace-feeder', methods=['GET'])
+def api_trace_feeder():
+    """Trace a feeder downstream from a starting node using BFS."""
+    from flask import request
+    start_bus = request.args.get('start_bus')
+    if not start_bus:
+        return jsonify({'error': 'Missing start_bus parameter'}), 400
+        
+    try:
+        from network_geometry_db import build_topology_graph, trace_feeder_bfs
+        from flask import current_app
+        
+        graph = build_topology_graph()
+        visited = trace_feeder_bfs(graph, start_bus)
+        
+        return jsonify({
+            'status': 'success',
+            'start_bus': start_bus,
+            'count': len(visited),
+            'visited_buses': visited
+        }), 200
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"Feeder trace failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/network/simulate-outage', methods=['GET'])
+def api_simulate_outage():
+    """Simulate an outage and calculate customer impact."""
+    from flask import request
+    start_bus = request.args.get('start_bus')
+    if not start_bus:
+        return jsonify({'error': 'Missing start_bus parameter'}), 400
+        
+    try:
+        from analysis_services import calculate_outage_impact
+        from flask import current_app
+        impact = calculate_outage_impact(start_bus)
+        return jsonify(impact), 200
+    except Exception as e:
+        from flask import current_app
+        import traceback
+        current_app.logger.error(f"Outage simulation failed: {e}")
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()}), 500

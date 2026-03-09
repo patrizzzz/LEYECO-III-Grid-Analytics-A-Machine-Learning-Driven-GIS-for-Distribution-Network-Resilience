@@ -957,6 +957,19 @@ h3 {
   filter: drop-shadow(0 6px 14px rgba(59, 130, 246, 0.55)) brightness(1.1);
 }
 
+/* Health / Risk Indicators for Transformers & Grid Assets */
+.leaflet-marker-icon.health-critical {
+  filter: drop-shadow(0 0 8px #ef4444) saturate(2) brightness(0.9) hue-rotate(-50deg) !important;
+}
+
+.leaflet-marker-icon.health-high {
+  filter: drop-shadow(0 0 8px #f59e0b) saturate(1.5) brightness(0.9) hue-rotate(0deg) !important;
+}
+
+.leaflet-marker-icon.health-normal {
+  filter: drop-shadow(0 0 5px #22c55e) saturate(1.2) brightness(1) hue-rotate(80deg) !important;
+}
+
 /* Connection control */
 
 /* Auth / Login improvements - Enhanced form styling */
@@ -3500,4 +3513,110 @@ body.dark-theme .breadcrumbs__item--active {
 
 body.dark-theme .modal-footer {
   background: rgba(255, 255, 255, 0.02);
+}
+
+/* --- Compact Map Popup Styles --- */
+.leaflet-popup-content-wrapper {
+  padding: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-xl);
+}
+
+.leaflet-popup-content {
+  margin: 0 !important;
+  width: 100% !important;
+}
+
+.post-popup-container {
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  max-height: 480px;
+  /* Limit height */
+}
+
+.post-popup-tabs {
+  display: flex;
+  background: var(--surface-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-link {
+  flex: 1;
+  padding: 10px 5px;
+  border: none;
+  background: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.tab-link.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  background: var(--surface);
+}
+
+.tab-content {
+  padding: 12px;
+  overflow-y: auto;
+  /* Enable scroll if content is too long */
+  flex: 1;
+}
+
+/* Compact Details */
+.popup-post-details {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+}
+
+/* Compact Health Summary */
+.popup-health-summary {
+  font-size: 0.75rem;
+  padding: 8px !important;
+  margin: 8px 0 !important;
+}
+
+/* Button Grid for Actions */
+.popup-connect-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  /* 2 columns */
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.popup-connect-actions .btn {
+  padding: 6px 4px !important;
+  font-size: 0.7rem !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 !important;
+  width: 100% !important;
+  height: 32px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.popup-connect-actions .btn svg {
+  margin-right: 4px;
+}
+
+/* Full width buttons still allowed if needed */
+.popup-connect-actions .btn.full-width-btn {
+  grid-column: span 2;
+}
+
+/* Street View button optimization */
+.btn-street-view {
+  grid-column: span 2;
+  margin-bottom: 4px !important;
 }
