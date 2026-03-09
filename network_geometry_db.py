@@ -583,6 +583,14 @@ def build_topology_graph(app):
                     graph[from_b].add(to_b)
                     graph[to_b].add(from_b)
 
+            # Bridge primary and secondary networks via Transformers
+            from models import DistributionTransformer
+            for tx in db.session.query(DistributionTransformer).all():
+                from_b, to_b = (tx.from_primary_bus_id or "").strip(), (tx.to_secondary_bus_id or "").strip()
+                if from_b and to_b:
+                    graph[from_b].add(to_b)
+                    graph[to_b].add(from_b)
+
             for conn in db.session.query(LineConnection).filter(
                 LineConnection.connection_type.notin_(['Primary_to_Transformer', 'Transformer_to_Secondary'])
             ).all():

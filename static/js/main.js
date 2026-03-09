@@ -947,10 +947,10 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     if (p.feeder) {
       knownFeeders.add(String(p.feeder).trim());
-      // Also create aliases for common bus naming patterns
-      if (p.primary_bus_id) {
-        busToPostMap[p.primary_bus_id] = p;
-      }
+    }
+    // Consistently index by primary_bus_id for tracing highlights
+    if (p.primary_bus_id) {
+      busToPostMap[p.primary_bus_id] = p;
     }
 
     // Also store in lookup maps for connection drawing
@@ -1228,7 +1228,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
               if (res.visited_buses && res.visited_buses.length > 0) {
                 highlightFeederTrace(res.visited_buses);
-                showNoticeModal('Trace Complete', `BFS traced <strong>${res.count}</strong> downstream nodes from <strong>${busId}</strong>. Trace is now highlighted on map.`);
+                traceBtn.textContent = `Trace Complete (${res.count} Nodes)`;
               } else {
                 showNoticeModal('Info', 'No downstream nodes found from this point.');
               }
@@ -1617,7 +1617,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }
       });
 
-      console.log(`Added \${addedCount} markers to posts layer`);
+      console.log(`Added ${addedCount} markers to posts layer`);
 
       // Add postsLayer to map by default
       postsLayer.addTo(map);
@@ -1932,6 +1932,9 @@ document.addEventListener('DOMContentLoaded', function () {
           poly.phasingType = meta.phasing;
           poly.lineCategory = lineCat;
           poly._feederName = String(meta.feeder || '').trim();
+          poly._fromBus = meta.from_bus;
+          poly._toBus = meta.to_bus;
+          poly._defaultStyle = { color: color, weight: weight, opacity: 0.8, dashArray: dash };
           if (meta.feeder) knownFeeders.add(String(meta.feeder).trim());
 
           var lenStr = (meta.length_meters != null && !Number.isNaN(meta.length_meters))
@@ -2666,7 +2669,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function showNoticeModal(title, message) {
     const m = createNoticeModal();
     m.querySelector('.notice-title').textContent = title || 'Notice';
-    m.querySelector('.notice-message').textContent = message || '';
+    m.querySelector('.notice-message').innerHTML = message || '';
     m.style.display = 'flex';
     m.tabIndex = -1;
     m.focus();
@@ -3727,6 +3730,64 @@ document.addEventListener('DOMContentLoaded', function () {
       '<button class="route-cancel-btn">✕ Cancel Route</button>';
   }
 
+  /**
+   * Clears an active feeder trace, restoring all map elements to default visibility.
+   */
+  function clearFeederTrace() {
+    console.log('🧹 Clearing active feeder trace...');
+
+    // Restore markers
+    _allPostMarkers.forEach(m => {
+      const el = m.getElement();
+      if (el) {
+        L.DomUtil.removeClass(el, 'active');
+        el.style.opacity = '1';
+        el.style.filter = 'none';
+      }
+    });
+
+    // Restore Network Lines to their original styles
+    if (typeof networkLinesLayer !== 'undefined') {
+      networkLinesLayer.eachLayer(layer => {
+        if (layer._defaultStyle) {
+          layer.setStyle(layer._defaultStyle);
+        }
+      });
+    }
+
+    // Hide the Clear Trace button
+    const clearBtn = document.getElementById('clear-trace-btn');
+    if (clearBtn) clearBtn.style.display = 'none';
+  }
+
+  // Helper to inject the Clear Trace button
+  function injectClearTraceButton() {
+    const mapContainer = document.getElementById('map');
+    if (mapContainer && !document.getElementById('clear-trace-btn')) {
+      const btn = document.createElement('button');
+      btn.id = 'clear-trace-btn';
+      btn.className = 'btn btn-danger';
+      btn.innerHTML = '✕ Clear Trace';
+      btn.style.position = 'absolute';
+      btn.style.bottom = '20px';
+      btn.style.left = '50%';
+      btn.style.transform = 'translateX(-50%)';
+      btn.style.zIndex = '1000';
+      btn.style.display = 'none';
+      btn.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
+      mapContainer.appendChild(btn);
+
+      btn.addEventListener('click', clearFeederTrace);
+    }
+  }
+
+  // Inject immediately if DOM is ready, otherwise wait for DOMContentLoaded
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', injectClearTraceButton);
+  } else {
+    injectClearTraceButton();
+  }
+
   // Handle dinamically added Cancel Route button
   document.addEventListener('click', function (e) {
     if (e.target && e.target.classList.contains('route-cancel-btn')) {
@@ -3743,21 +3804,25 @@ document.addEventListener('DOMContentLoaded', function () {
 
   /**
    * Highlights a set of buses found during a feeder trace.
-   * Applies the 'active' class to markers and updates their z-index.
+   * Applies the 'active' class to markers, styles polylines, and dims unrelated elements.
    */
   function highlightFeederTrace(busIds) {
     if (!busIds || !Array.isArray(busIds)) return;
 
     console.log('🌟 Highlighting feeder trace:', busIds.length, 'nodes');
+    const busSet = new Set(busIds);
 
-    // Clear previous highlights first (remove 'active' class from all)
+    // Dim ALL markers first, and remove active class
     _allPostMarkers.forEach(m => {
       const el = m.getElement();
       if (el) {
         L.DomUtil.removeClass(el, 'active');
+        el.style.opacity = '0.3';
+        el.style.filter = 'grayscale(100%)';
       }
     });
 
+    // Highlight only the traced markers
     let highlightedCount = 0;
     busIds.forEach(bid => {
       // Try various bus ID formats to find the post
@@ -3767,12 +3832,41 @@ document.addEventListener('DOMContentLoaded', function () {
         const el = marker.getElement();
         if (el) {
           L.DomUtil.addClass(el, 'active');
+          el.style.opacity = '1';
+          el.style.filter = 'none';
           highlightedCount++;
         }
       }
     });
 
-    console.log(`✅ Successfully highlighted ${highlightedCount} markers on map.`);
+    // Handle Network Lines
+    let highlightedLines = 0;
+    if (typeof networkLinesLayer !== 'undefined') {
+      networkLinesLayer.eachLayer(layer => {
+        // We highlight the line if BOTH ends are in the trace (for full connectivity)
+        // Or if one end is in the trace (e.g. for dangling service drops)
+        if (layer._fromBus || layer._toBus) {
+          const fromInTrace = busSet.has(layer._fromBus);
+          const toInTrace = busSet.has(layer._toBus);
+
+          if (fromInTrace || toInTrace) {
+            layer.setStyle({ color: '#ffeb3b', weight: 5, opacity: 1, dashArray: null });
+            if (layer.bringToFront) layer.bringToFront();
+            highlightedLines++;
+          } else {
+            // Dim network lines not in trace
+            layer.setStyle({ opacity: 0.15, weight: 1 });
+            if (layer.bringToBack) layer.bringToBack();
+          }
+        }
+      });
+    }
+
+    console.log(`✅ Successfully highlighted ${highlightedCount} markers and ${highlightedLines} lines on map.`);
+
+    // Show the Clear Trace button
+    const clearBtn = document.getElementById('clear-trace-btn');
+    if (clearBtn) clearBtn.style.display = 'block';
   }
 
   /**
@@ -3828,21 +3922,22 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
         
         <div class="stats-row" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
-            <div class="stat-card" style="padding:10px;">
-                <div class="stat-value" style="font-size:1.5rem;">${data.total_customers}</div>
+            <div class="stat-card" style="padding:12px; flex-direction:column; align-items:flex-start; gap:4px;">
+                <div class="stat-value" style="font-size:1.5rem;">${Number(data.total_customers).toLocaleString()}</div>
                 <div class="stat-label">Affected Customers</div>
             </div>
-            <div class="stat-card" style="padding:10px;">
-                <div class="stat-value" style="font-size:1.5rem;">${data.total_load_kwh}</div>
+            <div class="stat-card" style="padding:12px; flex-direction:column; align-items:flex-start; gap:4px;">
+                <div class="stat-value" style="font-size:1.5rem;">${Number(data.total_load_kwh).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
                 <div class="stat-label">Est. Load Loss (kWh)</div>
             </div>
         </div>
 
         <div style="margin-bottom:8px;"><strong>Downstream Topology Data:</strong></div>
         <ul style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
-            <li>Nodes in outage zone: ${data.downstream_bus_count}</li>
+            <li>Nodes in outage zone: ${Number(data.downstream_bus_count).toLocaleString()}</li>
             <li>Transformers offline: ${data.affected_transformer_ids.length}</li>
         </ul>
+
     `;
 
     if (data.customer_details && data.customer_details.length > 0) {

@@ -1328,14 +1328,20 @@ def api_trace_feeder():
         
     try:
         from network_geometry_db import build_topology_graph, trace_feeder_bfs
+        from models import Post
         from flask import current_app
         
-        graph = build_topology_graph()
-        visited = trace_feeder_bfs(graph, start_bus)
+        # Resolve pole number to primary_bus_id if needed
+        post = Post.query.filter((Post.primary_bus_id == start_bus) | (Post.pole_number == start_bus)).first()
+        actual_start_bus = post.primary_bus_id if post else start_bus
+        
+        graph = build_topology_graph(current_app)
+        visited = trace_feeder_bfs(current_app, actual_start_bus)
         
         return jsonify({
             'status': 'success',
-            'start_bus': start_bus,
+            'start_bus': actual_start_bus,
+            'original_query': start_bus,
             'count': len(visited),
             'visited_buses': visited
         }), 200
