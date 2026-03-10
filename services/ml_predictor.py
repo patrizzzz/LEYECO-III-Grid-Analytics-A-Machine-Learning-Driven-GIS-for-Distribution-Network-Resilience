@@ -50,7 +50,9 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
         df.rename(columns=col_map, inplace=True)
     else:
         if csv_path is None:
-            csv_path = os.path.join(os.path.dirname(__file__), 'example2.csv')
+            # Look in project root (one level up from services/)
+            root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            csv_path = os.path.join(root_dir, 'example2.csv')
         df = pd.read_csv(csv_path)
 
     # Clean column names (remove newlines/extra whitespace)
@@ -58,7 +60,8 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
     df.columns = [' '.join(c.split()) for c in df.columns]
 
     # --- 1b. Load stress data if available ---
-    stress_path = os.path.join(os.path.dirname(__file__), 'transformer_load_stress.csv')
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    stress_path = os.path.join(root_dir, 'transformer_load_stress.csv')
     df_stress = pd.DataFrame()
     if os.path.exists(stress_path):
         df_stress = pd.read_csv(stress_path)

@@ -233,7 +233,7 @@ def get_grid_health_analytics():
     Consolidates ML failure risk and load stress data into a single health report.
     Used by Layer 2 (API) to provide a combined GeoJSON-friendly summary.
     """
-    from ml_predictor import predict_transformer_risk
+    from .ml_predictor import predict_transformer_risk
     
     # 1. Get Load Stress Analysis
     stress_results = calculate_transformer_load_stress()

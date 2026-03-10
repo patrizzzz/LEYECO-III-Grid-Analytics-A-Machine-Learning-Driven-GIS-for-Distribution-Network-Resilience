@@ -54,10 +54,10 @@ flask db upgrade
 You can import infrastructure data from your CSV files:
 ```powershell
 # Single file
-python import_posts_from_csv.py "sample (1).csv"
+python scripts/data_management/import_posts_from_csv.py "sample (1).csv"
 
 # Batch import all CSV files in the data directory
-python import_batch_csv.py "data/*.csv"
+python scripts/data_management/import_batch_csv.py "data/*.csv"
 ```
 *(For detailed importing guidelines and conventions, read [DATA_MANAGEMENT_GUIDE.md](DATA_MANAGEMENT_GUIDE.md))*
 

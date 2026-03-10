@@ -5,7 +5,7 @@
 ### Step 1️⃣: Clear All Old Data
 
 ```powershell
-python clear_posts.py
+python scripts/maintenance/clear_posts.py
 ```
 
 When prompted, type **`DELETE`** to confirm.
@@ -32,17 +32,17 @@ Ready for fresh data import!
 
 #### Option A: Single CSV file
 ```powershell
-python import_posts_from_csv.py "sample (1).csv"
+python scripts/data_management/import_posts_from_csv.py "sample (1).csv"
 ```
 
 #### Option B: Multiple CSV files at once
 ```powershell
-python import_batch_csv.py "file1.csv" "file2.csv" "file3.csv"
+python scripts/data_management/import_batch_csv.py "file1.csv" "file2.csv" "file3.csv"
 ```
 
 #### Option C: All files from a folder
 ```powershell
-python import_batch_csv.py "data/*.csv"
+python scripts/data_management/import_batch_csv.py "data/*.csv"
 ```
 
 #### Expected Output:
@@ -100,10 +100,10 @@ All your new data will be visible on the map! 🗺️
 
 ```powershell
 # 1. Clear old data
-python clear_posts.py
+python scripts/maintenance/clear_posts.py
 
 # 2. Import new data (all CSV files)
-python import_batch_csv.py "data/*.csv"
+python scripts/data_management/import_batch_csv.py "data/*.csv"
 
 # 3. Run app
 python app.py
@@ -168,10 +168,10 @@ print("Columns found:", reader.fieldnames)
 ### Workflow 1: Upload One CSV File Weekly
 ```powershell
 # Step 1: Clear last week's data
-python clear_posts.py
+python scripts/maintenance/clear_posts.py
 
 # Step 2: Import this week's data
-python import_posts_from_csv.py "weekly_data.csv"
+python scripts/data_management/import_posts_from_csv.py "weekly_data.csv"
 
 # Step 3: Run app
 python app.py
@@ -180,10 +180,10 @@ python app.py
 ### Workflow 2: Merge Multiple District Data Files
 ```powershell
 # Step 1: Clear old data
-python clear_posts.py
+python scripts/maintenance/clear_posts.py
 
 # Step 2: Import all district files at once
-python import_batch_csv.py "districts/OBADO.csv" "districts/tamayo.csv" "districts/other.csv"
+python scripts/data_management/import_batch_csv.py "districts/OBADO.csv" "districts/tamayo.csv" "districts/other.csv"
 
 # Step 3: View consolidated map
 python app.py
@@ -192,7 +192,7 @@ python app.py
 ### Workflow 3: Continuous Updates
 ```powershell
 # Skip clearing, just add new data
-python import_posts_from_csv.py "new_poles.csv"
+python scripts/data_management/import_posts_from_csv.py "new_poles.csv"
 
 # Existing poles update, new poles add
 python app.py
@@ -213,8 +213,8 @@ After running `python app.py`, you'll see:
 
 ## Next Steps
 
-1. ✅ Clear old data (`clear_posts.py`)
-2. ✅ Import new CSV files (`import_batch_csv.py`)
+1. ✅ Clear old data (`scripts/maintenance/clear_posts.py`)
+2. ✅ Import new CSV files (`scripts/data_management/import_batch_csv.py`)
 3. ✅ Run application (`python app.py`)
 4. 🔄 View complete electrical network on map
 5. 📊 Run analytics and reports
