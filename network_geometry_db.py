@@ -598,9 +598,89 @@ def build_topology_graph(app):
                     graph[from_b].add(to_b)
                     graph[to_b].add(from_b)
 
+            # Suffix-mismatch bridge for undirected graph
+            all_sec_lines = db.session.query(SecondaryLineSegment).all()
+            sec_line_from_buses = {(sl.from_bus_id or "").strip() for sl in all_sec_lines}
+            for tx in db.session.query(DistributionTransformer).all():
+                sec_b = (tx.to_secondary_bus_id or "").strip()
+                if sec_b:
+                    base_b = sec_b.rstrip('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+                    if base_b != sec_b and base_b in sec_line_from_buses:
+                        graph[sec_b].add(base_b)
+                        graph[base_b].add(sec_b)
+
             return {k: list(v) for k, v in graph.items()}
         except Exception as e:
             app.logger.exception("build_topology_graph failed: %s", e)
+            return {}
+
+
+def build_reversed_topology_graph(app):
+    """
+    Builds a REVERSED DIRECTED adjacency list graph of the electrical network.
+    Models power flow in reverse: Customers → Service Drops → Secondary Lines →
+    Transformers → Primary Lines → Substation.
+    
+    Returns: dict mapping bus_id -> list of upstream bus_ids
+    """
+    from collections import defaultdict
+    graph = defaultdict(set)
+    with app.app_context():
+        try:
+            from models import DistributionLineSegment, SecondaryLineSegment, \
+                               SecondaryServiceDrop, LineConnection, DistributionTransformer
+            from extensions import db
+
+            # Reversed primary distribution lines (to→from)
+            for seg in db.session.query(DistributionLineSegment).all():
+                from_b = (seg.from_bus_id or "").strip()
+                to_b   = (seg.to_bus_id or "").strip()
+                if from_b and to_b:
+                    graph[to_b].add(from_b)
+
+            # Reversed transformer bridge: secondary side → primary side
+            for tx in db.session.query(DistributionTransformer).all():
+                from_b = (tx.from_primary_bus_id or "").strip()
+                to_b   = (tx.to_secondary_bus_id or "").strip()
+                if from_b and to_b:
+                    graph[to_b].add(from_b)
+
+            # Reversed suffix-mismatch bridge
+            all_sec_lines = db.session.query(SecondaryLineSegment).all()
+            sec_line_from_buses = {(sl.from_bus_id or "").strip() for sl in all_sec_lines}
+            for tx in db.session.query(DistributionTransformer).all():
+                sec_b = (tx.to_secondary_bus_id or "").strip()
+                if sec_b:
+                    base_b = sec_b.rstrip('ABCDEFGHIJKLMNOPQRSTUVWXYZ')
+                    if base_b != sec_b and base_b in sec_line_from_buses:
+                        graph[base_b].add(sec_b)
+
+            # Reversed secondary lines (to→from)
+            for sl in db.session.query(SecondaryLineSegment).all():
+                from_b = (sl.from_bus_id or "").strip()
+                to_b   = (sl.to_bus_id or "").strip()
+                if from_b and to_b:
+                    graph[to_b].add(from_b)
+
+            # Reversed service drops: customer → bus
+            for sd in db.session.query(SecondaryServiceDrop).all():
+                from_b = (sd.from_bus_id or "").strip()
+                to_b   = str(sd.to_customer_id or "").strip()
+                if from_b and to_b:
+                    graph[to_b].add(from_b)
+
+            # Reversed line connections (to→from)
+            for conn in db.session.query(LineConnection).filter(
+                LineConnection.connection_type.notin_(['Primary_to_Transformer', 'Transformer_to_Secondary'])
+            ).all():
+                from_b = (conn.from_bus or "").strip()
+                to_b   = (conn.to_bus or "").strip()
+                if from_b and to_b:
+                    graph[to_b].add(from_b)
+
+            return {k: list(v) for k, v in graph.items()}
+        except Exception as e:
+            app.logger.exception("build_reversed_topology_graph failed: %s", e)
             return {}
 
 
@@ -718,6 +798,36 @@ def trace_downstream_bfs(app, start_bus_ids):
         return set()
 
     # Normalize single starting ID to a list
+    if isinstance(start_bus_ids, str):
+        start_bus_ids = [start_bus_ids]
+
+    visited_set = set()
+    queue = []
+
+    for sid in start_bus_ids:
+        if sid and sid in graph:
+            visited_set.add(sid)
+            queue.append(sid)
+
+    while queue:
+        node = queue.pop(0)
+        for neighbor in graph.get(node, []):
+            if neighbor not in visited_set:
+                visited_set.add(neighbor)
+                queue.append(neighbor)
+
+    return visited_set
+
+
+def trace_upstream_bfs(app, start_bus_ids):
+    """
+    Performs REVERSED DIRECTED BFS from a given set of buses, following only upstream edges.
+    Returns a set of visited upstream bus_ids.
+    """
+    graph = build_reversed_topology_graph(app)
+    if not start_bus_ids:
+        return set()
+
     if isinstance(start_bus_ids, str):
         start_bus_ids = [start_bus_ids]
 

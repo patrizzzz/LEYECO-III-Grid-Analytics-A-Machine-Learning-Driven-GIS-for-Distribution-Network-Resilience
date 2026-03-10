@@ -890,10 +890,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 </button>
                 <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}">Primary overhead</button>
                 <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Dist. Transformer</button>
-                <button class="btn btn-secondary trace-downstream-btn" data-bus-id="${p.primary_bus_id || p.pole_number}">
+                <button class="btn btn-secondary trace-directional-btn" data-bus-id="${p.primary_bus_id || p.pole_number}" data-direction="downstream">
                   <svg xmlns="http://www.w3.org/2000/svg" height="14" width="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-120 300-300l56-56 124 124 124-124 56 56-180 180ZM240-240v-480h480v480H240Zm80-80h320v-320H320v320Zm-80-480h480-480Z"/></svg>
-                  Trace
+                  Trace Downstream
                 </button>
+
                 <button class="btn btn-danger simulate-outage-btn" data-bus-id="${p.primary_bus_id || p.pole_number}">
                   <svg xmlns="http://www.w3.org/2000/svg" height="14" width="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-80 310-250l57-57 113 113 113-113 57 57-170 170Zm0-160L310-410l57-57 113 113 113-113 57 57-170 170Zm0-160L310-570l113-113L310-796l57-57 170 170-170 171-57-57 113-113-113-113 113-113 113 113Zm0-160-57-57 57-57 57 57-57 57Z"/></svg>
                   Outage
@@ -939,15 +940,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Also store in lookup maps for connection drawing
     if (p.pole_number) {
-      poleToPostMap[p.pole_number] = p;
-      busToPostMap[p.pole_number] = p; // Primary bus is usually the pole number
+      const pn = String(p.pole_number).trim().toUpperCase();
+      poleToPostMap[pn] = p;
+      if (!busToPostMap[pn]) busToPostMap[pn] = p;
     }
+    if (p.primary_bus_id) busToPostMap[String(p.primary_bus_id).trim().toUpperCase()] = p;
+    if (p.sec_bus_id) busToPostMap[String(p.sec_bus_id).trim().toUpperCase()] = p;
+    if (p.transformer_bus_id) busToPostMap[String(p.transformer_bus_id).trim().toUpperCase()] = p;
+
     if (p.feeder) {
       knownFeeders.add(String(p.feeder).trim());
-    }
-    // Consistently index by primary_bus_id for tracing highlights
-    if (p.primary_bus_id) {
-      busToPostMap[p.primary_bus_id] = p;
     }
 
     // Also store in lookup maps for connection drawing
@@ -1202,21 +1204,23 @@ document.addEventListener('DOMContentLoaded', function () {
         };
       }
 
-      // Trace Downstream button: use BFS topology engine
-      const traceBtn = popupEl.querySelector('.trace-downstream-btn');
-      if (traceBtn) {
-        traceBtn.onclick = function () {
-          const busId = traceBtn.getAttribute('data-bus-id');
+      // Tracing buttons (Upstream / Downstream)
+      const traceBtns = popupEl.querySelectorAll('.trace-directional-btn');
+      traceBtns.forEach(btn => {
+        btn.onclick = function () {
+          const busId = btn.getAttribute('data-bus-id');
+          const direction = btn.getAttribute('data-direction');
           if (!busId) return;
 
-          traceBtn.textContent = 'Tracing...';
-          traceBtn.disabled = true;
+          const originalText = btn.textContent;
+          btn.textContent = 'Tracing...';
+          btn.disabled = true;
 
-          fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId))
+          fetch(`/api/network/trace-feeder?start_bus=${encodeURIComponent(busId)}&direction=${direction}`)
             .then(r => r.json())
             .then(res => {
-              traceBtn.textContent = 'Trace Downstream';
-              traceBtn.disabled = false;
+              btn.textContent = originalText;
+              btn.disabled = false;
 
               if (res.error) {
                 showNoticeModal('Error', 'Trace failed: ' + res.error);
@@ -1225,18 +1229,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
               if (res.visited_buses && res.visited_buses.length > 0) {
                 highlightFeederTrace(res.visited_buses);
-                traceBtn.textContent = `Trace Complete (${res.count} Nodes)`;
+                btn.textContent = `${direction === 'upstream' ? 'Upstream' : 'Downstream'} (${res.count} Nodes)`;
               } else {
-                showNoticeModal('Info', 'No downstream nodes found from this point.');
+                showNoticeModal('Info', `No ${direction} nodes found from this point.`);
               }
             })
             .catch(err => {
-              traceBtn.textContent = 'Trace Downstream';
-              traceBtn.disabled = false;
+              btn.textContent = originalText;
+              btn.disabled = false;
               showNoticeModal('Error', 'Trace request failed.');
             });
         };
-      }
+      });
 
       // Simulate Outage button
       const outageBtn = popupEl.querySelector('.simulate-outage-btn');
@@ -1962,6 +1966,16 @@ document.addEventListener('DOMContentLoaded', function () {
             var lng = parseFloat(n.lng);
             if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
+            // Use the most specific ID available for indexing
+            var rawId = n.pole_number || n.customer_identifier || n.bus_id || n.primary_bus_id;
+            if (!rawId) return;
+            var cleanedId = String(rawId).trim().toUpperCase();
+
+            // DEDUPLICATION: If this ID already points to a physical post, skip creating a virtual node
+            if (busToPostMap[cleanedId] && !busToPostMap[cleanedId].id.toString().startsWith('node_') && !busToPostMap[cleanedId].id.toString().startsWith('cust_')) {
+              return;
+            }
+
             var iconToUse = (n.feature_type === 'customer') ? customerIcon : virtualNodeIcon;
             var labelType = (n.feature_type === 'customer') ? 'Customer' : 'Virtual Node';
             var title = n.pole_number || (labelType + ' at ' + lat.toFixed(4) + ',' + lng.toFixed(4));
@@ -1979,6 +1993,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
             marker.addTo(networkLinesLayer);
             nodesDrawn++;
+
+            // Index for tracing highlights
+            var pseudoId = (n.feature_type === 'customer' ? 'cust_' : 'node_') + cleanedId;
+            busToPostMap[cleanedId] = n;
+            postMarkers[pseudoId] = marker;
+            n.id = pseudoId;
+
+            // Important: add to global list so it can be dimmed/highlighted during trace
+            if (typeof _allPostMarkers !== 'undefined') {
+              _allPostMarkers.push(marker);
+            }
           }
         });
         if (nodesDrawn > 0) {
@@ -3807,7 +3832,8 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!busIds || !Array.isArray(busIds)) return;
 
     console.log('🌟 Highlighting feeder trace:', busIds.length, 'nodes');
-    const busSet = new Set(busIds);
+    // Normalize set for fast robust lookups
+    const busSet = new Set(busIds.map(id => String(id).trim().toUpperCase()));
 
     // Dim ALL markers first, and remove active class
     _allPostMarkers.forEach(m => {
@@ -3821,17 +3847,20 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Highlight only the traced markers
     let highlightedCount = 0;
-    busIds.forEach(bid => {
-      // Try various bus ID formats to find the post
+    busSet.forEach(bid => {
+      // Try normalized ID formats to find the post or node
       const post = busToPostMap[bid] || poleToPostMap[bid];
-      if (post && postMarkers[post.id]) {
-        const marker = postMarkers[post.id];
-        const el = marker.getElement();
-        if (el) {
-          L.DomUtil.addClass(el, 'active');
-          el.style.opacity = '1';
-          el.style.filter = 'none';
-          highlightedCount++;
+      if (post) {
+        // Try all possible mapping keys: real ID, node_ID, cust_ID
+        const marker = postMarkers[post.id] || postMarkers['node_' + bid] || postMarkers['cust_' + bid];
+        if (marker) {
+          const el = marker.getElement();
+          if (el) {
+            L.DomUtil.addClass(el, 'active');
+            el.style.opacity = '1';
+            el.style.filter = 'none';
+            highlightedCount++;
+          }
         }
       }
     });
@@ -3840,11 +3869,12 @@ document.addEventListener('DOMContentLoaded', function () {
     let highlightedLines = 0;
     if (typeof networkLinesLayer !== 'undefined') {
       networkLinesLayer.eachLayer(layer => {
-        // We highlight the line if BOTH ends are in the trace (for full connectivity)
-        // Or if one end is in the trace (e.g. for dangling service drops)
-        if (layer._fromBus || layer._toBus) {
-          const fromInTrace = busSet.has(layer._fromBus);
-          const toInTrace = busSet.has(layer._toBus);
+        if (layer instanceof L.Polyline && (layer._fromBus || layer._toBus)) {
+          const fromNorm = String(layer._fromBus || '').trim().toUpperCase();
+          const toNorm = String(layer._toBus || '').trim().toUpperCase();
+
+          const fromInTrace = busSet.has(fromNorm);
+          const toInTrace = busSet.has(toNorm);
 
           if (fromInTrace || toInTrace) {
             layer.setStyle({ color: '#ffeb3b', weight: 5, opacity: 1, dashArray: null });

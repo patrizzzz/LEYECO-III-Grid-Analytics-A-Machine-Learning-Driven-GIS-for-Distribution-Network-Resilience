@@ -1,4 +1,0 @@
-Count,Segment ID,From Bus ID,To Bus ID,Phasing,Configuration,System Grounding Type,Length (meters),Conductor Type,Conductor Size,Unit (C),Strands (C),Neutral Wire Type,Neutral Wire Size,Unit (NW),Strands (NW),Spacing D12 (meters),Spacing D23 (meters),Spacing D13 (meters),Spacing D1n (meters),Spacing D2n (meters),Spacing D3n (meters),Spacing DC1-C2 (meters),Height H1 (meters),Height H2 (meters),Height H3 (meters),Height Hn (meters),Earth Resistivity (Ohm-meter)
-1,DXTUNGF2AC001,P00000000,P00000001,ABCN,Triangular,Multi-grounded,80,ACSR,4/0,AWG,6/1,ACSR,2,AWG,6/1,1.383,1.383,2.61,1.475,1.15,1.475,0,8.69,9.15,8.69,8,100
-2,DXTUNGF2AC002,P00000001,P00000002,ABCN,Triangular,Multi-grounded,95,ACSR,4/0,AWG,6/1,ACSR,2,AWG,6/1,1.383,1.383,2.61,1.475,1.15,1.475,0,8.7,9.16,8.7,8.1,100
-3,DXTUNGF2AC003,P00000002,P00000003,ABCN,Triangular,Multi-grounded,75,ACSR,2,AWG,6/1,ACSR,2,AWG,6/1,1.35,1.35,2.55,1.45,1.1,1.45,0,8.6,9.1,8.6,7.9,100

@@ -1,0 +1,13 @@
+--- Tracing from P00000001-7A (Upstream Check) ---
+Direct neighbors of P00000001-7A: ['P00000001-7']
+Total nodes found: 14928
+Is root (P00000000) in visited? True
+
+--- Tracing from Secondary S0001-0007-0001 ---
+Direct neighbors of S0001-0007-0001: ['DT00000001-7', '5050720314']
+Total nodes found: 14928
+Is root (P00000000) in visited? True
+
+--- Transformer bridge check for DT00000001-7U ---
+Neighbors of P00000001-7: ['DT00000001-7', 'P00000001-7A', 'P00000001-9', 'DT00000001-7A', 'P00000001']
+Neighbors of DT00000001-7: ['P00000001-7', 'S0001-0007-0001']

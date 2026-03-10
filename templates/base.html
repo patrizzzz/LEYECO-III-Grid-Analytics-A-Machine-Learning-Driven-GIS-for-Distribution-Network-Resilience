@@ -14,6 +14,15 @@
 </head>
 
 <body>
+  <!-- Global Loading Indicator -->
+  <div id="global-loader" class="global-loader">
+    <div class="loader-content">
+      <div class="loader-spinner"></div>
+      <div class="loader-text">Loading Resources</div>
+      <div class="loader-subtext">Optimizing network data...</div>
+    </div>
+  </div>
+
   <div class="app-shell">
     <aside class="vertical-sidebar">
       <input type="checkbox" role="switch" id="checkbox-input" class="checkbox-input" />
@@ -445,6 +454,66 @@
           if (e.target === logoutModal) logoutModal.style.display = 'none';
         });
       }
+    })();
+  </script>
+
+  <!-- Global Loader Logic -->
+  <script>
+    (function () {
+      const loader = document.getElementById('global-loader');
+      let requestCount = 0;
+      let loaderTimeout = null;
+
+      function showLoader() {
+        requestCount++;
+        if (requestCount === 1) {
+          // Add a tiny delay to avoid flashing for very fast requests
+          loaderTimeout = setTimeout(() => {
+            loader.style.display = 'flex';
+            requestAnimationFrame(() => {
+              loader.classList.add('is-visible');
+            });
+          }, 150);
+        }
+      }
+
+      function hideLoader() {
+        requestCount = Math.max(0, requestCount - 1);
+        if (requestCount === 0) {
+          if (loaderTimeout) {
+            clearTimeout(loaderTimeout);
+            loaderTimeout = null;
+          }
+          loader.classList.remove('is-visible');
+          // Wait for transition before hiding display
+          setTimeout(() => {
+            if (requestCount === 0) loader.style.display = 'none';
+          }, 300);
+        }
+      }
+
+      // Intercept Fetch API
+      const originalFetch = window.fetch;
+      window.fetch = async (...args) => {
+        // Skip some background or internal fetches if needed
+        const url = args[0] ? (typeof args[0] === 'string' ? args[0] : args[0].url) : '';
+        const isAuthCheck = url.includes('/auth/whoami');
+
+        if (!isAuthCheck) showLoader();
+
+        try {
+          const response = await originalFetch(...args);
+          return response;
+        } finally {
+          if (!isAuthCheck) hideLoader();
+        }
+      };
+
+      // Expose for manual control if needed
+      window.LoaderManager = {
+        show: showLoader,
+        hide: hideLoader
+      };
     })();
   </script>
 </body>

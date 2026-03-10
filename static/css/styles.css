@@ -3620,3 +3620,79 @@ body.dark-theme .modal-footer {
   grid-column: span 2;
   margin-bottom: 4px !important;
 }
+
+/* =============================================
+   Global Loading Indicator (Glassmorphism)
+   ============================================= */
+.global-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: none;
+  /* Controlled by JS */
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: opacity 0.3s ease;
+  opacity: 0;
+}
+
+.global-loader.is-visible {
+  display: flex;
+  opacity: 1;
+}
+
+.loader-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 2.5rem;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2xl);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  animation: loaderPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes loaderPop {
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.loader-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid var(--primary-light);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: loaderSpin 1s infinite linear;
+}
+
+@keyframes loaderSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loader-text {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-size: 1.125rem;
+  letter-spacing: -0.01em;
+}
+
+.loader-subtext {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-top: -1rem;
+}

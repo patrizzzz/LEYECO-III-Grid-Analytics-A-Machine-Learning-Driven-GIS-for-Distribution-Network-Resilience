@@ -1,8 +1,0 @@
-﻿Post ID 184:
-  Pole Number: 184
-  Primary Bus: 184
-  Coords: 11.2926, 124.647
-Post with Pole Number '184':
-  ID: 184
-  Primary Bus: 184
-Posts matching P0000000090: 0

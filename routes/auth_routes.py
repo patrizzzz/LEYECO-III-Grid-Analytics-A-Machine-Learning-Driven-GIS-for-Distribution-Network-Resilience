@@ -93,3 +93,5 @@ def setup_create_admin():
     db.session.add(u)
     db.session.commit()
     return jsonify({'id': u.id, 'username': u.username, 'role': u.role}), 201
+
+

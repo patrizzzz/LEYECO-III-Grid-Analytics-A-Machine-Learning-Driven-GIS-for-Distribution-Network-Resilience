@@ -1,5 +1,0 @@
-﻿BusNode for S000090-0000011:
-  Pole Number: 184
-  Lat/Lng: 11.2926, 124.647
-  Mapped Post ID: 184
-  Mapped Post Number: 184

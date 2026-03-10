@@ -1327,21 +1327,32 @@ def api_trace_feeder():
         return jsonify({'error': 'Missing start_bus parameter'}), 400
         
     try:
-        from network_geometry_db import build_topology_graph, trace_feeder_bfs
+        from network_geometry_db import build_topology_graph, trace_feeder_bfs, \
+                                   trace_downstream_bfs, trace_upstream_bfs
         from models import Post
         from flask import current_app
+        
+        direction = request.args.get('direction', 'both').lower()
         
         # Resolve pole number to primary_bus_id if needed
         post = Post.query.filter((Post.primary_bus_id == start_bus) | (Post.pole_number == start_bus)).first()
         actual_start_bus = post.primary_bus_id if post else start_bus
         
-        graph = build_topology_graph(current_app)
-        visited = trace_feeder_bfs(current_app, actual_start_bus)
+        if direction == 'downstream':
+            visited_set = trace_downstream_bfs(current_app, actual_start_bus)
+            visited = list(visited_set)
+        elif direction == 'upstream':
+            visited_set = trace_upstream_bfs(current_app, actual_start_bus)
+            visited = list(visited_set)
+        else:
+            # Default to 'both' (undirected)
+            visited = trace_feeder_bfs(current_app, actual_start_bus)
         
         return jsonify({
             'status': 'success',
             'start_bus': actual_start_bus,
             'original_query': start_bus,
+            'direction': direction,
             'count': len(visited),
             'visited_buses': visited
         }), 200

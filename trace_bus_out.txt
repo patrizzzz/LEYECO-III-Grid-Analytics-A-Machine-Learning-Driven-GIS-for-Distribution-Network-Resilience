@@ -1,4 +1,0 @@
-﻿Tracing from bus: S000090-0000011
-  No direct DT. Checking secondary lines...
-    Connects to: S000090-0000010
-    Connects to: S000090-0000012
