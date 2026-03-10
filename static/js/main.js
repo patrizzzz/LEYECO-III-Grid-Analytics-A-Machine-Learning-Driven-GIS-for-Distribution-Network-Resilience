@@ -98,7 +98,8 @@ document.addEventListener('DOMContentLoaded', function () {
   let activeLineTypes = new Set(['primary', 'transformer', 'secondary', 'service_drop', 'unknown']);
 
   // --- Transformer filter state ---
-  let activeTransformersOnly = false;
+  let showTransformers = true;
+  let showNoTransformers = true;
 
   // --- Analysis Cache ---
   window._mlRiskMap = {};
@@ -123,7 +124,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
       // Transformer Filter
       const hasTransformer = marker._postData.kva_rating != null && marker._postData.kva_rating !== '';
-      const shouldShowTransformer = !activeTransformersOnly || hasTransformer;
+      const shouldShowTransformer = (hasTransformer && showTransformers) || (!hasTransformer && showNoTransformers);
 
       const shouldShow = shouldShowFeeder && shouldShowTransformer;
 
@@ -459,16 +460,32 @@ document.addEventListener('DOMContentLoaded', function () {
     transRow.className = 'msp-option';
     const transCb = document.createElement('input');
     transCb.type = 'checkbox';
-    transCb.checked = activeTransformersOnly;
+    transCb.checked = showTransformers;
     transCb.addEventListener('change', function () {
-      activeTransformersOnly = this.checked;
+      showTransformers = this.checked;
       applyFeederFilter();
     });
     const transSpan = document.createElement('span');
-    transSpan.innerHTML = 'Show Transformers Only <img src="/static/img/transformer_pole.svg" style="width:14px;height:14px;vertical-align:middle;margin-left:4px;">';
+    transSpan.innerHTML = 'Show Transformers <img src="/static/img/transformer_pole.svg" style="width:14px;height:14px;vertical-align:middle;margin-left:4px;">';
     transRow.appendChild(transCb);
     transRow.appendChild(transSpan);
     transFilterList.appendChild(transRow);
+
+    const poleRow = document.createElement('label');
+    poleRow.className = 'msp-option';
+    const poleCb = document.createElement('input');
+    poleCb.type = 'checkbox';
+    poleCb.checked = showNoTransformers;
+    poleCb.addEventListener('change', function () {
+      showNoTransformers = this.checked;
+      applyFeederFilter();
+    });
+    const poleSpan = document.createElement('span');
+    poleSpan.innerHTML = 'Show Poles (No Transformer) <img src="/static/img/pole.svg" style="width:14px;height:14px;vertical-align:middle;margin-left:4px;">';
+    poleRow.appendChild(poleCb);
+    poleRow.appendChild(poleSpan);
+    transFilterList.appendChild(poleRow);
+
     transFilterSection.appendChild(transFilterList);
 
     // === Section 4: Visualization ===
@@ -823,10 +840,16 @@ document.addEventListener('DOMContentLoaded', function () {
 
       // Look up analysis data using various possible IDs
       const lookupIds = [p.pole_number, p.primary_bus_id, p.id];
+      if (window._debugTransformer) {
+        console.log(`[Transformer Popup Debug] Pole ${p.pole_number} | lookupIds:`, lookupIds, '| _mlRiskMap keys sample:', Object.keys(window._mlRiskMap || {}).slice(0, 5));
+      }
       for (const id of lookupIds) {
         if (!id) continue;
         if (window._mlRiskMap && window._mlRiskMap[id]) riskInfo = window._mlRiskMap[id];
         if (window._loadStressMap && window._loadStressMap[id]) stressInfo = window._loadStressMap[id];
+      }
+      if (window._debugTransformer) {
+        console.log(`[Transformer Popup Debug] riskInfo:`, riskInfo);
       }
 
       if (riskInfo) {
@@ -1581,12 +1604,22 @@ document.addEventListener('DOMContentLoaded', function () {
       fetch('/api/ml/transformer-risk').then(r => r.json()).catch(() => ({})),
       fetch('/api/ml/transformer-load-stress').then(r => r.json()).catch(() => ({}))
     ]).then(([posts, mlResults, loadResults]) => {
-      // Index ML Risk data for fast lookup
+      // Index ML Risk data for fast lookup — keyed by transformer_id, from_primary_bus_id, AND post_id
       window._mlRiskMap = {};
       if (mlResults.predictions) {
         mlResults.predictions.forEach(r => {
+          // Key by transformer_id
           const key = r.transformer_id || r.id || r.bus_id;
           if (key) window._mlRiskMap[key] = r;
+          // Also index by from_primary_bus_id so the popup can match by pole bus ID
+          if (r.from_primary_bus_id) {
+            window._mlRiskMap[String(r.from_primary_bus_id).trim()] = r;
+          }
+          // Also index by post_id (Post.id) which is what the popup uses for p.id lookup
+          if (r.post_id != null) {
+            window._mlRiskMap[String(r.post_id)] = r;
+            window._mlRiskMap[Number(r.post_id)] = r;
+          }
         });
       }
 
@@ -1624,21 +1657,27 @@ document.addEventListener('DOMContentLoaded', function () {
       postsLayer.addTo(map);
       console.log('Posts layer added to map');
 
-      // Fit map if we added markers (use isValid() guard — isEmpty() isn't available in this Leaflet build)
-      if (typeof bounds.isValid === 'function' ? bounds.isValid() : !bounds.isEmpty) {
-        try {
-          map.fitBounds(bounds.pad(0.12));
-          console.log('Map bounds fitted');
-        } catch (e) {
-          console.warn('Failed to fit bounds:', e);
+      // Fit map if we added markers AND we don't have a specific target to zoom to
+      if (!window._targetPostId && !window._targetTransformerId) {
+        if (typeof bounds.isValid === 'function' ? bounds.isValid() : !bounds.isEmpty) {
+          try {
+            map.fitBounds(bounds.pad(0.12));
+            console.log('Map bounds fitted');
+          } catch (e) {
+            console.warn('Failed to fit bounds:', e);
+          }
+        } else {
+          console.log('Bounds not valid - using default map view');
         }
       } else {
-        console.log('Bounds not valid - using default map view');
+        console.log('Skipping fitBounds because a target post/transformer is specified in URL.');
       }
 
-      // If a target post id was provided via URL params, center/fly to it and open popup
+      // If a target post id or transformer id was provided via URL params, center/fly to it and open popup
       try {
         const targetId = window._targetPostId;
+        const targetTransformerId = window._targetTransformerId;
+
         if (targetId) {
           const tid = parseInt(targetId, 10);
           console.log('Targeting post ID:', tid);
@@ -1652,6 +1691,53 @@ document.addEventListener('DOMContentLoaded', function () {
               console.warn('Target marker not found:', tid);
             }
           }, 250);
+        } else if (targetTransformerId) {
+          console.log('Targeting transformer ID:', targetTransformerId);
+
+          let retryCount = 0;
+          const maxRetries = 10;
+
+          function tryLocateTransformer() {
+            let foundMarker = null;
+            const targetUpper = targetTransformerId.toUpperCase();
+
+            // Loop through all markers and inspect their data
+            for (let i = 0; i < _allPostMarkers.length; i++) {
+              const m = _allPostMarkers[i];
+              if (!m._postData) continue;
+
+              const pData = m._postData;
+              const matches =
+                (pData.transformer_bus_id && String(pData.transformer_bus_id).toUpperCase() === targetUpper) ||
+                (pData.primary_bus_id && String(pData.primary_bus_id).toUpperCase() === targetUpper) ||
+                (pData.pole_number && String(pData.pole_number).toUpperCase() === targetUpper) ||
+                (pData.id && String(pData.id) === targetTransformerId);
+
+              if (matches) {
+                foundMarker = m;
+                break;
+              }
+            }
+
+            if (foundMarker && foundMarker.getLatLng) {
+              console.log('Found transformer marker! Zooming...', foundMarker._postData);
+              try { map.flyTo(foundMarker.getLatLng(), 18); } catch (e) { map.setView(foundMarker.getLatLng(), 18); }
+              setTimeout(() => {
+                try { foundMarker.openPopup(); } catch (e) { }
+              }, 600);
+            } else {
+              retryCount++;
+              if (retryCount < maxRetries) {
+                console.log(`Target transformer marker not found yet, retrying (${retryCount}/${maxRetries})...`);
+                setTimeout(tryLocateTransformer, 300);
+              } else {
+                console.warn('Target transformer marker not found after map rendered:', targetTransformerId);
+              }
+            }
+          }
+
+          // Start the first attempt very quickly
+          setTimeout(tryLocateTransformer, 100);
         }
       } catch (e) { console.error('Error in target post handling:', e); }
 

@@ -1193,6 +1193,44 @@ def export_master_csv():
 
 # ==================== ML Prediction Endpoints ====================
 
+@api_bp.route('/transformer-location/<transformer_id>', methods=['GET'])
+def api_transformer_location(transformer_id):
+    """Resolve a transformer_id to the lat/lng of its associated Post."""
+    try:
+        from models import DistributionTransformer, Post, BusNode
+        trans = DistributionTransformer.query.filter_by(transformer_id=transformer_id).first()
+        if not trans:
+            return jsonify({'error': 'Transformer not found'}), 404
+        
+        primary_bus = trans.from_primary_bus_id
+        if not primary_bus:
+            return jsonify({'error': 'Transformer has no primary bus connection'}), 404
+        
+        # Try to find the Post by primary_bus_id or pole_number
+        post = Post.query.filter(
+            (Post.primary_bus_id == primary_bus) | (Post.pole_number == primary_bus)
+        ).first()
+        
+        if not post:
+            # Try via BusNode lookup
+            bn = BusNode.query.filter_by(bus_id=primary_bus).first()
+            if bn and bn.pole_number:
+                post = Post.query.filter_by(pole_number=bn.pole_number).first()
+        
+        if post and post.lat and post.lng:
+            return jsonify({
+                'post_id': post.id,
+                'lat': post.lat,
+                'lng': post.lng,
+                'pole_number': post.pole_number,
+                'name': post.name
+            }), 200
+        else:
+            return jsonify({'error': 'No Post with coordinates found for this transformer'}), 404
+    except Exception as e:
+        current_app.logger.error(f"Transformer location lookup failed: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @api_bp.route('/ml/transformer-risk', methods=['GET'])
 def api_ml_transformer_risk():
     """Run Isolation Forest anomaly detection on transformer data to predict failure risk."""

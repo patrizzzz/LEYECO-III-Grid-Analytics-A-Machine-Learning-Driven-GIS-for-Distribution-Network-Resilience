@@ -251,6 +251,33 @@ def get_grid_health_analytics():
     total_kva = sum(t.kva_rating or 0 for t in transformers)
     avg_kva = max(total_kva / len(transformers), 1.0) if transformers else 1.0
     
+    # Build a map from transformer_id -> from_primary_bus_id for frontend lookup
+    trans_bus_map = {t.transformer_id: t.from_primary_bus_id for t in transformers if t.from_primary_bus_id}
+    
+    # Build a map from from_primary_bus_id -> Post to get post_id for frontend _mlRiskMap lookup
+    # The popup looks up by p.id (Post.id), so we need post_id in the ML predictions
+    all_primary_bus_ids = [t.from_primary_bus_id for t in transformers if t.from_primary_bus_id]
+    posts_by_bus = {}
+    if all_primary_bus_ids:
+        from models import BusNode
+        matched_posts = Post.query.filter(
+            (Post.primary_bus_id.in_(all_primary_bus_ids)) | (Post.pole_number.in_(all_primary_bus_ids))
+        ).all()
+        for p in matched_posts:
+            if p.primary_bus_id:
+                posts_by_bus[p.primary_bus_id] = p.id
+            if p.pole_number:
+                posts_by_bus[str(p.pole_number)] = p.id
+        # Also try BusNode -> Post lookup for any still-unmatched bus IDs
+        unmatched = [bid for bid in all_primary_bus_ids if bid not in posts_by_bus]
+        if unmatched:
+            bn_posts = BusNode.query.filter(BusNode.bus_id.in_(unmatched)).all()
+            for bn in bn_posts:
+                if bn.pole_number:
+                    p2 = Post.query.filter_by(pole_number=bn.pole_number).first()
+                    if p2:
+                        posts_by_bus[bn.bus_id] = p2.id
+    
     # 3. Merge results — keep ALL original ML fields and add load stress data
     combined_details = []
     for ml_pred in ml_results.get('predictions', []):
@@ -259,6 +286,11 @@ def get_grid_health_analytics():
         
         # Start with all ML prediction fields (rank, transformer_id, kva_rating, etc.)
         merged = dict(ml_pred)
+        
+        # Add from_primary_bus_id and post_id so the frontend can match to map markers
+        primary_bus = trans_bus_map.get(tid, '')
+        merged['from_primary_bus_id'] = primary_bus
+        merged['post_id'] = posts_by_bus.get(primary_bus, None) if primary_bus else None
         
         # Add load stress fields
         util_pct = stress.get('utilization_percent', 0)
