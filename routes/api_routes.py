@@ -38,13 +38,11 @@ def admin_required(f):
         return f(*args, **kwargs)
     return wrapper
 
-# Sample in-memory posts
-POSTS = [
-    {"id": 1, "name": "Pole A", "lat": 14.5995, "lng": 120.9842, "status": "Active"},
-    {"id": 2, "name": "Pole B", "lat": 14.6091, "lng": 121.0223, "status": "Active"},
-]
-
-# --- API Routes ---
+from services.post_service import (
+    create_post, get_paginated_posts, 
+    get_post_detail as svc_get_post_detail, 
+    update_post, delete_post
+)
 
 @api_bp.route('/posts', methods=['GET', 'POST'])
 def api_posts():
@@ -53,31 +51,11 @@ def api_posts():
             return jsonify({'error': 'admin required'}), 403
         try:
             data = request.get_json() or {}
-            name = (data.get('name') or '').strip()
-            if not name:
-                return jsonify({'error': 'name is required'}), 400
-            try:
-                lat = float(data.get('lat'))
-                lng = float(data.get('lng'))
-            except (TypeError, ValueError):
-                return jsonify({'error': 'lat and lng must be numbers'}), 400
-            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
-                return jsonify({'error': 'lat/lng out of range'}), 400
-            status = (data.get('status') or '').strip() or None
-            area = (data.get('area') or '').strip() or None
-            post = Post(name=name, lat=lat, lng=lng, status=status, area=area)
-            db.session.add(post)
-            db.session.commit()
-            return jsonify({
-                'id': post.id,
-                'name': post.name,
-                'lat': post.lat,
-                'lng': post.lng,
-                'status': post.status,
-            }), 201
+            result = create_post(data)
+            return jsonify(result), 201
         except Exception as e:
             db.session.rollback()
-            return jsonify({'error': str(e)}), 500
+            return jsonify({'error': str(e)}), getattr(e, 'code', 400) if isinstance(e, ValueError) else 500
 
     # GET
     in_ph = str(request.args.get('in_ph', '')).lower() in ('1', 'true', 'yes')
@@ -88,76 +66,20 @@ def api_posts():
     if per_page < 1 or per_page > 1000: per_page = 10
     
     try:
-        query = Post.query
-        if in_ph:
-            query = query.filter(Post.lat >= 4.0, Post.lat <= 22.0, Post.lng >= 116.0, Post.lng <= 127.5)
-        
-        total = query.count()
-        db_posts = query.offset((page - 1) * per_page).limit(per_page).all()
-        posts = [{"id": p.id, "name": p.name, "lat": p.lat, "lng": p.lng, "status": p.status, "kva_rating": p.kva_rating, "pole_number": p.pole_number} for p in db_posts]
-        
-        total_pages = (total + per_page - 1) // per_page
-        
-        return jsonify({
-            "data": posts,
-            "pagination": {
-                "page": page,
-                "per_page": per_page,
-                "total": total,
-                "total_pages": total_pages,
-                "has_next": page < total_pages,
-                "has_prev": page > 1
-            }
-        })
+        result = get_paginated_posts(in_ph, page, per_page)
+        return jsonify(result)
     except Exception as e:
         if current_app.debug:
             return jsonify({"error": "DB query failed", "details": str(e)}), 500
-        pass
-    
-    # Fallback to in-memory
-    fallback_posts = POSTS
-    if in_ph:
-        fallback_posts = [p for p in POSTS if p['lat'] >= 4.0 and p['lat'] <= 22.0 and p['lng'] >= 116.0 and p['lng'] <= 127.5]
-    
-    total = len(fallback_posts)
-    total_pages = (total + per_page - 1) // per_page
-    paginated_posts = fallback_posts[(page - 1) * per_page:page * per_page]
-    
-    return jsonify({
-        "data": paginated_posts,
-        "pagination": {
-            "page": page,
-            "per_page": per_page,
-            "total": total,
-            "total_pages": total_pages,
-            "has_next": page < total_pages,
-            "has_prev": page > 1
-        }
-    })
+        return jsonify({"data": [], "error": str(e)}), 500
 
 @api_bp.route('/posts/<int:post_id>', methods=['GET', 'PUT', 'DELETE'])
 def api_post_detail(post_id):
     try:
-        p = Post.query.get(post_id)
-        if not p: return jsonify({'error': 'post not found'}), 404
-        
         if request.method == 'GET':
-            post_dict = p.to_dict()
-            meters = []
-            for m in getattr(p, 'meters', []):
-                meters.append({
-                    'id': m.id, 'meter_id': m.meter_id, 'meter_brand': m.meter_brand,
-                    'meter_rating': m.meter_rating, 'kwhr_reading': m.kwhr_reading,
-                    'reading_date': m.reading_date.isoformat() if m.reading_date else None,
-                })
-            post_dict['meters'] = meters
-            extra_fields = ['pri_structure','pri_conductor_size','neutral_wire','configuration',
-                            'primary_bus_id','sec_structure','sec_conductor_size','sec_type',
-                            'conductor_type','sec_bus_id','common_sole','transformer_bus_id',
-                            'transformer_phasing','grounding_rod','l2_wire_type','l1_wire_type',
-                            'created_at','updated_at']
-            for f in extra_fields:
-                post_dict[f] = getattr(p, f, None)
+            post_dict = svc_get_post_detail(post_id)
+            if not post_dict:
+                return jsonify({'error': 'post not found'}), 404
             return jsonify(post_dict)
         
         if not g.get('current_user') or not g.current_user.is_admin():
@@ -165,20 +87,18 @@ def api_post_detail(post_id):
         
         if request.method == 'PUT':
             data = request.get_json() or {}
-            if 'lat' in data: p.lat = float(data['lat'])
-            if 'lng' in data: p.lng = float(data['lng'])
-            if 'status' in data: p.status = (data['status'] or '').strip() or None
-            db.session.commit()
-            return jsonify({'success': True, 'id': p.id, 'name': p.name, 'lat': p.lat, 'lng': p.lng, 'status': p.status})
+            result = update_post(post_id, data)
+            result['success'] = True
+            return jsonify(result)
         
         elif request.method == 'DELETE':
-            db.session.delete(p)
-            db.session.commit()
-            return jsonify({'success': True})
+            success = delete_post(post_id)
+            return jsonify({'success': success})
     
     except Exception as e:
         db.session.rollback()
-        return jsonify({'error': str(e)}), 500
+        status_code = 404 if str(e) == "Post not found" else 500
+        return jsonify({'error': str(e)}), status_code
 
 @api_bp.route('/posts/<int:post_id>/connections', methods=['GET'])
 def api_post_connections(post_id):
@@ -256,7 +176,7 @@ def api_post_service_drops(post_id):
     Get service drops for a post via decentralized service layer logic.
     """
     try:
-        from analysis_services import get_service_drops_for_post
+        from services.analysis_services import get_service_drops_for_post
         drops_list = get_service_drops_for_post(post_id)
         return jsonify({
             'count': len(drops_list),
@@ -645,7 +565,7 @@ def api_network_geometry():
     """Return network geometry (lines and nodes) for map rendering, enriched with health data."""
     try:
         from network_geometry_db import get_network_geometry
-        from analysis_services import get_grid_health_analytics
+        from services.analysis_services import get_grid_health_analytics
         
         # 1. Get Geometry
         data = get_network_geometry(current_app)
@@ -950,7 +870,7 @@ def api_energy_consumption_bulk_import():
         return jsonify(stats), 200
     return jsonify({'error': 'File processing failed'}), 500
 
-from analysis_services import find_customer_post_location
+from services.analysis_services import find_customer_post_location
 
 @api_bp.route('/customers', methods=['GET'])
 def get_customers():
@@ -1277,7 +1197,7 @@ def export_master_csv():
 def api_ml_transformer_risk():
     """Run Isolation Forest anomaly detection on transformer data to predict failure risk."""
     try:
-        from analysis_services import get_grid_health_analytics
+        from services.analysis_services import get_grid_health_analytics
         result = get_grid_health_analytics()
         # Remap 'details' -> 'predictions' for frontend compatibility
         response = {
@@ -1301,7 +1221,7 @@ def api_ml_transformer_risk():
 def api_transformer_load_stress():
     """Run load flow calculations to determine transformer stress levels."""
     try:
-        from analysis_services import calculate_transformer_load_stress
+        from services.analysis_services import calculate_transformer_load_stress
         results = calculate_transformer_load_stress()
         
         return jsonify({
@@ -1370,7 +1290,7 @@ def api_simulate_outage():
         return jsonify({'error': 'Missing start_bus parameter'}), 400
         
     try:
-        from analysis_services import calculate_outage_impact
+        from services.analysis_services import calculate_outage_impact
         from flask import current_app
         impact = calculate_outage_impact(start_bus)
         return jsonify(impact), 200
