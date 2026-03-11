@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // --- Transformer filter state ---
   let showTransformers = true;
-  let showNoTransformers = true;
+  let showPoles = true;
 
   // --- Analysis Cache ---
   window._mlRiskMap = {};
@@ -122,11 +122,25 @@ document.addEventListener('DOMContentLoaded', function () {
       const f = String(marker._postData.feeder || '').trim();
       const shouldShowFeeder = showAllFeeds || activeFeeders.has(f);
 
-      // Transformer Filter
+      // Transformer/Pole Logic
       const hasTransformer = marker._postData.kva_rating != null && marker._postData.kva_rating !== '';
-      const shouldShowTransformer = (hasTransformer && showTransformers) || (!hasTransformer && showNoTransformers);
-
-      const shouldShow = shouldShowFeeder && shouldShowTransformer;
+      
+      let shouldShow = false;
+      if (hasTransformer) {
+        // If it's a transformer, show if EITHER transformer or pole is enabled
+        shouldShow = shouldShowFeeder && (showTransformers || showPoles);
+        
+        // Dynamic Icon Logic
+        if (shouldShow) {
+          if (showTransformers && showPoles) marker.setIcon(transformerPoleIcon);
+          else if (showTransformers) marker.setIcon(transformerOnlyIcon);
+          else marker.setIcon(poleIcon);
+        }
+      } else {
+        // Plain pole - only show if poles are enabled
+        shouldShow = shouldShowFeeder && showPoles;
+        if (shouldShow) marker.setIcon(poleIcon);
+      }
 
       if (shouldShow) {
         if (!postsLayer.hasLayer(marker)) postsLayer.addLayer(marker);
@@ -475,13 +489,13 @@ document.addEventListener('DOMContentLoaded', function () {
     poleRow.className = 'msp-option';
     const poleCb = document.createElement('input');
     poleCb.type = 'checkbox';
-    poleCb.checked = showNoTransformers;
+    poleCb.checked = showPoles;
     poleCb.addEventListener('change', function () {
-      showNoTransformers = this.checked;
+      showPoles = this.checked;
       applyFeederFilter();
     });
     const poleSpan = document.createElement('span');
-    poleSpan.innerHTML = 'Show Poles (No Transformer) <img src="/static/img/pole.svg" style="width:14px;height:14px;vertical-align:middle;margin-left:4px;">';
+    poleSpan.innerHTML = 'Show Poles <img src="/static/img/pole.svg" style="width:14px;height:14px;vertical-align:middle;margin-left:4px;">';
     poleRow.appendChild(poleCb);
     poleRow.appendChild(poleSpan);
     transFilterList.appendChild(poleRow);
@@ -613,6 +627,15 @@ document.addEventListener('DOMContentLoaded', function () {
     popupAnchor: [0, -72],
     tooltipAnchor: [0, -55],
     className: 'pole-icon transformer-pole-icon'
+  });
+
+  const transformerOnlyIcon = L.icon({
+    iconUrl: '/static/img/transformer.svg',
+    iconSize: [60, 80],
+    iconAnchor: [30, 72],
+    popupAnchor: [0, -72],
+    tooltipAnchor: [0, -55],
+    className: 'pole-icon transformer-only-icon'
   });
 
   const customerIcon = L.divIcon({
@@ -827,7 +850,12 @@ document.addEventListener('DOMContentLoaded', function () {
     if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
     const hasTransformer = p.kva_rating != null && p.kva_rating !== '';
-    const currentIcon = hasTransformer ? transformerPoleIcon : poleIcon;
+    let currentIcon = poleIcon;
+    if (hasTransformer) {
+      if (showTransformers && showPoles) currentIcon = transformerPoleIcon;
+      else if (showTransformers) currentIcon = transformerOnlyIcon;
+      else currentIcon = poleIcon; // fallback if somehow added while both off
+    }
 
     let tooltipHtml = `ID: ${p.id}`;
     let healthClass = '';
