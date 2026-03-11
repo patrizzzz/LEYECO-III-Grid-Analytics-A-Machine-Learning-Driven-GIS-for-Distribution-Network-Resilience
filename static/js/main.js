@@ -3524,26 +3524,32 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  searchIconBtn.addEventListener('click', function (e) {
-    e.stopPropagation();
-    toggleSearchBar();
-  });
+  if (searchIconBtn) {
+    searchIconBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      toggleSearchBar();
+    });
+  }
 
   // Keyboard support
-  customerSearchInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') {
-      toggleSearchBar(false);
-      e.preventDefault();
-    }
-  });
+  if (customerSearchInput) {
+    customerSearchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        toggleSearchBar(false);
+        e.preventDefault();
+      }
+    });
+  }
 
   // Clear search when closing
-  searchBarExpanded.addEventListener('focusout', function (e) {
-    // Only close if focus moved outside the search bar
-    if (!searchBarExpanded.contains(e.relatedTarget)) {
-      // Don't automatically close, let user interact
-    }
-  });
+  if (searchBarExpanded) {
+    searchBarExpanded.addEventListener('focusout', function (e) {
+      // Only close if focus moved outside the search bar
+      if (!searchBarExpanded.contains(e.relatedTarget)) {
+        // Don't automatically close, let user interact
+      }
+    });
+  }
 
   // ── 1.6. Customer Search functionality ──
   var customerSearchTimeout = null;
@@ -3551,91 +3557,97 @@ document.addEventListener('DOMContentLoaded', function () {
   var customerSearchHighlight = null;
 
   // Search customers as user types with loading state
-  customerSearchInput.addEventListener('input', function (e) {
-    clearTimeout(customerSearchTimeout);
-    var query = e.target.value.trim();
+  if (customerSearchInput && customerSearchSuggestions) {
+    customerSearchInput.addEventListener('input', function (e) {
+      clearTimeout(customerSearchTimeout);
+      var query = e.target.value.trim();
 
-    // Toggle clear button
-    if (query.length > 0) {
-      searchClearBtn.classList.add('active');
-    } else {
-      searchClearBtn.classList.remove('active');
-    }
+      // Toggle clear button
+      if (query.length > 0) {
+        if (searchClearBtn) searchClearBtn.classList.add('active');
+      } else {
+        if (searchClearBtn) searchClearBtn.classList.remove('active');
+      }
 
-    if (!query || query.length < 1) {
-      customerSearchSuggestions.classList.remove('active');
-      return;
-    }
+      if (!query || query.length < 1) {
+        customerSearchSuggestions.classList.remove('active');
+        return;
+      }
 
-    // Show loading state
-    customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading">🔍 Searching...</div>';
-    customerSearchSuggestions.classList.add('active');
+      // Show loading state
+      customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading">🔍 Searching...</div>';
+      customerSearchSuggestions.classList.add('active');
 
-    customerSearchTimeout = setTimeout(function () {
-      fetch('/api/customers?q=' + encodeURIComponent(query) + '&per_page=5&skip_trace=true')
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-          if (!data.data || data.data.length === 0) {
-            customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-empty">No customers found</div>';
+      customerSearchTimeout = setTimeout(function () {
+        fetch('/api/customers?q=' + encodeURIComponent(query) + '&per_page=5&skip_trace=true')
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (!data.data || data.data.length === 0) {
+              customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-empty">No customers found</div>';
+              customerSearchSuggestions.classList.add('active');
+              return;
+            }
+
+            var html = data.data.map(function (cust, idx) {
+              var name = cust.name || 'N/A';
+              return '<div class="customer-search-item" data-customer-id="' + cust.customer_id + '" tabindex="' + idx + '">' +
+                '<div class="customer-search-item-id">🏢 ' + cust.customer_id + '</div>' +
+                '<div class="customer-search-item-name">' + name + '</div>' +
+                '</div>';
+            }).join('');
+
+            customerSearchSuggestions.innerHTML = html;
             customerSearchSuggestions.classList.add('active');
-            return;
-          }
 
-          var html = data.data.map(function (cust, idx) {
-            var name = cust.name || 'N/A';
-            return '<div class="customer-search-item" data-customer-id="' + cust.customer_id + '" tabindex="' + idx + '">' +
-              '<div class="customer-search-item-id">🏢 ' + cust.customer_id + '</div>' +
-              '<div class="customer-search-item-name">' + name + '</div>' +
-              '</div>';
-          }).join('');
-
-          customerSearchSuggestions.innerHTML = html;
-          customerSearchSuggestions.classList.add('active');
-
-          // Add click handlers to suggestions
-          var items = customerSearchSuggestions.querySelectorAll('.customer-search-item');
-          items.forEach(function (item) {
-            item.addEventListener('click', function (e) {
-              e.stopPropagation();
-              var customerId = item.getAttribute('data-customer-id');
-              selectCustomer(customerId);
-            });
-            item.addEventListener('keydown', function (e) {
-              if (e.key === 'Enter') {
+            // Add click handlers to suggestions
+            var items = customerSearchSuggestions.querySelectorAll('.customer-search-item');
+            items.forEach(function (item) {
+              item.addEventListener('click', function (e) {
+                e.stopPropagation();
                 var customerId = item.getAttribute('data-customer-id');
                 selectCustomer(customerId);
-              }
+              });
+              item.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                  var customerId = item.getAttribute('data-customer-id');
+                  selectCustomer(customerId);
+                }
+              });
             });
+          })
+          .catch(function (err) {
+            console.error('Customer search error:', err);
+            customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error">⚠️ Error loading customers</div>';
+            customerSearchSuggestions.classList.add('active');
           });
-        })
-        .catch(function (err) {
-          console.error('Customer search error:', err);
-          customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error">⚠️ Error loading customers</div>';
-          customerSearchSuggestions.classList.add('active');
-        });
-    }, 300);
-  });
+      }, 300);
+    });
+  }
 
   // Clear button logic
-  searchClearBtn.addEventListener('click', function (e) {
-    e.stopPropagation();
-    customerSearchInput.value = '';
-    searchClearBtn.classList.remove('active');
-    customerSearchSuggestions.classList.remove('active');
-    customerSearchInput.focus();
+  if (searchClearBtn) {
+    searchClearBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      customerSearchInput.value = '';
+      searchClearBtn.classList.remove('active');
+      customerSearchSuggestions.classList.remove('active');
+      if (customerSearchInput) customerSearchInput.focus();
 
-    // Clear highlights and routes
-    if (customerSearchHighlight) {
-      map.removeLayer(customerSearchHighlight);
-      customerSearchHighlight = null;
-    }
-    clearRoute();
-  });
+      // Clear highlights and routes
+      if (customerSearchHighlight) {
+        map.removeLayer(customerSearchHighlight);
+        customerSearchHighlight = null;
+      }
+      clearRoute();
+    });
+  }
 
   // Hide suggestions and close search when clicking elsewhere
   document.addEventListener('click', function (e) {
-    if (!searchBarExpanded.contains(e.target) && e.target !== searchIconBtn && !searchIconBtn.contains(e.target)) {
-      customerSearchSuggestions.classList.remove('active');
+    if (searchBarExpanded && searchIconBtn && customerSearchSuggestions) {
+      if (!searchBarExpanded.contains(e.target) && e.target !== searchIconBtn && !searchIconBtn.contains(e.target)) {
+        customerSearchSuggestions.classList.remove('active');
+      }
     }
   });
 

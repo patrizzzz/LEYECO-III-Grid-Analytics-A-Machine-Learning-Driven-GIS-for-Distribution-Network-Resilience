@@ -24,7 +24,8 @@ from utils.csv_importers import (import_posts_from_csv, import_transformers_from
                                 import_voltage_regulators_from_csv, import_shunt_capacitors_from_csv,
                                 import_shunt_inductors_from_csv, import_series_inductors_from_csv,
                                 import_customers_from_csv, import_energy_consumption_from_csv,
-                                import_bus_nodes_from_csv, import_primary_lines_from_csv)
+                                import_bus_nodes_from_csv, import_primary_lines_from_csv,
+                                import_load_profiles_from_csv)
 
 api_bp = Blueprint('api', __name__)
 
@@ -722,7 +723,7 @@ def api_upload_history():
         # Group by file_type, keeping only the most recent one
         latest = {}
         # Pre-initialize keys
-        for k in ['bus_nodes', 'posts', 'primary_lines', 'transformers', 'secondary_lines', 'service_drops', 'voltage_regulators', 'shunt_capacitors', 'shunt_inductors', 'series_inductors', 'customers', 'energy_consumption']:
+        for k in ['bus_nodes', 'posts', 'primary_lines', 'transformers', 'secondary_lines', 'service_drops', 'voltage_regulators', 'shunt_capacitors', 'shunt_inductors', 'series_inductors', 'customers', 'energy_consumption', 'load_curves']:
             latest[k] = None
 
         for h in history:
@@ -803,6 +804,22 @@ def api_shunt_inductors_bulk_import():
         return jsonify({'error': 'No selected file'}), 400
     if file and file.filename.lower().endswith('.csv'):
         stats = import_shunt_inductors_from_csv(file)
+        if 'error' in stats:
+            return jsonify(stats), 500
+        return jsonify({'result': 'success', 'stats': stats})
+    return jsonify({'error': 'Invalid file format'}), 400
+
+# Load Curves (Profiles)
+@api_bp.route('/load-curves/bulk-import', methods=['POST'])
+@admin_required
+def api_load_curves_bulk_import():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if file and file.filename.lower().endswith('.csv'):
+        stats = import_load_profiles_from_csv(file)
         if 'error' in stats:
             return jsonify(stats), 500
         return jsonify({'result': 'success', 'stats': stats})

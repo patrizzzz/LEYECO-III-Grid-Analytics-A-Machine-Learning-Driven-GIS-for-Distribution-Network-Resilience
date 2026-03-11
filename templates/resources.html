@@ -544,16 +544,16 @@
       </div>
     </div>
 
-    <!-- Energy Consumption -->
+    <!-- Energy Consumption (Billing) -->
     <div class="res-upload-panel" id="panel-energy-consumption">
       <div class="res-upload-panel-header">
-        <h3>⚡ Energy Consumption</h3>
+        <h3>📊 Consumption / Billing</h3>
         <button class="res-panel-close" aria-label="Close">✕</button>
       </div>
       <div class="res-upload-panel-body">
         <div class="upload-card">
           <div class="upload-card-desc">
-            Billing / kWh records. Required: <code>Customer ID</code>, <code>Billing Period</code>,
+            Monthly billing / kWh records. Required: <code>Customer ID</code>, <code>Billing Period</code>,
             <code>kWh Consumed</code>.
           </div>
           <div class="upload-card-history">
@@ -566,6 +566,31 @@
             <button class="btn-sample" data-sample="energy-consumption">📥 Sample</button>
           </div>
           <div id="upload-energy-consumption-status" class="status-msg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Load Profiles / Curves -->
+    <div class="res-upload-panel" id="panel-load-curves">
+      <div class="res-upload-panel-header">
+        <h3>📈 Load Profiles / Curve</h3>
+        <button class="res-panel-close" aria-label="Close">✕</button>
+      </div>
+      <div class="res-upload-panel-body">
+        <div class="upload-card">
+          <div class="upload-card-desc">
+            24-hour load profiles for stress analysis. Required: <code>Customer Type</code>, <code>Hour 1</code>...<code>Hour 24</code>.
+            Saves to <code>services/load_curve_data.csv</code>.
+          </div>
+          <div class="upload-card-history">
+            <div id="history-load_curves" style="display:none;"></div>
+          </div>
+          <input type="file" id="upload-load-curves-file" accept=".csv,.xlsx,.xls" class="file-input">
+          <div class="upload-card-actions">
+            <button class="btn-upload-main" id="upload-load-curves-btn" data-form="load-curves">⬆ Upload</button>
+            <button class="btn-sample" data-sample="load-curves">📥 Sample</button>
+          </div>
+          <div id="upload-load-curves-status" class="status-msg"></div>
         </div>
       </div>
     </div>
@@ -861,6 +886,10 @@
       'series-inductors': {
         filename: 'sample_series_inductors.csv',
         data: 'From Bus ID,To Bus ID,Inductance (mH),Resistance (Ohm),Phasing\nP0000000040-S1,P0000000040-S2,5.5,0.12,ABC\n'
+      },
+      'load-curves': {
+        filename: 'sample_load_curves.csv',
+        data: 'Customer Type,Hour 1,Hour 2,Hour 3,Hour 4,Hour 5,Hour 6,Hour 7,Hour 8,Hour 9,Hour 10,Hour 11,Hour 12,Hour 13,Hour 14,Hour 15,Hour 16,Hour 17,Hour 18,Hour 19,Hour 20,Hour 21,Hour 22,Hour 23,Hour 24\nRES1,0.5,0.4,0.3,0.3,0.4,0.6,0.8,1.2,1.5,1.8,2.0,2.2,2.0,1.8,1.6,1.8,2.2,3.0,3.5,3.2,2.8,2.0,1.2,0.8\nCOM1,1.0,0.8,0.7,0.7,1.0,1.5,2.5,4.0,5.5,6.5,7.0,7.5,7.0,6.5,6.0,6.5,7.0,6.0,5.0,4.0,3.0,2.0,1.5,1.2\n'
       }
     };
 
@@ -890,7 +919,8 @@
       'voltage-regulators': { file: 'upload-voltage-regulators-file', btn: 'upload-voltage-regulators-btn', status: 'upload-voltage-regulators-status', url: '/api/voltage-regulators/bulk-import' },
       'shunt-capacitors': { file: 'upload-shunt-capacitors-file', btn: 'upload-shunt-capacitors-btn', status: 'upload-shunt-capacitors-status', url: '/api/shunt-capacitors/bulk-import' },
       'shunt-inductors': { file: 'upload-shunt-inductors-file', btn: 'upload-shunt-inductors-btn', status: 'upload-shunt-inductors-status', url: '/api/shunt-inductors/bulk-import' },
-      'series-inductors': { file: 'upload-series-inductors-file', btn: 'upload-series-inductors-btn', status: 'upload-series-inductors-status', url: '/api/series-inductors/bulk-import' }
+      'series-inductors': { file: 'upload-series-inductors-file', btn: 'upload-series-inductors-btn', status: 'upload-series-inductors-status', url: '/api/series-inductors/bulk-import' },
+      'load-curves': { file: 'upload-load-curves-file', btn: 'upload-load-curves-btn', status: 'upload-load-curves-status', url: '/api/load-curves/bulk-import' }
     };
 
     function doUpload(key) {
@@ -966,7 +996,8 @@
           'history-voltage_regulators': data.voltage_regulators,
           'history-shunt_capacitors': data.shunt_capacitors,
           'history-shunt_inductors': data.shunt_inductors,
-          'history-series_inductors': data.series_inductors
+          'history-series_inductors': data.series_inductors,
+          'history-load_curves': data.load_curves
         };
         Object.keys(map).forEach(function (id) {
           var el = document.getElementById(id);

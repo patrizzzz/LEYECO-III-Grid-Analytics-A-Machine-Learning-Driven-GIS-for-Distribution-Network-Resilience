@@ -1,6 +1,7 @@
 
 import csv
 import io
+import os
 import re
 from datetime import datetime
 from sqlalchemy.exc import SQLAlchemyError
@@ -426,13 +427,53 @@ def import_transformers_from_csv(csv_file):
                     existing_connections[conn_key] = conn
 
             # --- Sync to Post Table for Map Visualization ---
-            if t.from_primary_bus_id:
-                # We reuse existing_posts from previous imports if possible, but here we'll pull fresh or use a local cache
-                # For simplicity and to avoid pre-loading 10k poles, we'll do a quick lookup
-                p = Post.query.filter((Post.pole_number == t.from_primary_bus_id) | (Post.primary_bus_id == t.from_primary_bus_id)).first()
+            buses_to_check = [str(t.from_primary_bus_id or "").strip(), str(t.to_secondary_bus_id or "").strip()]
+            p = None
+            
+            for bus_id in buses_to_check:
+                if not bus_id: continue
+                # 1. Direct match
+                p = Post.query.filter((Post.pole_number == bus_id) | (Post.primary_bus_id == bus_id)).first()
+                
+                # 2. bus_data.csv lookup mapping
+                if not p and bus_id.lower() in bus_map:
+                    mapped = bus_map[bus_id.lower()]
+                    p = Post.query.filter((Post.pole_number == mapped) | (Post.primary_bus_id == mapped)).first()
+
+                # 3. Smart Extraction
+                if not p:
+                    import re
+                    parts = re.split(r'[^a-zA-Z0-9]', bus_id)
+                    parts = [part for part in parts if part]
+                    candidates = set()
+                    if len(parts) > 1:
+                        candidates.add(parts[-1].lower())
+                        candidates.add(parts[-1].lstrip('0').lower())
+                        m = re.match(r'^(\d+)[a-zA-Z]*$', parts[-1])
+                        if m:
+                            candidates.add(m.group(1).lower())
+                            candidates.add(m.group(1).lstrip('0').lower())
+                        candidates.add(parts[0].replace('P', '').replace('p', '').lstrip('0').lower())
+                    else:
+                        m = re.search(r'\d+', bus_id)
+                        if m:
+                            num_str = m.group(0)
+                            candidates.add(num_str.lstrip('0').lower())
+                            candidates.add(num_str.lower())
+                    
+                    for c in candidates:
+                        p = Post.query.filter((Post.pole_number == c) | (Post.primary_bus_id == c)).first()
+                        if not p and c in bus_map:
+                            mapped_c = bus_map[c]
+                            p = Post.query.filter((Post.pole_number == mapped_c) | (Post.primary_bus_id == mapped_c)).first()
+                        if p:
+                            break
                 if p:
-                    p.kva_rating = t.kva_rating
-                    p.transformer_bus_id = t.from_primary_bus_id
+                    break
+
+            if p:
+                p.kva_rating = t.kva_rating
+                p.transformer_bus_id = t.from_primary_bus_id or t.to_secondary_bus_id
             
         except Exception as e:
             stats['errors'].append(f"Row {row_idx}: {str(e)}")
@@ -1004,3 +1045,34 @@ def import_energy_consumption_from_csv(csv_file):
         db.session.rollback()
         return {'error': f"Database commit failed: {str(e)}"}
     return stats
+
+def import_load_profiles_from_csv(csv_file):
+    """
+    Saves the uploaded CSV to services/load_curve_data.csv.
+    This file is used by the stress analysis service.
+    """
+    stats = {'created': 1, 'updated': 0, 'skipped': 0, 'errors': []}
+    try:
+        filename = getattr(csv_file, 'filename', 'load_curve_data.csv')
+        content = csv_file.stream.read()
+        
+        # Ensure services directory exists
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        services_dir = os.path.join(base_dir, 'services')
+        if not os.path.exists(services_dir):
+            os.makedirs(services_dir)
+            
+        target_path = os.path.join(services_dir, 'load_curve_data.csv')
+        
+        with open(target_path, 'wb') as f:
+            f.write(content)
+            
+        # Log to history
+        h = UploadHistory(file_type='load_curves', filename=filename, record_count=1)
+        db.session.add(h)
+        db.session.commit()
+        
+        return stats
+    except Exception as e:
+        db.session.rollback()
+        return {'error': f"Failed to save load profiles: {str(e)}"}
