@@ -59,7 +59,12 @@ document.addEventListener('DOMContentLoaded', function () {
     return;
   }
 
-  const postsLayer = L.layerGroup();
+  const postsLayer = (L.markerClusterGroup ? L.markerClusterGroup({
+    maxClusterRadius: 60,
+    showCoverageOnHover: false,
+    spiderfyOnEveryZoom: false,
+    spiderfyOnMaxZoom: true
+  }) : L.layerGroup());
   const latlongLayer = L.layerGroup();
   const connectionsLayer = L.layerGroup();
   const networkLinesLayer = L.layerGroup();
@@ -89,58 +94,55 @@ document.addEventListener('DOMContentLoaded', function () {
   // --- Feeder filter state ---
   let knownFeeders = new Set();
   let activeFeeders = new Set(); // feeders currently visible – starts with all enabled
+  try {
+    const savedFeedersRaw = localStorage.getItem('mapActiveFeeders');
+    if (savedFeedersRaw) {
+      const savedFeeders = JSON.parse(savedFeedersRaw);
+      if (Array.isArray(savedFeeders)) {
+        savedFeeders.forEach(function (f) {
+          if (typeof f === 'string' && f) activeFeeders.add(f);
+        });
+      }
+    }
+  } catch (e) { /* ignore */ }
 
   // --- Phase filter state ---
   // Categories: '1' (Single Phase), '2' (Double Phase), '3' (Three Phase), '0' (Other/Unknown)
   let activePhaseCategories = new Set(['1', '2', '3', '0']);
-
-  // --- Line Type filter state ---
-  let activeLineTypes = new Set(['primary', 'transformer', 'secondary', 'service_drop', 'unknown']);
-
-  // --- Transformer filter state ---
-  let showTransformers = true;
-  let showPoles = true;
-
-  // --- Analysis Cache ---
-  window._mlRiskMap = {};
-  window._loadStressMap = {};
+  try {
+    const savedPhasesRaw = localStorage.getItem('mapActivePhases');
+    if (savedPhasesRaw) {
+      const savedPhases = JSON.parse(savedPhasesRaw);
+      if (Array.isArray(savedPhases) && savedPhases.length > 0) {
+        activePhaseCategories = new Set(savedPhases.filter(function (p) { return p === '0' || p === '1' || p === '2' || p === '3'; }));
+      }
+    }
+  } catch (e) { /* ignore */ }
 
   const _allPostMarkers = []; // keeps references to ALL markers even when removed from layer
-  let feederList = null; // Scoped for applyFeederFilter
+
+  function persistActiveFeeders() {
+    try {
+      const arr = Array.from(activeFeeders);
+      localStorage.setItem('mapActiveFeeders', JSON.stringify(arr));
+    } catch (e) { /* ignore */ }
+  }
 
   function applyFeederFilter() {
-    // Show all when: no feeders known, OR "Show All" checkbox is checked, OR we haven't built the UI yet (initial load)
-    const showAllCb = feederList ? feederList.querySelector('.msp-feeder-all input') : null;
-    const showAllFeeds = (knownFeeders.size === 0) || (showAllCb ? showAllCb.checked : true);
-
-    // Engineers want to see "lines only" when posts are hidden.
-    // Virtual nodes and customers are markers, so we hide them if postsLayer is off.
-    const postsVisible = map.hasLayer(postsLayer);
+    // Filter posts: remove/add from postsLayer
+    // Show all when: no feeders known, or all feeders are checked (Show All)
+    const showAllFeeds = knownFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
+    // activePhaseCategories covers 1, 2, 3, 0
 
     _allPostMarkers.forEach(function (marker) {
       if (!marker._postData) return;
-      const f = String(marker._postData.feeder || '').trim();
+      const f = marker._postData.feeder || '';
       const shouldShowFeeder = showAllFeeds || activeFeeders.has(f);
 
-      // Transformer/Pole Logic
-      const hasTransformer = marker._postData.kva_rating != null && marker._postData.kva_rating !== '';
-      
-      let shouldShow = false;
-      if (hasTransformer) {
-        // If it's a transformer, show if EITHER transformer or pole is enabled
-        shouldShow = shouldShowFeeder && (showTransformers || showPoles);
-        
-        // Dynamic Icon Logic
-        if (shouldShow) {
-          if (showTransformers && showPoles) marker.setIcon(transformerPoleIcon);
-          else if (showTransformers) marker.setIcon(transformerOnlyIcon);
-          else marker.setIcon(poleIcon);
-        }
-      } else {
-        // Plain pole - only show if poles are enabled
-        shouldShow = shouldShowFeeder && showPoles;
-        if (shouldShow) marker.setIcon(poleIcon);
-      }
+      // For posts, we might not filter by phase strictly unless they have phase data
+      // Assume posts show if feeder is active. If needed, we can check post phasing.
+      // But typically phase filtering applies more to lines.
+      const shouldShow = shouldShowFeeder;
 
       if (shouldShow) {
         if (!postsLayer.hasLayer(marker)) postsLayer.addLayer(marker);
@@ -149,9 +151,10 @@ document.addEventListener('DOMContentLoaded', function () {
       }
     });
 
-    // Ensure networkLinesLayer is on map so its content is visible
-    if (!map.hasLayer(networkLinesLayer)) networkLinesLayer.addTo(map);
+    // Persist feeder selection whenever filter is applied
+    persistActiveFeeders();
 
+    // Filter network lines: remove/add from networkLinesLayer
     const allLines = [];
     networkLinesLayer.eachLayer(function (layer) { allLines.push(layer); });
     if (!window._hiddenNetworkLines) window._hiddenNetworkLines = [];
@@ -161,7 +164,7 @@ document.addEventListener('DOMContentLoaded', function () {
     allNetLines.forEach(function (layer) {
       if (layer instanceof L.Polyline) {
         // Feeder Check
-        const f = String(layer._feederName || '').trim();
+        const f = layer._feederName || '';
         const isFeederVisible = showAllFeeds || activeFeeders.has(f);
 
         // Phase Check
@@ -184,22 +187,7 @@ document.addEventListener('DOMContentLoaded', function () {
           isPhaseVisible = activePhaseCategories.has(category);
         }
 
-        // Line Type Check
-        const lType = layer.lineCategory || 'unknown';
-        const isLineTypeVisible = activeLineTypes.has(lType);
-
-        if (isFeederVisible && isPhaseVisible && isLineTypeVisible) {
-          if (!networkLinesLayer.hasLayer(layer)) networkLinesLayer.addLayer(layer);
-        } else {
-          if (networkLinesLayer.hasLayer(layer)) networkLinesLayer.removeLayer(layer);
-          window._hiddenNetworkLines.push(layer);
-        }
-      } else if (layer instanceof L.Marker) {
-        // Feeder Check for Virtual Nodes / Customers
-        const f = String(layer._feederName || '').trim();
-        const isFeederVisible = showAllFeeds || activeFeeders.has(f);
-
-        if (isFeederVisible && postsVisible) {
+        if (isFeederVisible && isPhaseVisible) {
           if (!networkLinesLayer.hasLayer(layer)) networkLinesLayer.addLayer(layer);
         } else {
           if (networkLinesLayer.hasLayer(layer)) networkLinesLayer.removeLayer(layer);
@@ -209,26 +197,53 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
+  // Simple debounce helper for expensive filter operations
+  function debounce(fn, delay) {
+    let timer = null;
+    return function () {
+      const ctx = this;
+      const args = arguments;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(function () { fn.apply(ctx, args); }, delay);
+    };
+  }
+
+  let applyFeederFilterDebounced = null;
+
   // Expose function so it can be called after data loads
   window._refreshFeederList = function () { };
 
-  // --- Unified Map Settings (Sidebar) ---
-  const sidebarSettingsContainer = document.getElementById('sidebar-map-settings');
-  const sidebarSettingsWrapper = document.getElementById('sidebar-map-settings-wrapper');
-  const sidebarToggle = document.getElementById('sidebar-map-settings-toggle');
+  // --- Unified Map Settings Control ---
+  const mapSettingsControl = L.control({ position: 'topright' });
+  mapSettingsControl.onAdd = function () {
+    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control map-settings-panel');
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
 
-  if (sidebarToggle && sidebarSettingsWrapper) {
-    sidebarToggle.addEventListener('click', function (e) {
-      e.preventDefault();
-      const isVisible = sidebarSettingsWrapper.style.display !== 'none';
-      sidebarSettingsWrapper.style.display = isVisible ? 'none' : '';
-      const arrow = sidebarToggle.querySelector('.sidebar-msp-arrow');
-      if (arrow) arrow.classList.toggle('expanded', !isVisible);
+    // State for collapse
+    let collapsed = false;
+
+    // --- Header ---
+    const header = document.createElement('div');
+    header.className = 'msp-header';
+    header.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 -960 960 960" fill="currentColor"><path d="M440-120v-240h80v80h320v80H520v80h-80Zm-320-80v-80h240v80H120Zm160-160v-80H120v-80h160v-80h80v240h-80Zm160-80v-80h400v80H440Zm160-160v-240h80v80h160v80H680v80h-80Zm-480-80v-80h400v80H120Z"/></svg>
+      <span>Map Settings</span>
+      <button class="msp-toggle" title="Collapse">▾</button>
+    `;
+
+    const body = document.createElement('div');
+    body.className = 'msp-body';
+    body.style.maxHeight = '400px';
+    body.style.overflowY = 'auto';
+
+    header.querySelector('.msp-toggle').addEventListener('click', function () {
+      collapsed = !collapsed;
+      body.style.display = collapsed ? 'none' : '';
+      this.textContent = collapsed ? '▸' : '▾';
+      container.classList.toggle('msp-collapsed', collapsed);
     });
-  }
 
-  // Build settings sections inside the sidebar
-  if (sidebarSettingsContainer) {
     // === Section 1: Base Map ===
     const baseSection = document.createElement('div');
     baseSection.className = 'msp-section';
@@ -283,9 +298,6 @@ document.addEventListener('DOMContentLoaded', function () {
       cb.addEventListener('change', function () {
         if (this.checked) { overlays[name].addTo(map); }
         else { map.removeLayer(overlays[name]); }
-
-        // If Posts or Network lines toggle, re-run filter to sync virtual nodes
-        applyFeederFilter();
       });
       const span = document.createElement('span');
       span.textContent = name;
@@ -299,27 +311,32 @@ document.addEventListener('DOMContentLoaded', function () {
     const feederSection = document.createElement('div');
     feederSection.className = 'msp-section';
     feederSection.innerHTML = '<div class="msp-section-title">Feeder Filter</div>';
-    feederList = document.createElement('div');
+    const feederList = document.createElement('div');
     feederList.className = 'msp-option-list msp-feeder-list';
     feederList.innerHTML = '<span class="msp-hint">Loading feeders…</span>';
     feederSection.appendChild(feederList);
 
     // Refresh feeder list after post data is loaded
     window._refreshFeederList = function () {
-      if (!feederList) return;
-      const showAllWasChecked = feederList.querySelector('.msp-feeder-all input') ? feederList.querySelector('.msp-feeder-all input').checked : true;
+      feederList.innerHTML = '<span class="msp-hint">Loading feeders…</span>';
 
-      feederList.innerHTML = '';
+      // Build debounced filter on first use
+      if (!applyFeederFilterDebounced) {
+        applyFeederFilterDebounced = debounce(applyFeederFilter, 120);
+      }
+
       if (knownFeeders.size === 0) {
         feederList.innerHTML = '<span class="msp-hint">No feeders found</span>';
         return;
       }
+      feederList.innerHTML = '';
       // "Show All" option
       const allRow = document.createElement('label');
       allRow.className = 'msp-option msp-feeder-all';
       const allCb = document.createElement('input');
       allCb.type = 'checkbox';
-      allCb.checked = showAllWasChecked;
+      // "Show All" is checked only if every feeder is active
+      allCb.checked = activeFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
       const allSpan = document.createElement('span');
       allSpan.textContent = 'Show All';
       allSpan.style.fontWeight = '600';
@@ -330,23 +347,21 @@ document.addEventListener('DOMContentLoaded', function () {
       const feederCbs = [];
       const sortedFeeders = Array.from(knownFeeders).sort();
       sortedFeeders.forEach(function (fname) {
-        // Automatically activate new feeders if "Show All" is checked
-        if (showAllWasChecked && !activeFeeders.has(fname)) {
-          activeFeeders.add(fname);
-        }
-
+        const hasSaved = activeFeeders.size > 0;
         const row = document.createElement('label');
         row.className = 'msp-option';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
-        cb.checked = activeFeeders.has(fname);
+        const shouldBeChecked = !hasSaved || activeFeeders.has(fname);
+        cb.checked = shouldBeChecked;
         cb.dataset.feeder = fname;
         cb.addEventListener('change', function () {
           if (this.checked) { activeFeeders.add(fname); }
           else { activeFeeders.delete(fname); }
           // Sync "Show All"
           allCb.checked = activeFeeders.size === knownFeeders.size;
-          applyFeederFilter();
+          if (applyFeederFilterDebounced) applyFeederFilterDebounced();
+          else applyFeederFilter();
         });
         const span = document.createElement('span');
         span.textContent = fname;
@@ -362,7 +377,8 @@ document.addEventListener('DOMContentLoaded', function () {
           if (allCb.checked) { activeFeeders.add(cb.dataset.feeder); }
           else { activeFeeders.delete(cb.dataset.feeder); }
         });
-        applyFeederFilter();
+        if (applyFeederFilterDebounced) applyFeederFilterDebounced();
+        else applyFeederFilter();
       });
     };
 
@@ -389,7 +405,11 @@ document.addEventListener('DOMContentLoaded', function () {
       cb.addEventListener('change', function () {
         if (this.checked) activePhaseCategories.add(p.id);
         else activePhaseCategories.delete(p.id);
-        applyFeederFilter(); // Re-run filter logic
+        try {
+          localStorage.setItem('mapActivePhases', JSON.stringify(Array.from(activePhaseCategories)));
+        } catch (e) { /* ignore */ }
+        if (applyFeederFilterDebounced) applyFeederFilterDebounced();
+        else applyFeederFilter(); // Re-run filter logic
       });
       const span = document.createElement('span');
       span.textContent = p.label;
@@ -398,109 +418,6 @@ document.addEventListener('DOMContentLoaded', function () {
       phaseList.appendChild(row);
     });
     phaseSection.appendChild(phaseList);
-
-    // === Section 3.6: Line Type Filter ===
-    const lineTypeSection = document.createElement('div');
-    lineTypeSection.className = 'msp-section';
-    lineTypeSection.innerHTML = '<div class="msp-section-title">Line Type Filter</div>';
-    const lineTypeList = document.createElement('div');
-    lineTypeList.className = 'msp-option-list';
-
-    const allLineCb = document.createElement('input');
-    allLineCb.type = 'checkbox';
-    allLineCb.checked = true;
-
-    const allLineRow = document.createElement('label');
-    allLineRow.className = 'msp-option';
-    allLineRow.innerHTML = '<span><strong style="color:#0056b3;">Show All</strong></span>';
-    allLineRow.prepend(allLineCb);
-    lineTypeList.appendChild(allLineRow);
-
-    const lineTypes = [
-      { id: 'primary', label: 'Primary / Distribution Line' },
-      { id: 'secondary', label: 'Secondary Line' }
-    ];
-
-    const ltCheckboxes = [];
-
-    lineTypes.forEach(function (lt) {
-      const row = document.createElement('label');
-      row.className = 'msp-option';
-
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.dataset.linetype = lt.id;
-      cb.checked = activeLineTypes.has(lt.id);
-      ltCheckboxes.push(cb);
-
-      cb.addEventListener('change', function () {
-        if (this.checked) activeLineTypes.add(lt.id);
-        else activeLineTypes.delete(lt.id);
-
-        allLineCb.checked = ltCheckboxes.every(c => c.checked);
-        applyFeederFilter();
-      });
-
-      const span = document.createElement('span');
-      span.textContent = lt.label;
-
-      row.appendChild(cb);
-      row.appendChild(span);
-      lineTypeList.appendChild(row);
-    });
-
-    allLineCb.addEventListener('change', function () {
-      const isChecked = this.checked;
-      ltCheckboxes.forEach(cb => {
-        cb.checked = isChecked;
-        if (isChecked) activeLineTypes.add(cb.dataset.linetype);
-        else activeLineTypes.delete(cb.dataset.linetype);
-      });
-      if (isChecked) activeLineTypes.add('unknown');
-      else activeLineTypes.delete('unknown');
-      applyFeederFilter();
-    });
-
-    lineTypeSection.appendChild(lineTypeList);
-
-    // === Section 3.7: Transformer Filter ===
-    const transFilterSection = document.createElement('div');
-    transFilterSection.className = 'msp-section';
-    transFilterSection.innerHTML = '<div class="msp-section-title">Analysis Filters</div>';
-    const transFilterList = document.createElement('div');
-    transFilterList.className = 'msp-option-list';
-
-    const transRow = document.createElement('label');
-    transRow.className = 'msp-option';
-    const transCb = document.createElement('input');
-    transCb.type = 'checkbox';
-    transCb.checked = showTransformers;
-    transCb.addEventListener('change', function () {
-      showTransformers = this.checked;
-      applyFeederFilter();
-    });
-    const transSpan = document.createElement('span');
-    transSpan.innerHTML = 'Show Transformers <img src="/static/img/transformer_pole.svg" style="width:14px;height:14px;vertical-align:middle;margin-left:4px;">';
-    transRow.appendChild(transCb);
-    transRow.appendChild(transSpan);
-    transFilterList.appendChild(transRow);
-
-    const poleRow = document.createElement('label');
-    poleRow.className = 'msp-option';
-    const poleCb = document.createElement('input');
-    poleCb.type = 'checkbox';
-    poleCb.checked = showPoles;
-    poleCb.addEventListener('change', function () {
-      showPoles = this.checked;
-      applyFeederFilter();
-    });
-    const poleSpan = document.createElement('span');
-    poleSpan.innerHTML = 'Show Poles <img src="/static/img/pole.svg" style="width:14px;height:14px;vertical-align:middle;margin-left:4px;">';
-    poleRow.appendChild(poleCb);
-    poleRow.appendChild(poleSpan);
-    transFilterList.appendChild(poleRow);
-
-    transFilterSection.appendChild(transFilterList);
 
     // === Section 4: Visualization ===
     const vizSection = document.createElement('div');
@@ -578,15 +495,17 @@ document.addEventListener('DOMContentLoaded', function () {
       updateNetworkLineColors();
     });
 
-    // Assemble all sections into sidebar settings container
-    sidebarSettingsContainer.appendChild(baseSection);
-    sidebarSettingsContainer.appendChild(layerSection);
-    sidebarSettingsContainer.appendChild(feederSection);
-    sidebarSettingsContainer.appendChild(phaseSection);
-    sidebarSettingsContainer.appendChild(lineTypeSection);
-    sidebarSettingsContainer.appendChild(transFilterSection);
-    sidebarSettingsContainer.appendChild(vizSection);
-  }
+    // Assemble
+    body.appendChild(baseSection);
+    body.appendChild(layerSection);
+    body.appendChild(feederSection);
+    body.appendChild(phaseSection);
+    body.appendChild(vizSection);
+    container.appendChild(header);
+    container.appendChild(body);
+    return container;
+  };
+  mapSettingsControl.addTo(map);
 
   // Force Leaflet to measure container and load tiles (fixes blank map)
   function refreshMapSize() {
@@ -618,38 +537,6 @@ document.addEventListener('DOMContentLoaded', function () {
     popupAnchor: [0, -68],
     tooltipAnchor: [0, -44],
     className: 'pole-icon'
-  });
-
-  const transformerPoleIcon = L.icon({
-    iconUrl: '/static/img/transformer_pole.svg',
-    iconSize: [60, 80],
-    iconAnchor: [30, 72],
-    popupAnchor: [0, -72],
-    tooltipAnchor: [0, -55],
-    className: 'pole-icon transformer-pole-icon'
-  });
-
-  const transformerOnlyIcon = L.icon({
-    iconUrl: '/static/img/transformer.svg',
-    iconSize: [60, 80],
-    iconAnchor: [30, 72],
-    popupAnchor: [0, -72],
-    tooltipAnchor: [0, -55],
-    className: 'pole-icon transformer-only-icon'
-  });
-
-  const customerIcon = L.divIcon({
-    className: '',
-    html: '<div style="background-color:#FF3366; width:12px; height:12px; border-radius:50%; border:2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>',
-    iconSize: [16, 16],
-    iconAnchor: [8, 8]
-  });
-
-  const virtualNodeIcon = L.divIcon({
-    className: '',
-    html: '<div style="background-color:#FF9900; width:10px; height:10px; border-radius:50%; border:2px solid white; box-shadow: 0 0 3px rgba(0,0,0,0.5);"></div>',
-    iconSize: [14, 14],
-    iconAnchor: [7, 7]
   });
 
   // Connection editing state
@@ -698,7 +585,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }, 100);
 
     setTimeout(function () {
-      // loadLineConnections(); // DEPRECATED: network-geometry endpoint now handles all connections with filtering support
+      loadLineConnections();
       loadNetworkGeometry();
     }, 1500);
   }
@@ -849,74 +736,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const lng = parseFloat(p.lng);
     if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
-    const hasTransformer = p.kva_rating != null && p.kva_rating !== '';
-    let currentIcon = poleIcon;
-    if (hasTransformer) {
-      if (showTransformers && showPoles) currentIcon = transformerPoleIcon;
-      else if (showTransformers) currentIcon = transformerOnlyIcon;
-      else currentIcon = poleIcon; // fallback if somehow added while both off
-    }
-
-    let tooltipHtml = `ID: ${p.id}`;
-    let healthClass = '';
-    let riskInfo = null;
-    let stressInfo = null;
-    let healthHtml = '';
-
-    if (hasTransformer) {
-      tooltipHtml += ` <img src="/static/img/transformer_pole.svg" style="width:18px;height:24px;vertical-align:middle;margin-left:4px;" title="Transformer Pole">`;
-
-      // Look up analysis data using various possible IDs
-      const lookupIds = [p.pole_number, p.primary_bus_id, p.id];
-      if (window._debugTransformer) {
-        console.log(`[Transformer Popup Debug] Pole ${p.pole_number} | lookupIds:`, lookupIds, '| _mlRiskMap keys sample:', Object.keys(window._mlRiskMap || {}).slice(0, 5));
-      }
-      for (const id of lookupIds) {
-        if (!id) continue;
-        if (window._mlRiskMap && window._mlRiskMap[id]) riskInfo = window._mlRiskMap[id];
-        if (window._loadStressMap && window._loadStressMap[id]) stressInfo = window._loadStressMap[id];
-      }
-      if (window._debugTransformer) {
-        console.log(`[Transformer Popup Debug] riskInfo:`, riskInfo);
-      }
-
-      if (riskInfo) {
-        const rl = (riskInfo.risk_level || '').toLowerCase();
-        if (rl === 'critical') healthClass = 'health-critical';
-        else if (rl === 'high') healthClass = 'health-high';
-        else healthClass = 'health-normal';
-      } else if (stressInfo) {
-        const st = (stressInfo.status || '').toLowerCase();
-        if (st === 'overloaded') healthClass = 'health-critical';
-        else if (st === 'high load') healthClass = 'health-high';
-        else healthClass = 'health-normal';
-      } else {
-        healthClass = 'health-normal';
-      }
-
-      // Build Health Info HTML with color-coded border
-      let borderCol = 'var(--success)';
-      if (healthClass === 'health-critical') borderCol = 'var(--danger)';
-      else if (healthClass === 'health-high') borderCol = 'var(--warning)';
-
-      healthHtml = `
-        <div class="popup-health-summary" style="margin: 8px 0; padding: 8px; background: rgba(0,0,0,0.03); border-radius: 6px; border-left: 3px solid ${borderCol};">
-          <div style="font-weight:700; font-size:0.8rem; margin-bottom:4px;">
-            ${riskInfo ? `Impact Rank: #${riskInfo.impact_rank}` : 'Transformer Health'}
-          </div>
-          ${riskInfo ? `
-            <div style="font-size:0.75rem;">Impact Level: <strong style="color:${borderCol}">${riskInfo.risk_level}</strong></div>
-            <div style="font-size:0.75rem;">Impact Score: <strong>${riskInfo.impact_score}</strong></div>
-            <div style="font-size:0.75rem;">Customers Served: <strong>${riskInfo.customer_count || 0}</strong></div>
-            <div style="font-size:0.75rem; margin-top:4px; opacity:0.8;">Technical Anomaly Risk: ${riskInfo.risk_score}%</div>
-            <div style="font-size:0.75rem; opacity:0.8;">Load: ${riskInfo.load_status} (${riskInfo.utilization_percent}%)</div>
-          ` : (stressInfo ? `
-            <div style="font-size:0.75rem;">Load: <strong>${stressInfo.load_status}</strong> (${stressInfo.utilization_percent}%)</div>
-          ` : '<div style="font-size:0.75rem; color:var(--success);">Status: Healthy / Normal</div>')}
-        </div>
-      `;
-    }
-
     const popupHtml = `
       <div class="post-popup-container">
         <div class="post-popup-tabs">
@@ -927,61 +746,45 @@ document.addEventListener('DOMContentLoaded', function () {
 
         <div id="General-${p.id}" class="tab-content" style="display: block;">
             <div class="popup-post-details">
-              <strong>${(p.name || 'Post ' + p.id).replace(/</g, '&lt;')}</strong>${(p.kva_rating != null && p.kva_rating !== '') ? ' <img src="/static/img/transformer_pole.svg" style="width:18px;height:18px;vertical-align:middle;margin-left:4px;" title="Transformer Pole">' : ''}<br>
+              <strong>${(p.name || 'Post ' + p.id).replace(/</g, '&lt;')}</strong><br>
               Feeder: ${(p.feeder || 'N/A').replace(/</g, '&lt;')}<br>
               Status: ${(p.status || 'N/A').replace(/</g, '&lt;')}<br>
               Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>
               ID: ${p.id}
             </div>
-            ${healthHtml}
-            <div class="popup-connect-actions">
-                <button class="btn btn-outline btn-street-view" data-lat="${lat}" data-lng="${lng}" data-post-id="${p.id}" title="Open Street View">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="14" width="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q27-35 43.5-76t22.5-86H640v40q0 33 23.5 56.5T720-306v42Z"/></svg>
+            <div class="popup-connect-actions" style="margin-bottom:4px;">
+                <button class="btn btn-outline btn-street-view" data-lat="${lat}" data-lng="${lng}" data-post-id="${p.id}" title="Open Street View at this location">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 -960 960 960" fill="currentColor" style="vertical-align:middle;margin-right:4px;"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q27-35 43.5-76t22.5-86H640v40q0 33 23.5 56.5T720-306v42Z"/></svg>
                   Street View
                 </button>
-                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}">Primary overhead</button>
-                <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Dist. Transformer</button>
-                <button class="btn btn-secondary trace-directional-btn" data-bus-id="${p.primary_bus_id || p.pole_number}" data-direction="downstream">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="14" width="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-120 300-300l56-56 124 124 124-124 56 56-180 180ZM240-240v-480h480v480H240Zm80-80h320v-320H320v320Zm-80-480h480-480Z"/></svg>
-                  Trace Downstream
-                </button>
-
-                <button class="btn btn-danger simulate-outage-btn" data-bus-id="${p.primary_bus_id || p.pole_number}">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="14" width="14" viewBox="0 -960 960 960" fill="currentColor"><path d="M480-80 310-250l57-57 113 113 113-113 57 57-170 170Zm0-160L310-410l57-57 113 113 113-113 57 57-170 170Zm0-160L310-570l113-113L310-796l57-57 170 170-170 171-57-57 113-113-113-113 113-113 113 113Zm0-160-57-57 57-57 57 57-57 57Z"/></svg>
-                  Outage
-                </button>
+            </div>
+             <div class="popup-connect-actions">
+                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}">Primary line-overhead</button>
+                <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Distribution Transformer</button>
             </div>
         </div>
 
         <div id="Connections-${p.id}" class="tab-content" style="display: none;">
              <div class="popup-connect-actions">
-                <button class="btn btn-outline secondary-lines-btn" data-post-id="${p.id}">Sec. Lines</button>
-                <button class="btn btn-outline service-drop-btn" data-post-id="${p.id}">Service Drop</button>
-                <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connections</button>
+                <button class="btn btn-outline secondary-lines-btn" data-post-id="${p.id}">Secondary Lines</button>
+                <button class="btn btn-outline service-drop-btn" data-post-id="${p.id}">Secondary Service Drop</button>
+                <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connected Lines</button>
             </div>
         </div>
 
         <div id="Assets-${p.id}" class="tab-content" style="display: none;">
-            <div class="popup-connect-actions">
-              <button class="btn btn-outline voltage-regulator-btn" data-post-id="${p.id}">Regulator</button>
-              <button class="btn btn-outline shunt-capacitor-btn" data-post-id="${p.id}">Capacitor</button>
-              <button class="btn btn-outline shunt-inductor-btn" data-post-id="${p.id}">Inductor</button>
-              <button class="btn btn-outline series-inductor-btn" data-post-id="${p.id}">Inductor</button>
+            <div class="popup-connect-actions grid-actions">
+              <button class="btn btn-outline voltage-regulator-btn" data-post-id="${p.id}">Voltage Regulator</button>
+              <button class="btn btn-outline shunt-capacitor-btn" data-post-id="${p.id}">Shunt Capacitor</button>
+              <button class="btn btn-outline shunt-inductor-btn" data-post-id="${p.id}">Shunt Inductor</button>
+              <button class="btn btn-outline series-inductor-btn" data-post-id="${p.id}">Series Inductor</button>
             </div>
         </div>
       </div>
     `;
 
-    const markerOptions = { title: p.name || `Post ${p.id}`, icon: currentIcon };
-    if (healthClass) {
-      // We append the health class to the icon's class list
-      markerOptions.className = (markerOptions.className || '') + ' ' + healthClass;
-    }
-
-    const marker = L.marker([lat, lng], markerOptions)
+    const marker = L.marker([lat, lng], { title: p.name || `Post ${p.id}`, icon: poleIcon })
       .bindPopup(popupHtml, { maxWidth: 400, minWidth: 280 });
-
-    marker.bindTooltip(tooltipHtml, { permanent: false, direction: 'top' });
 
     // Store post data on marker for later access (connections, etc.)
     marker._postData = p;
@@ -991,19 +794,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // Also store in lookup maps for connection drawing
     if (p.pole_number) {
-      const pn = String(p.pole_number).trim().toUpperCase();
-      poleToPostMap[pn] = p;
-      if (!busToPostMap[pn]) busToPostMap[pn] = p;
+      poleToPostMap[p.pole_number] = p;
+      busToPostMap[p.pole_number] = p; // Primary bus is usually the pole number
     }
-    if (p.primary_bus_id) busToPostMap[String(p.primary_bus_id).trim().toUpperCase()] = p;
-    if (p.sec_bus_id) busToPostMap[String(p.sec_bus_id).trim().toUpperCase()] = p;
-    if (p.transformer_bus_id) busToPostMap[String(p.transformer_bus_id).trim().toUpperCase()] = p;
-
     if (p.feeder) {
-      knownFeeders.add(String(p.feeder).trim());
+      knownFeeders.add(p.feeder);
+      // Also create aliases for common bus naming patterns
+      if (p.primary_bus_id) {
+        busToPostMap[p.primary_bus_id] = p;
+      }
     }
 
-    // Also store in lookup maps for connection drawing
+    // Bind tooltip but control open/close to avoid overlapping tooltips
+    marker.bindTooltip(`ID: ${p.id}`, { permanent: false, direction: 'top' });
     marker.addTo(layer);
     _allPostMarkers.push(marker);
 
@@ -1087,34 +890,11 @@ document.addEventListener('DOMContentLoaded', function () {
         primaryLineBtn.onclick = function () {
           const postId = primaryLineBtn.getAttribute('data-post-id');
           if (!postId) return;
-
           fetch('/api/posts/' + postId)
             .then(function (r) { return r.json(); })
-            .then(function (postData) {
-              if (postData && postData.error) return;
-
-              var poleId = postData.pole_number;
-              if (!poleId) {
-                showNoticeModal('Info', 'No pole ID found for this post to fetch primary line data.');
-                return;
-              }
-
-              fetch('/api/primary-lines/by-bus/' + encodeURIComponent(poleId))
-                .then(function (r) { return r.json(); })
-                .then(function (result) {
-                  if (result && result.error) {
-                    showNoticeModal('Error', 'Error: ' + result.error);
-                    return;
-                  }
-                  if (!result.primary_lines || result.primary_lines.length === 0) {
-                    showNoticeModal('Info', 'No primary line found connected to Pole ID: ' + poleId);
-                    return;
-                  }
-                  showPrimaryLineOverheadModal(result.primary_lines[0]);
-                })
-                .catch(function (err) {
-                  showNoticeModal('Error', 'Failed to load primary line data: ' + (err && err.message ? err.message : String(err)));
-                });
+            .then(function (data) {
+              if (data && data.error) return;
+              showPrimaryLineOverheadModal(data);
             })
             .catch(function () { });
         };
@@ -1131,12 +911,12 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (r) { return r.json(); })
             .then(function (postData) {
               if (postData && postData.error) return;
-              var poleId = postData.pole_number;
-              if (!poleId) {
-                showNoticeModal('Info', 'No pole ID found for this post');
+              var busId = postData.primary_bus_id || postData.pole_number;
+              if (!busId) {
+                showNoticeModal('Info', 'No primary bus ID found for this post');
                 return;
               }
-              fetch('/api/transformers/by-bus/' + encodeURIComponent(poleId))
+              fetch('/api/transformers/by-bus/' + encodeURIComponent(busId))
                 .then(function (r) { return r.json(); })
                 .then(function (result) {
                   if (result && result.error) {
@@ -1226,98 +1006,109 @@ document.addEventListener('DOMContentLoaded', function () {
         };
       }
 
-      // Secondary Service Drop button: fetch drops directly via unified backend endpoint
+      // Secondary Service Drop button: fetch drops via Secondary Line's to_bus_id
       const serviceDropBtn = popupEl.querySelector('.service-drop-btn');
       if (serviceDropBtn) {
         serviceDropBtn.onclick = function () {
           const postId = serviceDropBtn.getAttribute('data-post-id');
           if (!postId) return;
 
-          fetch('/api/posts/' + postId + '/service-drops')
+          // 1. Get Post Details to find Primary Bus ID
+          fetch('/api/posts/' + postId)
             .then(function (r) { return r.json(); })
-            .then(function (result) {
-              if (result && result.error) {
-                showNoticeModal('Error', 'Failed to load service drops: ' + result.error);
+            .then(function (postData) {
+              if (postData && postData.error) return;
+
+              var primaryBusId = postData.primary_bus_id || postData.pole_number;
+              if (!primaryBusId) {
+                showNoticeModal('Info', 'No primary bus ID found for this post.');
                 return;
               }
-              if (!result || !result.service_drops || result.service_drops.length === 0) {
-                showNoticeModal('Info', 'No service drops found for this post.');
-                return;
-              }
-              showServiceDropModal({
-                count: result.count || result.service_drops.length,
-                service_drops: result.service_drops
-              });
+
+              // 2. Find Transformer connected to this Primary Bus
+              fetch('/api/transformers/by-bus/' + encodeURIComponent(primaryBusId))
+                .then(function (r) { return r.json(); })
+                .then(function (transResult) {
+                  if (transResult && transResult.error) {
+                    console.warn('Transformer fetch error:', transResult.error);
+                    showNoticeModal('Info', 'No transformer found. Service drops require a transformer connection.');
+                    return;
+                  }
+
+                  if (!transResult.transformers || transResult.transformers.length === 0) {
+                    showNoticeModal('Info', 'No transformer found for bus ID: ' + primaryBusId);
+                    return;
+                  }
+
+                  // 3. Get Secondary Bus ID from the transformer
+                  var transformer = transResult.transformers[0];
+                  var secondaryBusId = transformer.to_secondary_bus_id;
+
+                  if (!secondaryBusId) {
+                    showNoticeModal('Info', 'Transformer has no Secondary Bus ID defined.');
+                    return;
+                  }
+
+                  // 4. Fetch Secondary Lines using the Transformer's Secondary Bus ID
+                  fetch('/api/secondary-lines/by-bus/' + encodeURIComponent(secondaryBusId))
+                    .then(function (r) { return r.json(); })
+                    .then(function (linesResult) {
+                      if (linesResult && linesResult.error) {
+                        showNoticeModal('Error', 'Error fetching secondary lines: ' + linesResult.error);
+                        return;
+                      }
+
+                      if (!linesResult.secondary_lines || linesResult.secondary_lines.length === 0) {
+                        showNoticeModal('Info', 'No secondary lines found for this transformer.');
+                        return;
+                      }
+
+                      // 5. Collect all to_bus_id values from secondary lines
+                      var toBusIds = [];
+                      linesResult.secondary_lines.forEach(function (line) {
+                        if (line.to_bus_id && toBusIds.indexOf(line.to_bus_id) === -1) {
+                          toBusIds.push(line.to_bus_id);
+                        }
+                      });
+
+                      if (toBusIds.length === 0) {
+                        showNoticeModal('Info', 'No valid bus IDs found in secondary lines.');
+                        return;
+                      }
+
+                      // 6. Fetch service drops for each to_bus_id and combine results
+                      var allDrops = [];
+                      var fetchPromises = toBusIds.map(function (busId) {
+                        return fetch('/api/secondary-service-drops/by-bus/' + encodeURIComponent(busId))
+                          .then(function (r) { return r.json(); })
+                          .then(function (result) {
+                            if (result && result.service_drops) {
+                              allDrops = allDrops.concat(result.service_drops);
+                            }
+                          });
+                      });
+
+                      Promise.all(fetchPromises).then(function () {
+                        showServiceDropModal({
+                          count: allDrops.length,
+                          service_drops: allDrops
+                        });
+                      }).catch(function (err) {
+                        showNoticeModal('Error', 'Failed to load service drops: ' + (err.message || String(err)));
+                      });
+
+                    })
+                    .catch(function (err) {
+                      showNoticeModal('Error', 'Failed to load secondary lines: ' + (err.message || String(err)));
+                    });
+
+                })
+                .catch(function (err) {
+                  showNoticeModal('Error', 'Failed to check for transformer: ' + (err.message || String(err)));
+                });
             })
             .catch(function (err) {
-              showNoticeModal('Error', 'Failed to load service drops: ' + (err.message || String(err)));
-            });
-        };
-      }
-
-      // Tracing buttons (Upstream / Downstream)
-      const traceBtns = popupEl.querySelectorAll('.trace-directional-btn');
-      traceBtns.forEach(btn => {
-        btn.onclick = function () {
-          const busId = btn.getAttribute('data-bus-id');
-          const direction = btn.getAttribute('data-direction');
-          if (!busId) return;
-
-          const originalText = btn.textContent;
-          btn.textContent = 'Tracing...';
-          btn.disabled = true;
-
-          fetch(`/api/network/trace-feeder?start_bus=${encodeURIComponent(busId)}&direction=${direction}`)
-            .then(r => r.json())
-            .then(res => {
-              btn.textContent = originalText;
-              btn.disabled = false;
-
-              if (res.error) {
-                showNoticeModal('Error', 'Trace failed: ' + res.error);
-                return;
-              }
-
-              if (res.visited_buses && res.visited_buses.length > 0) {
-                highlightFeederTrace(res.visited_buses);
-                btn.textContent = `${direction === 'upstream' ? 'Upstream' : 'Downstream'} (${res.count} Nodes)`;
-              } else {
-                showNoticeModal('Info', `No ${direction} nodes found from this point.`);
-              }
-            })
-            .catch(err => {
-              btn.textContent = originalText;
-              btn.disabled = false;
-              showNoticeModal('Error', 'Trace request failed.');
-            });
-        };
-      });
-
-      // Simulate Outage button
-      const outageBtn = popupEl.querySelector('.simulate-outage-btn');
-      if (outageBtn) {
-        outageBtn.onclick = function () {
-          const busId = outageBtn.getAttribute('data-bus-id');
-          if (!busId) return;
-
-          outageBtn.textContent = 'Analyzing...';
-          outageBtn.disabled = true;
-
-          fetch('/api/network/simulate-outage?start_bus=' + encodeURIComponent(busId))
-            .then(r => r.json())
-            .then(res => {
-              outageBtn.textContent = 'Simulate Outage';
-              outageBtn.disabled = false;
-              if (res.error) {
-                showNoticeModal('Error', 'Analysis failed: ' + res.error);
-                return;
-              }
-              showOutageImpactModal(res, busId);
-            })
-            .catch(err => {
-              outageBtn.textContent = 'Simulate Outage';
-              outageBtn.disabled = false;
-              showNoticeModal('Error', 'Request failed.');
+              console.error('Post details fetch failed:', err);
             });
         };
       }
@@ -1483,34 +1274,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 kvaDisplay = data.kva_rating;
               }
 
-              let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong>${(data.kva_rating != null && data.kva_rating !== '') ? ' <img src="/static/img/transformer_pole.svg" style="width:18px;height:18px;vertical-align:middle;margin-left:4px;" title="Transformer Pole">' : ''}<br>`;
+              let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong><br>`;
               infoHtml += `Pole Number: ${data.pole_number || '—'}<br>`;
               infoHtml += `Status: ${data.status || 'N/A'}<br>`;
               infoHtml += `Feeder: ${data.feeder || '—'}<br>`;
               infoHtml += `kVA Rating: ${kvaDisplay}<br>`;
-
-              // Injection of Analysis Data
-              const id = data.pole_number || data.primary_bus_id;
-              const r = window._mlRiskMap[id];
-              const s = window._loadStressMap[id];
-
-              if (r) {
-                const color = r.risk_level === 'Critical' ? '#ef4444' : (r.risk_level === 'High' ? '#f59e0b' : '#22c55e');
-                infoHtml += `<div style="margin-top:8px; padding:6px; border-radius:6px; background:rgba(0,0,0,0.03); border-left:4px solid ${color};">`;
-                infoHtml += `<strong style="color:${color}; font-size:0.8rem;">PREDICTIVE RISK: ${r.risk_level}</strong><br>`;
-                infoHtml += `<span style="font-size:0.75rem;">Score: ${r.risk_score.toFixed(4)}</span>`;
-                infoHtml += `</div>`;
-              }
-
-              if (s) {
-                const color = s.status === 'Overloaded' ? '#ef4444' : (s.status === 'High Load' ? '#f59e0b' : '#22c55e');
-                infoHtml += `<div style="margin-top:4px; padding:6px; border-radius:6px; background:rgba(0,0,0,0.03); border-left:4px solid ${color};">`;
-                infoHtml += `<strong style="color:${color}; font-size:0.8rem;">LOAD FLOW: ${s.status}</strong><br>`;
-                infoHtml += `<span style="font-size:0.75rem;">Peak: ${s.peak_load_kw.toFixed(2)} kW (${s.utilization_pct.toFixed(1)}%)</span>`;
-                infoHtml += `</div>`;
-              }
-
-              infoHtml += `<div style="margin-top:8px; font-size:0.8rem; color:var(--text-secondary);">Coordinates: ${latText}, ${lngText}</div>`;
+              infoHtml += `Meter: ${data.meter_brand ? (data.meter_brand + (data.meter_id ? ' / ' + data.meter_id : '')) : (data.meter_id || '—')}<br>`;
+              infoHtml += `Coordinates: ${latText}, ${lngText}<br>`;
               if (detailsEl) detailsEl.innerHTML = infoHtml;
             });
           }).catch(() => { });
@@ -1594,81 +1364,23 @@ document.addEventListener('DOMContentLoaded', function () {
     return circle;
   }
 
-  // Load canonical posts (filtered to PH) by iterating through all pages
-  async function fetchAllPosts(inPh = 1) {
-    let allPosts = [];
-    let page = 1;
-    let totalPages = 1;
+  // Load canonical posts (filtered to PH)
+  fetch('/api/posts?in_ph=1&per_page=1000')
+    .then(r => {
+      if (!r.ok) throw new Error(`API error: ${r.status}`);
+      return r.json();
+    })
+    .then(response => {
+      console.log('Posts API response:', response);
 
-    try {
-      while (page <= totalPages) {
-        let response = await fetch(`/api/posts?in_ph=${inPh}&per_page=1000&page=${page}`);
-        if (!response.ok) throw new Error(`API error: ${response.status}`);
-        let json = await response.json();
-
-        let postsBatch = Array.isArray(json) ? json : (json.data || []);
-        allPosts = allPosts.concat(postsBatch);
-
-        if (json.pagination) {
-          totalPages = json.pagination.total_pages || 1;
-        } else {
-          break; // Not paginated response
-        }
-        page++;
-      }
-      return allPosts;
-    } catch (err) {
-      console.error('Failed to fetch all posts:', err);
-      return allPosts;
-    }
-  }
-
-  function loadPosts() {
-    console.log('🔄 Loading posts and analysis data...');
-
-    // Fetch all analysis data in parallel with posts
-    Promise.all([
-      fetchAllPosts(1),
-      fetch('/api/ml/transformer-risk').then(r => r.json()).catch(() => ({})),
-      fetch('/api/ml/transformer-load-stress').then(r => r.json()).catch(() => ({}))
-    ]).then(([posts, mlResults, loadResults]) => {
-      // Index ML Risk data for fast lookup — keyed by transformer_id, from_primary_bus_id, AND post_id
-      window._mlRiskMap = {};
-      if (mlResults.predictions) {
-        mlResults.predictions.forEach(r => {
-          // Key by transformer_id
-          const key = r.transformer_id || r.id || r.bus_id;
-          if (key) window._mlRiskMap[key] = r;
-          // Also index by from_primary_bus_id so the popup can match by pole bus ID
-          if (r.from_primary_bus_id) {
-            window._mlRiskMap[String(r.from_primary_bus_id).trim()] = r;
-          }
-          // Also index by post_id (Post.id) which is what the popup uses for p.id lookup
-          if (r.post_id != null) {
-            window._mlRiskMap[String(r.post_id)] = r;
-            window._mlRiskMap[Number(r.post_id)] = r;
-          }
-        });
-      }
-
-      // Index Load Flow data
-      window._loadStressMap = {};
-      if (loadResults.predictions) {
-        loadResults.predictions.forEach(s => {
-          const key = s.transformer_id || s.bus_id;
-          if (key) window._loadStressMap[key] = s;
-        });
-      }
-
-      console.log('Posts to render on map:', posts.length);
+      // Handle both old array format and new paginated format
+      const posts = Array.isArray(response) ? response : (response.data || []);
+      console.log('Posts to render on map:', posts.length, posts);
 
       if (!posts || posts.length === 0) {
-        showMapError('No post data available to display.');
-        return;
+        console.warn('No posts found - map may appear empty');
       }
 
-      // Update sidebar analytics after data is loaded
-      updateGridAnalytics();
       let addedCount = 0;
       posts.forEach(p => {
         if (p && p.lat && p.lng) {
@@ -1685,27 +1397,21 @@ document.addEventListener('DOMContentLoaded', function () {
       postsLayer.addTo(map);
       console.log('Posts layer added to map');
 
-      // Fit map if we added markers AND we don't have a specific target to zoom to
-      if (!window._targetPostId && !window._targetTransformerId) {
-        if (typeof bounds.isValid === 'function' ? bounds.isValid() : !bounds.isEmpty) {
-          try {
-            map.fitBounds(bounds.pad(0.12));
-            console.log('Map bounds fitted');
-          } catch (e) {
-            console.warn('Failed to fit bounds:', e);
-          }
-        } else {
-          console.log('Bounds not valid - using default map view');
+      // Fit map if we added markers (use isValid() guard — isEmpty() isn't available in this Leaflet build)
+      if (typeof bounds.isValid === 'function' ? bounds.isValid() : !bounds.isEmpty) {
+        try {
+          map.fitBounds(bounds.pad(0.12));
+          console.log('Map bounds fitted');
+        } catch (e) {
+          console.warn('Failed to fit bounds:', e);
         }
       } else {
-        console.log('Skipping fitBounds because a target post/transformer is specified in URL.');
+        console.log('Bounds not valid - using default map view');
       }
 
-      // If a target post id or transformer id was provided via URL params, center/fly to it and open popup
+      // If a target post id was provided via URL params, center/fly to it and open popup
       try {
         const targetId = window._targetPostId;
-        const targetTransformerId = window._targetTransformerId;
-
         if (targetId) {
           const tid = parseInt(targetId, 10);
           console.log('Targeting post ID:', tid);
@@ -1719,68 +1425,10 @@ document.addEventListener('DOMContentLoaded', function () {
               console.warn('Target marker not found:', tid);
             }
           }, 250);
-        } else if (targetTransformerId) {
-          console.log('Targeting transformer ID:', targetTransformerId);
-
-          let retryCount = 0;
-          const maxRetries = 10;
-
-          function tryLocateTransformer() {
-            let foundMarker = null;
-            const targetUpper = targetTransformerId.toUpperCase();
-
-            // Loop through all markers and inspect their data
-            for (let i = 0; i < _allPostMarkers.length; i++) {
-              const m = _allPostMarkers[i];
-              if (!m._postData) continue;
-
-              const pData = m._postData;
-              const matches =
-                (pData.transformer_bus_id && String(pData.transformer_bus_id).toUpperCase() === targetUpper) ||
-                (pData.primary_bus_id && String(pData.primary_bus_id).toUpperCase() === targetUpper) ||
-                (pData.pole_number && String(pData.pole_number).toUpperCase() === targetUpper) ||
-                (pData.id && String(pData.id) === targetTransformerId);
-
-              if (matches) {
-                foundMarker = m;
-                break;
-              }
-            }
-
-            if (foundMarker && foundMarker.getLatLng) {
-              console.log('Found transformer marker! Zooming...', foundMarker._postData);
-              try { map.flyTo(foundMarker.getLatLng(), 18); } catch (e) { map.setView(foundMarker.getLatLng(), 18); }
-              setTimeout(() => {
-                try { foundMarker.openPopup(); } catch (e) { }
-              }, 600);
-            } else {
-              retryCount++;
-              if (retryCount < maxRetries) {
-                console.log(`Target transformer marker not found yet, retrying (${retryCount}/${maxRetries})...`);
-                setTimeout(tryLocateTransformer, 300);
-              } else {
-                console.warn('Target transformer marker not found after map rendered:', targetTransformerId);
-              }
-            }
-          }
-
-          // Start the first attempt very quickly
-          setTimeout(tryLocateTransformer, 100);
         }
       } catch (e) { console.error('Error in target post handling:', e); }
-
-      // Ensure postsLayer is on map so applyFeederFilter sees it as visible
-      if (!map.hasLayer(postsLayer)) postsLayer.addTo(map);
-
-      // Ensure new feeders from posts are reflected in UI and filter
-      if (typeof window._refreshFeederList === 'function') window._refreshFeederList();
-      applyFeederFilter();
     })
-      .catch(err => console.error('Failed to load posts:', err));
-  }
-
-  // Initial load
-  loadPosts();
+    .catch(err => console.error('Failed to load posts:', err));
 
   // Load raw latlongdata layer
   fetch('/api/latlongdata')
@@ -1941,15 +1589,6 @@ document.addEventListener('DOMContentLoaded', function () {
         for (var j = 0; j < lines.length; j++) {
           if (used[j]) continue;
           var s = lines[j];
-
-          // CRITICAL: Only chain if metadata matches (prevent "consumption" of different line types)
-          if (s.connection_type !== pathMeta.connection_type ||
-            s.phasing !== pathMeta.phasing ||
-            s.circuit !== pathMeta.circuit ||
-            s.feeder !== pathMeta.feeder) {
-            continue;
-          }
-
           var s1 = [parseFloat(s.lat1), parseFloat(s.lng1)];
           var s2 = [parseFloat(s.lat2), parseFloat(s.lng2)];
           if (samePoint(head[0], head[1], s1[0], s1[1])) { points.push(s2); pathMeta.segments++; pathMeta.to_bus = s.to_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
@@ -1987,151 +1626,43 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
           if (hintEl) { hintEl.style.display = 'none'; }
         }
-        // Instead of chaining segments (which merges metadata), 
-        // we render each segment individually to match the CSV records exactly.
-        lines.forEach(function (line) {
-          var points = [[line.lat1, line.lng1], [line.lat2, line.lng2]];
-          var meta = line;
+        // Chain segments into continuous paths so the network draws as connected lines, not many separate straight segments
+        var paths = chainSegmentsIntoPaths(lines);
+        paths.forEach(function (pathObj) {
+          var points = pathObj.points;
+          var meta = pathObj.meta;
           if (points.length < 2) return;
           var connType = meta.connection_type || '';
           var color = getLineColor(meta.circuit, meta.phasing);
           var weight = 2;
           var dash = null;
-          var lineCat = 'unknown'; // specific category for the UI filters
-
-          // prioritized categorization based on user technical terminology (P = Primary/Distribution, DT = Transformer, S = Secondary)
-          var fromB = String(meta.from_bus || '').toUpperCase();
-          var toB = String(meta.to_bus || '').toUpperCase();
-
-          // Priority categorization: check explicit connection type first
-          if (connType.indexOf('Transformer') !== -1 || connType === 'Primary_to_Transformer') {
-            weight = 3;
-            lineCat = 'transformer';
-            color = '#f59e0b'; // Bold Transformer Gold
-          }
-          else if (connType.indexOf('Secondary') !== -1 || (connType.indexOf('Line') !== -1 && connType.indexOf('Secondary') !== -1)) {
-            weight = 2;
-            lineCat = 'secondary';
-          }
-          else if (connType.indexOf('Customer') !== -1 || connType.indexOf('Service_Drop') !== -1 || connType === 'Secondary_to_Customer') {
-            weight = 2;
-            lineCat = 'service_drop';
-            dash = '3, 4';
-          }
-          else if (connType.indexOf('Primary') !== -1 || connType === 'Distribution_Line') {
-            weight = 3;
-            lineCat = 'primary';
-          }
-          // Fallback to ID prefixes if type is ambiguous
-          else if (fromB.startsWith('DT') || toB.startsWith('DT') || connType.indexOf('transformer') !== -1) {
-            weight = 3;
-            lineCat = 'transformer';
-            color = '#f59e0b';
-          }
-          else if (fromB.startsWith('S') || toB.startsWith('S')) {
-            weight = 2;
-            lineCat = 'secondary';
-          }
-          else if (fromB.startsWith('P') || toB.startsWith('P')) {
-            weight = 3;
-            lineCat = 'primary';
-          }
-          else {
-            lineCat = 'primary'; // Fallback
-          }
-
+          if (connType.indexOf('Primary_to_Primary') !== -1) { weight = 3; }
+          else if (connType === 'Distribution_Line') { weight = 3; }
+          else if (connType.indexOf('Primary_to_Transformer') !== -1) { weight = 2.5; }
+          else if (connType.indexOf('Transformer_to_Secondary') !== -1) { weight = 2; }
+          else if (connType === 'Primary_to_Secondary') { weight = 2.5; }
+          else if (connType === 'Secondary_Line') { weight = 2; }
           var poly = L.polyline(points, { color: color, weight: weight, opacity: 0.8, dashArray: dash, lineJoin: 'round', lineCap: 'round' });
 
-          // Store tags for dynamic styling and filtering
+          // Store circuit type and phasing for dynamic styling on layer change
           poly.circuitType = meta.circuit;
           poly.phasingType = meta.phasing;
-          poly.lineCategory = lineCat;
-          poly._feederName = String(meta.feeder || '').trim();
-          poly._fromBus = meta.from_bus;
-          poly._toBus = meta.to_bus;
-          poly._defaultStyle = { color: color, weight: weight, opacity: 0.8, dashArray: dash };
-          if (meta.feeder) knownFeeders.add(String(meta.feeder).trim());
+          poly._feederName = meta.feeder || '';
+          if (meta.feeder) knownFeeders.add(meta.feeder);
 
           var lenStr = (meta.length_meters != null && !Number.isNaN(meta.length_meters))
             ? '<br>Length: ' + Number(meta.length_meters).toFixed(2) + ' m'
             : '';
           var segStr = meta.segments > 1 ? ' (' + meta.segments + ' segments)' : '';
-
-          // Use friendly label for the popup title based on category
-          var friendlyTitle = 'Network';
-          if (lineCat === 'primary') friendlyTitle = 'Primary / Distribution Line';
-          else if (lineCat === 'secondary') friendlyTitle = 'Secondary Line';
-          else if (lineCat === 'service_drop') friendlyTitle = 'Service Drop';
-          else if (lineCat === 'transformer') friendlyTitle = 'Distribution Transformer';
-          else friendlyTitle = connType.replace(/_/g, ' \u2192 ') || 'Network';
-
-          var popup = '<strong>' + friendlyTitle + segStr + '</strong><br>From: ' + (meta.from_bus || '') + ' \u2192 To: ' + (meta.to_bus || '') + '<br>Feeder: ' + (meta.feeder || '') + ' | Circuit: ' + (meta.circuit || '') + ' | Phasing: ' + (meta.phasing || 'N/A') + lenStr;
+          var popup = '<strong>' + (connType.replace(/_/g, ' \u2192 ') || 'Network') + segStr + '</strong><br>From: ' + (meta.from_bus || '') + ' \u2192 To: ' + (meta.to_bus || '') + '<br>Feeder: ' + (meta.feeder || '') + ' | Circuit: ' + (meta.circuit || '') + ' | Phasing: ' + (meta.phasing || 'N/A') + lenStr;
           poly.bindPopup(popup);
           poly.addTo(networkLinesLayer);
         });
         networkLinesLayer.addTo(map);
-
-        // --- Render Virtual Nodes & Customers ---
-        var nodesForMap = data.nodes || [];
-        var nodesDrawn = 0;
-        nodesForMap.forEach(function (n) {
-          if (n.feature_type === 'virtual_node' || n.feature_type === 'customer') {
-            var lat = parseFloat(n.lat);
-            var lng = parseFloat(n.lng);
-            if (Number.isNaN(lat) || Number.isNaN(lng)) return;
-
-            // Use the most specific ID available for indexing
-            var rawId = n.pole_number || n.customer_identifier || n.bus_id || n.primary_bus_id;
-            if (!rawId) return;
-            var cleanedId = String(rawId).trim().toUpperCase();
-
-            // DEDUPLICATION: If this ID already points to a physical post, skip creating a virtual node
-            if (busToPostMap[cleanedId] && !busToPostMap[cleanedId].id.toString().startsWith('node_') && !busToPostMap[cleanedId].id.toString().startsWith('cust_')) {
-              return;
-            }
-
-            var iconToUse = (n.feature_type === 'customer') ? customerIcon : virtualNodeIcon;
-            var labelType = (n.feature_type === 'customer') ? 'Customer' : 'Virtual Node';
-            var title = n.pole_number || (labelType + ' at ' + lat.toFixed(4) + ',' + lng.toFixed(4));
-
-            var marker = L.marker([lat, lng], { title: title, icon: iconToUse });
-            marker._feederName = String(n.feeder || '').trim();
-            if (n.feeder) knownFeeders.add(String(n.feeder).trim());
-
-            var popupContent = '<strong>' + labelType + '</strong><br>ID: ' + (n.pole_number || 'N/A') + '<br>Feeder: ' + (n.feeder || 'N/A');
-            if (n.feature_type === 'customer' && n.customer_name) {
-              popupContent += '<br>Name: ' + n.customer_name;
-            }
-            marker.bindPopup(popupContent);
-            marker.bindTooltip(title, { permanent: false, direction: 'top' });
-
-            marker.addTo(networkLinesLayer);
-            nodesDrawn++;
-
-            // Index for tracing highlights
-            var pseudoId = (n.feature_type === 'customer' ? 'cust_' : 'node_') + cleanedId;
-            busToPostMap[cleanedId] = n;
-            postMarkers[pseudoId] = marker;
-            n.id = pseudoId;
-
-            // Important: add to global list so it can be dimmed/highlighted during trace
-            if (typeof _allPostMarkers !== 'undefined') {
-              _allPostMarkers.push(marker);
-            }
-          }
-        });
-        if (nodesDrawn > 0) {
-          console.log('Network geometry: Rendered ' + nodesDrawn + ' virtual/customer nodes.');
-        }
-        // -----------------------------------------
-
-        // Refresh the feeder filter UI after network lines are loaded FIRST
+        // Refresh the feeder filter UI after network lines are loaded
         if (typeof window._refreshFeederList === 'function') window._refreshFeederList();
-
-        // Final pass to apply all active filters (feeders, phases, and Post visibility logic for technical markers)
-        applyFeederFilter();
         var totalM = stats.total_length_meters != null ? stats.total_length_meters : 0;
-        console.log('Network geometry: Rendered ' + lines.length + ' segments (nodes: ' + (stats.nodes || 0) + ', total length: ' + (typeof totalM === 'number' ? totalM.toFixed(2) : totalM) + ' m)');
+        console.log('Network geometry: ' + lines.length + ' segments chained into ' + paths.length + ' paths (nodes: ' + (stats.nodes || 0) + ', total length: ' + (typeof totalM === 'number' ? totalM.toFixed(2) : totalM) + ' m)');
       })
       .catch(function (err) { console.warn('Network geometry load failed:', err); });
   }
@@ -2140,7 +1671,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // Load connections after posts are loaded
   setTimeout(function () {
     console.log('Calling loadLineConnections after posts...');
-    // loadLineConnections(); // DEPRECATED: redundant with network-geometry
+    loadLineConnections();
     loadNetworkGeometry();
   }, 1000);
 
@@ -2314,9 +1845,6 @@ document.addEventListener('DOMContentLoaded', function () {
   // --- Primary line-overhead modal (post technical data) ---
   var _primaryLineOverheadModal = null;
   var PRIMARY_LINE_OVERHEAD_FIELDS = [
-    { key: 'segment_id', label: 'Segment ID' },
-    { key: 'from_bus_id', label: 'From Pole ID' },
-    { key: 'to_bus_id', label: 'To Pole ID' },
     { key: 'length_meters', label: 'Length (m)' },
     { key: 'conductor_unit', label: 'Conductor unit' },
     { key: 'system_grounding_type', label: 'System grounding type' },
@@ -2611,9 +2139,6 @@ document.addEventListener('DOMContentLoaded', function () {
       '    <h3 class="result-modal-title">Secondary Service Drops</h3>',
       '    <button class="modal-close service-drop-close" aria-label="Close">✕</button>',
       '  </div>',
-      '  <div class="modal-search-container" style="padding: 12px 16px; border-bottom: 1px solid var(--border);">',
-      '    <input type="text" class="service-drop-search" placeholder="Search by Customer ID, Drop ID, or Phase..." style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 4px; font-size: 0.9rem;">',
-      '  </div>',
       '  <div class="modal-body result-modal-body service-drop-body enhanced-body" style="max-height: 60vh; overflow-y: auto; padding: 12px 16px;">',
       '    <div class="service-drop-content"></div>',
       '  </div>',
@@ -2633,19 +2158,14 @@ document.addEventListener('DOMContentLoaded', function () {
     var m = createServiceDropModal();
     var contentDiv = m.querySelector('.service-drop-content');
     var title = m.querySelector('.result-modal-title');
-    var searchInput = m.querySelector('.service-drop-search');
 
     title.textContent = 'Service Drops (' + (data.count || 0) + ')';
-    searchInput.value = ''; // Reset search on open
+    contentDiv.innerHTML = '';
 
-    const renderDrops = (filteredDrops) => {
-      contentDiv.innerHTML = '';
-      if (!filteredDrops || filteredDrops.length === 0) {
-        contentDiv.innerHTML = '<div class="info-card" style="text-align:center; color:var(--text-secondary); padding: 20px;">No matching service drops found.</div>';
-        return;
-      }
-
-      filteredDrops.forEach(function (drop, idx) {
+    if (!data.service_drops || data.service_drops.length === 0) {
+      contentDiv.innerHTML = '<div class="info-card" style="text-align:center; color:var(--text-secondary);">No service drops found for this bus.</div>';
+    } else {
+      data.service_drops.forEach(function (drop, idx) {
         var card = document.createElement('div');
         card.className = 'info-card';
 
@@ -2653,10 +2173,10 @@ document.addEventListener('DOMContentLoaded', function () {
         var header = document.createElement('div');
         header.className = 'info-card-header';
 
-        var cardTitle = document.createElement('div');
-        cardTitle.className = 'info-card-title';
-        cardTitle.textContent = 'Drop #' + (idx + 1) + (drop.service_drop_id ? ' (' + drop.service_drop_id + ')' : '');
-        header.appendChild(cardTitle);
+        var title = document.createElement('div');
+        title.className = 'info-card-title';
+        title.textContent = 'Drop #' + (idx + 1) + (drop.service_drop_id ? ' (' + drop.service_drop_id + ')' : '');
+        header.appendChild(title);
 
         if (drop.to_customer_id) {
           var cBtn = document.createElement('button');
@@ -2695,19 +2215,7 @@ document.addEventListener('DOMContentLoaded', function () {
         card.appendChild(grid);
         contentDiv.appendChild(card);
       });
-    };
-
-    renderDrops(data.service_drops);
-
-    searchInput.oninput = function () {
-      var query = searchInput.value.toLowerCase().trim();
-      var filtered = data.service_drops.filter(function (d) {
-        return (d.to_customer_id && d.to_customer_id.toLowerCase().includes(query)) ||
-          (d.service_drop_id && d.service_drop_id.toLowerCase().includes(query)) ||
-          (d.phasing && d.phasing.toLowerCase().includes(query));
-      });
-      renderDrops(filtered);
-    };
+    }
 
     m.style.display = 'flex';
     m.tabIndex = -1;
@@ -2805,7 +2313,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function showNoticeModal(title, message) {
     const m = createNoticeModal();
     m.querySelector('.notice-title').textContent = title || 'Notice';
-    m.querySelector('.notice-message').innerHTML = message || '';
+    m.querySelector('.notice-message').textContent = message || '';
     m.style.display = 'flex';
     m.tabIndex = -1;
     m.focus();
@@ -3420,14 +2928,21 @@ document.addEventListener('DOMContentLoaded', function () {
             table += '<th>Power Factor</th>';
             table += '</tr></thead><tbody>';
 
-            consData.items.forEach(function (item) {
+            var maxRows = 200;
+            var totalRows = consData.items.length;
+            var limit = Math.min(totalRows, maxRows);
+            for (var i = 0; i < limit; i++) {
+              var item = consData.items[i];
               table += '<tr>';
               table += '<td>' + (item.billing_period || '—') + '</td>';
               table += '<td>' + (item.kwh_consumed || '—') + '</td>';
               table += '<td>' + (item.power_factor || '—') + '</td>';
               table += '</tr>';
-            });
+            }
             table += '</tbody></table></div>';
+            if (totalRows > maxRows) {
+              table += '<div style="margin-top:4px;font-size:0.8rem;color:var(--text-secondary);">Showing first ' + maxRows + ' of ' + totalRows + ' records for performance. Filter or export for full history.</div>';
+            }
             consDiv.innerHTML = table;
           })
           .catch(function (e) {
@@ -3444,51 +2959,42 @@ document.addEventListener('DOMContentLoaded', function () {
   // CUSTOMER SEARCH BAR (Top-Right Corner)
   // ═══════════════════════════════════════════════════════
 
-  // ── 1. Build expandable search icon HTML ──
-  var searchIconHTML = `
-    <div class="expandable-search-wrapper">
-      <button id="search-icon-btn" class="search-icon-btn" title="Search Customer">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor">
-          <path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/>
-        </svg>
-      </button>
-    </div>
-  `;
-
-  var expandedBarHTML = `
-    <div id="search-bar-expanded" class="search-bar-expanded">
-      <div style="position:relative;width:100%;">
-        <input id="customer-search-input" class="top-search-input"
-          type="text" placeholder="Customer ID…"
-          autocomplete="off" spellcheck="false" />
-        <button id="search-clear-btn" class="search-clear-btn" title="Clear Search">✕</button>
-        <div id="customer-search-suggestions" class="customer-search-suggestions"></div>
+  // ── 1. Build combined expandable search HTML ──
+  var combinedSearchHTML = `
+    <div style="display:flex; align-items:center; gap:8px;">
+      <div id="search-bar-expanded" class="search-bar-expanded" style="display:none;">
+        <div style="position:relative; width: 250px;">
+          <input id="customer-search-input" class="top-search-input"
+            type="text" placeholder="Customer ID…"
+            autocomplete="off" spellcheck="false" 
+            style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px;" />
+          <div id="customer-search-suggestions" class="customer-search-suggestions" style="display:none; position:absolute; top:100%; left:0; width:100%; background:white; border:1px solid #ccc; z-index:1000; border-radius:4px; margin-top:4px; max-height:200px; overflow-y:auto; box-shadow:0 4px 6px rgba(0,0,0,0.1);"></div>
+        </div>
+      </div>
+      <div class="expandable-search-wrapper">
+        <button id="search-icon-btn" class="search-icon-btn" title="Search Customer" style="width: 36px; height: 36px; background-color: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 6px;">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" width="20" height="20">
+            <path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/>
+          </svg>
+        </button>
       </div>
     </div>
   `;
 
-  // Append search tools to the map-actions container
-  var mapActions = document.getElementById('map-actions');
-  if (!mapActions) {
-    // Fallback if index.html hasn't been updated or in other pages
-    var mapHeader = document.querySelector('.map-header');
-    if (mapHeader) {
-      mapActions = document.createElement('div');
-      mapActions.className = 'map-actions';
-      mapActions.id = 'map-actions';
-      mapHeader.appendChild(mapActions);
-    }
+  // Append search HTML to the map header
+  var mapHeader = document.querySelector('.map-header');
+  if (!mapHeader) {
+    // Fallback: create header if it doesn't exist
+    mapHeader = document.createElement('div');
+    mapHeader.className = 'map-header';
+    mapEl.parentElement.insertBefore(mapHeader, mapEl);
   }
 
-  if (mapActions) {
-    // Clear any existing content (like ghost elements or old buttons)
-    mapActions.innerHTML = '';
-
-    var searchContainer = document.createElement('div');
-    searchContainer.className = 'expandable-search-container';
-    searchContainer.innerHTML = searchIconHTML + expandedBarHTML;
-    mapActions.appendChild(searchContainer);
-  }
+  // Create wrapper container and append to header
+  var searchWrapper = document.createElement('div');
+  searchWrapper.style.cssText = 'display:flex; align-items:center; z-index:1001; margin-left: auto;';
+  searchWrapper.innerHTML = combinedSearchHTML;
+  mapHeader.appendChild(searchWrapper);
 
   // Append route result to body
   var routeResultWrapper = document.createElement('div');
@@ -3500,19 +3006,13 @@ document.addEventListener('DOMContentLoaded', function () {
   var searchBarExpanded = document.getElementById('search-bar-expanded');
   var customerSearchInput = document.getElementById('customer-search-input');
   var customerSearchSuggestions = document.getElementById('customer-search-suggestions');
-  var searchClearBtn = document.getElementById('search-clear-btn');
 
   function toggleSearchBar(show) {
     if (show === undefined) {
-      show = !searchBarExpanded.classList.contains('active');
+      show = searchBarExpanded.style.display === 'none';
     }
 
-    if (show) {
-      searchBarExpanded.classList.add('active');
-    } else {
-      searchBarExpanded.classList.remove('active');
-    }
-
+    searchBarExpanded.style.display = show ? 'block' : 'none';
     searchIconBtn.setAttribute('aria-expanded', show);
 
     if (show) {
@@ -3520,36 +3020,29 @@ document.addEventListener('DOMContentLoaded', function () {
       customerSearchInput.select();
     } else {
       customerSearchInput.blur();
-      customerSearchSuggestions.classList.remove('active');
     }
   }
 
-  if (searchIconBtn) {
-    searchIconBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      toggleSearchBar();
-    });
-  }
+  searchIconBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleSearchBar();
+  });
 
   // Keyboard support
-  if (customerSearchInput) {
-    customerSearchInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') {
-        toggleSearchBar(false);
-        e.preventDefault();
-      }
-    });
-  }
+  customerSearchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+      toggleSearchBar(false);
+      e.preventDefault();
+    }
+  });
 
   // Clear search when closing
-  if (searchBarExpanded) {
-    searchBarExpanded.addEventListener('focusout', function (e) {
-      // Only close if focus moved outside the search bar
-      if (!searchBarExpanded.contains(e.relatedTarget)) {
-        // Don't automatically close, let user interact
-      }
-    });
-  }
+  searchBarExpanded.addEventListener('focusout', function (e) {
+    // Only close if focus moved outside the search bar
+    if (!searchBarExpanded.contains(e.relatedTarget)) {
+      // Don't automatically close, let user interact
+    }
+  });
 
   // ── 1.6. Customer Search functionality ──
   var customerSearchTimeout = null;
@@ -3557,117 +3050,84 @@ document.addEventListener('DOMContentLoaded', function () {
   var customerSearchHighlight = null;
 
   // Search customers as user types with loading state
-  if (customerSearchInput && customerSearchSuggestions) {
-    customerSearchInput.addEventListener('input', function (e) {
-      clearTimeout(customerSearchTimeout);
-      var query = e.target.value.trim();
+  customerSearchInput.addEventListener('input', function (e) {
+    clearTimeout(customerSearchTimeout);
+    var query = e.target.value.trim();
 
-      // Toggle clear button
-      if (query.length > 0) {
-        if (searchClearBtn) searchClearBtn.classList.add('active');
-      } else {
-        if (searchClearBtn) searchClearBtn.classList.remove('active');
-      }
+    if (!query || query.length < 1) {
+      customerSearchSuggestions.style.display = 'none';
+      return;
+    }
 
-      if (!query || query.length < 1) {
-        customerSearchSuggestions.classList.remove('active');
-        return;
-      }
+    // Show loading state
+    customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading">🔍 Searching...</div>';
+    customerSearchSuggestions.style.display = 'block';
 
-      // Show loading state
-      customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading">🔍 Searching...</div>';
-      customerSearchSuggestions.classList.add('active');
+    customerSearchTimeout = setTimeout(function () {
+      fetch('/api/customers?q=' + encodeURIComponent(query) + '&per_page=5')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.data || data.data.length === 0) {
+            customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-empty">No customers found</div>';
+            customerSearchSuggestions.style.display = 'block';
+            return;
+          }
 
-      customerSearchTimeout = setTimeout(function () {
-        fetch('/api/customers?q=' + encodeURIComponent(query) + '&per_page=5&skip_trace=true')
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (!data.data || data.data.length === 0) {
-              customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-empty">No customers found</div>';
-              customerSearchSuggestions.classList.add('active');
-              return;
-            }
+          var html = data.data.map(function (cust, idx) {
+            var name = cust.name || 'N/A';
+            return '<div class="customer-search-item" data-customer-id="' + cust.customer_id + '" tabindex="' + idx + '">' +
+              '<div class="customer-search-item-id">🏢 ' + cust.customer_id + '</div>' +
+              '<div class="customer-search-item-name">' + name + '</div>' +
+              '</div>';
+          }).join('');
 
-            var html = data.data.map(function (cust, idx) {
-              var name = cust.name || 'N/A';
-              return '<div class="customer-search-item" data-customer-id="' + cust.customer_id + '" tabindex="' + idx + '">' +
-                '<div class="customer-search-item-id">🏢 ' + cust.customer_id + '</div>' +
-                '<div class="customer-search-item-name">' + name + '</div>' +
-                '</div>';
-            }).join('');
+          customerSearchSuggestions.innerHTML = html;
+          customerSearchSuggestions.style.display = 'block';
 
-            customerSearchSuggestions.innerHTML = html;
-            customerSearchSuggestions.classList.add('active');
-
-            // Add click handlers to suggestions
-            var items = customerSearchSuggestions.querySelectorAll('.customer-search-item');
-            items.forEach(function (item) {
-              item.addEventListener('click', function (e) {
-                e.stopPropagation();
+          // Add click handlers to suggestions
+          var items = customerSearchSuggestions.querySelectorAll('.customer-search-item');
+          items.forEach(function (item) {
+            item.addEventListener('click', function (e) {
+              e.stopPropagation();
+              var customerId = item.getAttribute('data-customer-id');
+              selectCustomer(customerId);
+            });
+            item.addEventListener('keydown', function (e) {
+              if (e.key === 'Enter') {
                 var customerId = item.getAttribute('data-customer-id');
                 selectCustomer(customerId);
-              });
-              item.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') {
-                  var customerId = item.getAttribute('data-customer-id');
-                  selectCustomer(customerId);
-                }
-              });
+              }
             });
-          })
-          .catch(function (err) {
-            console.error('Customer search error:', err);
-            customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error">⚠️ Error loading customers</div>';
-            customerSearchSuggestions.classList.add('active');
           });
-      }, 300);
-    });
-  }
-
-  // Clear button logic
-  if (searchClearBtn) {
-    searchClearBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      customerSearchInput.value = '';
-      searchClearBtn.classList.remove('active');
-      customerSearchSuggestions.classList.remove('active');
-      if (customerSearchInput) customerSearchInput.focus();
-
-      // Clear highlights and routes
-      if (customerSearchHighlight) {
-        map.removeLayer(customerSearchHighlight);
-        customerSearchHighlight = null;
-      }
-      clearRoute();
-    });
-  }
+        })
+        .catch(function (err) {
+          console.error('Customer search error:', err);
+          customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error">⚠️ Error loading customers</div>';
+          customerSearchSuggestions.style.display = 'block';
+        });
+    }, 300);
+  });
 
   // Hide suggestions and close search when clicking elsewhere
   document.addEventListener('click', function (e) {
-    if (searchBarExpanded && searchIconBtn && customerSearchSuggestions) {
-      if (!searchBarExpanded.contains(e.target) && e.target !== searchIconBtn && !searchIconBtn.contains(e.target)) {
-        customerSearchSuggestions.classList.remove('active');
-      }
+    if (!searchBarExpanded.contains(e.target) && e.target !== searchIconBtn && !searchIconBtn.contains(e.target)) {
+      customerSearchSuggestions.style.display = 'none';
     }
   });
 
   function selectCustomer(customerId) {
-    // Show loading state
-    customerSearchInput.value = customerId;
-    customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading" style="padding: 12px; text-align: center; color: var(--text-secondary);">⏳ Locating and calculating route...</div>';
-    customerSearchSuggestions.classList.add('active');
-
     // Fetch customer location and details
     fetch('/api/customers/' + encodeURIComponent(customerId) + '/location')
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data.found || !data.customer) {
-          customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error" style="padding: 12px; text-align: center; color: #dc2626;">⚠️ Customer not found</div>';
-          setTimeout(function () { customerSearchSuggestions.classList.remove('active'); }, 2000);
+          alert('Customer not found');
           return;
         }
 
         selectedCustomerData = data;
+        customerSearchInput.value = data.customer.customer_id;
+        customerSearchSuggestions.style.display = 'none';
 
         // Highlight customer location on map if post location exists
         if (data.connected_post) {
@@ -3691,25 +3151,14 @@ document.addEventListener('DOMContentLoaded', function () {
 
           // Zoom to customer location
           map.setView([lat, lng], 17);
-
-          // AUTO-TRIGGER ROUTE FINDING
-          findRouteToCustomer(customerId).finally(function () {
-            customerSearchSuggestions.classList.remove('active');
-            searchClearBtn.classList.add('active'); // Show clear button
-          });
-        } else {
-          // Customer found but no post linked
-          customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error" style="padding: 12px; text-align: center; color: #f59e0b;">⚠️ Customer found but no connected pole on map</div>';
-          setTimeout(function () {
-            customerSearchSuggestions.classList.remove('active');
-            searchClearBtn.classList.add('active');
-          }, 3000);
         }
+
+        // AUTO-TRIGGER ROUTE FINDING
+        findRouteToCustomer(customerId);
       })
       .catch(function (err) {
         console.error('Error fetching customer location:', err);
-        customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error" style="padding: 12px; text-align: center; color: #dc2626;">⚠️ Error loading customer location</div>';
-        setTimeout(function () { customerSearchSuggestions.classList.remove('active'); }, 2000);
+        alert('Error loading customer location');
       });
   }
 
@@ -3727,53 +3176,42 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── 3. Auto-trigger route finding when customer selected ──
   function findRouteToCustomer(custId) {
-    return new Promise(function (resolve, reject) {
-      if (!custId) {
-        console.error('No customer ID provided');
-        resolve();
-        return;
-      }
+    if (!custId) {
+      console.error('No customer ID provided');
+      return;
+    }
 
-      if (!navigator.geolocation) {
-        console.error('Geolocation is not supported by your browser.');
-        resolve();
-        return;
-      }
+    if (!navigator.geolocation) {
+      console.error('Geolocation is not supported by your browser.');
+      return;
+    }
 
-      // Show specific geolocation status
-      showRouteStatus('info', '⏳ Waiting for GPS permission...');
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        var lat = pos.coords.latitude;
+        var lng = pos.coords.longitude;
 
-      navigator.geolocation.getCurrentPosition(
-        function (pos) {
-          showRouteStatus('info', '✅ GPS location acquired. Calculating route...');
-          var lat = pos.coords.latitude;
-          var lng = pos.coords.longitude;
+        var url = '/api/path?customer_id=' + encodeURIComponent(custId)
+          + '&user_lat=' + lat + '&user_lng=' + lng;
 
-          var url = '/api/path?customer_id=' + encodeURIComponent(custId)
-            + '&user_lat=' + lat + '&user_lng=' + lng;
-
-          fetch(url)
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-              if (!data.found) {
-                console.warn('No path found for customer ' + custId);
-              } else {
-                drawRoute(data, lat, lng);
-              }
-              resolve();
-            })
-            .catch(function (err) {
-              console.error('Route finding error:', err);
-              resolve();
-            });
-        },
-        function (err) {
-          console.error('Geolocation error:', err);
-          resolve();
-        },
-        { enableHighAccuracy: true, timeout: 15000 }
-      );
-    });
+        fetch(url)
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (!data.found) {
+              console.warn('No path found for customer ' + custId);
+              return;
+            }
+            drawRoute(data, lat, lng);
+          })
+          .catch(function (err) {
+            console.error('Route finding error:', err);
+          });
+      },
+      function (err) {
+        console.error('Geolocation error:', err);
+      },
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
   }
 
   // ── 4. Status helper ──
@@ -3874,252 +3312,7 @@ document.addEventListener('DOMContentLoaded', function () {
       '<div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:2px;">Destination</div>' +
       '<strong>' + (data.customer_name || data.customer_id) + '</strong>' +
       '<div style="font-size:0.75rem;color:var(--text-secondary); margin-top:1px;">' + (data.destination_post.name || 'Post #' + data.destination_post.id) + '</div>' +
-      '</div>' +
-      '<button class="route-cancel-btn">✕ Cancel Route</button>';
-  }
-
-  /**
-   * Clears an active feeder trace, restoring all map elements to default visibility.
-   */
-  function clearFeederTrace() {
-    console.log('🧹 Clearing active feeder trace...');
-
-    // Restore markers
-    _allPostMarkers.forEach(m => {
-      const el = m.getElement();
-      if (el) {
-        L.DomUtil.removeClass(el, 'active');
-        el.style.opacity = '1';
-        el.style.filter = 'none';
-      }
-    });
-
-    // Restore Network Lines to their original styles
-    if (typeof networkLinesLayer !== 'undefined') {
-      networkLinesLayer.eachLayer(layer => {
-        if (layer._defaultStyle) {
-          layer.setStyle(layer._defaultStyle);
-        }
-      });
-    }
-
-    // Hide the Clear Trace button
-    const clearBtn = document.getElementById('clear-trace-btn');
-    if (clearBtn) clearBtn.style.display = 'none';
-  }
-
-  // Helper to inject the Clear Trace button
-  function injectClearTraceButton() {
-    const mapContainer = document.getElementById('map');
-    if (mapContainer && !document.getElementById('clear-trace-btn')) {
-      const btn = document.createElement('button');
-      btn.id = 'clear-trace-btn';
-      btn.className = 'btn btn-danger';
-      btn.innerHTML = '✕ Clear Trace';
-      btn.style.position = 'absolute';
-      btn.style.bottom = '20px';
-      btn.style.left = '50%';
-      btn.style.transform = 'translateX(-50%)';
-      btn.style.zIndex = '1000';
-      btn.style.display = 'none';
-      btn.style.boxShadow = '0 4px 6px rgba(0,0,0,0.3)';
-      mapContainer.appendChild(btn);
-
-      btn.addEventListener('click', clearFeederTrace);
-    }
-  }
-
-  // Inject immediately if DOM is ready, otherwise wait for DOMContentLoaded
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', injectClearTraceButton);
-  } else {
-    injectClearTraceButton();
-  }
-
-  // Handle dinamically added Cancel Route button
-  document.addEventListener('click', function (e) {
-    if (e.target && e.target.classList.contains('route-cancel-btn')) {
-      clearRoute();
-      // Also clear search state
-      customerSearchInput.value = '';
-      searchClearBtn.classList.remove('active');
-      if (customerSearchHighlight) {
-        map.removeLayer(customerSearchHighlight);
-        customerSearchHighlight = null;
-      }
-    }
-  });
-
-  /**
-   * Highlights a set of buses found during a feeder trace.
-   * Applies the 'active' class to markers, styles polylines, and dims unrelated elements.
-   */
-  function highlightFeederTrace(busIds) {
-    if (!busIds || !Array.isArray(busIds)) return;
-
-    console.log('🌟 Highlighting feeder trace:', busIds.length, 'nodes');
-    // Normalize set for fast robust lookups
-    const busSet = new Set(busIds.map(id => String(id).trim().toUpperCase()));
-
-    // Dim ALL markers first, and remove active class
-    _allPostMarkers.forEach(m => {
-      const el = m.getElement();
-      if (el) {
-        L.DomUtil.removeClass(el, 'active');
-        el.style.opacity = '0.3';
-        el.style.filter = 'grayscale(100%)';
-      }
-    });
-
-    // Highlight only the traced markers
-    let highlightedCount = 0;
-    busSet.forEach(bid => {
-      // Try normalized ID formats to find the post or node
-      const post = busToPostMap[bid] || poleToPostMap[bid];
-      if (post) {
-        // Try all possible mapping keys: real ID, node_ID, cust_ID
-        const marker = postMarkers[post.id] || postMarkers['node_' + bid] || postMarkers['cust_' + bid];
-        if (marker) {
-          const el = marker.getElement();
-          if (el) {
-            L.DomUtil.addClass(el, 'active');
-            el.style.opacity = '1';
-            el.style.filter = 'none';
-            highlightedCount++;
-          }
-        }
-      }
-    });
-
-    // Handle Network Lines
-    let highlightedLines = 0;
-    if (typeof networkLinesLayer !== 'undefined') {
-      networkLinesLayer.eachLayer(layer => {
-        if (layer instanceof L.Polyline && (layer._fromBus || layer._toBus)) {
-          const fromNorm = String(layer._fromBus || '').trim().toUpperCase();
-          const toNorm = String(layer._toBus || '').trim().toUpperCase();
-
-          const fromInTrace = busSet.has(fromNorm);
-          const toInTrace = busSet.has(toNorm);
-
-          if (fromInTrace || toInTrace) {
-            layer.setStyle({ color: '#ffeb3b', weight: 5, opacity: 1, dashArray: null });
-            if (layer.bringToFront) layer.bringToFront();
-            highlightedLines++;
-          } else {
-            // Dim network lines not in trace
-            layer.setStyle({ opacity: 0.15, weight: 1 });
-            if (layer.bringToBack) layer.bringToBack();
-          }
-        }
-      });
-    }
-
-    console.log(`✅ Successfully highlighted ${highlightedCount} markers and ${highlightedLines} lines on map.`);
-
-    // Show the Clear Trace button
-    const clearBtn = document.getElementById('clear-trace-btn');
-    if (clearBtn) clearBtn.style.display = 'block';
-  }
-
-  /**
-   * Updates the global grid analytics stats in the sidebar.
-   */
-  function updateGridAnalytics() {
-    const el = document.getElementById('sidebar-grid-analytics');
-    if (!el) return;
-
-    const mlRisks = Object.values(window._mlRiskMap || {});
-    const loadStresses = Object.values(window._loadStressMap || {});
-
-    const criticalCount = mlRisks.filter(r => r.risk_level === 'Critical').length;
-    const highRiskCount = mlRisks.filter(r => r.risk_level === 'High').length;
-    const overloadedCount = loadStresses.filter(s => s.status === 'Overloaded').length;
-    const highLoadCount = loadStresses.filter(s => s.status === 'High Load').length;
-
-    let html = '';
-
-    // ML Stats
-    html += `<div style="margin-bottom:8px;">
-                <div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:4px;">ML Predicted Risks:</div>
-                <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
-                    <span style="color:var(--danger); font-weight:600;">Critical: ${criticalCount}</span>
-                    <span style="color:var(--warning); font-weight:600;">High: ${highRiskCount}</span>
-                </div>
-             </div>`;
-
-    // Load Stats
-    html += `<div>
-                <div style="font-size:0.75rem; color:var(--text-secondary); margin-bottom:4px;">Load Flow Stress:</div>
-                <div style="display:flex; justify-content:space-between; font-size:0.8rem;">
-                    <span style="color:var(--danger); font-weight:600;">Overloaded: ${overloadedCount}</span>
-                    <span style="color:var(--warning); font-weight:600;">High Load: ${highLoadCount}</span>
-                </div>
-             </div>`;
-
-    if (criticalCount + highRiskCount + overloadedCount + highLoadCount === 0) {
-      html = '<div style="padding:10px; font-size:0.8rem; color:var(--text-muted); text-align:center;">Network 100% Healthy</div>';
-    }
-
-    el.innerHTML = html;
-  }
-
-  /**
-   * Displays a detailed modal with Outage Simulation results.
-   */
-  function showOutageImpactModal(data, startBus) {
-    let html = `
-        <div class="outage-summary" style="margin-bottom:16px; padding:12px; background:var(--danger-light); border-radius:8px; border-left:4px solid var(--danger);">
-            <div style="font-size:1.1rem; font-weight:700; color:var(--danger-dark);">Potential Outage Detected</div>
-            <div style="font-size:0.9rem; color:var(--text-secondary);">Root Point: ${startBus}</div>
-        </div>
-        
-        <div class="stats-row" style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
-            <div class="stat-card" style="padding:12px; flex-direction:column; align-items:flex-start; gap:4px;">
-                <div class="stat-value" style="font-size:1.5rem;">${Number(data.total_customers).toLocaleString()}</div>
-                <div class="stat-label">Affected Customers</div>
-            </div>
-            <div class="stat-card" style="padding:12px; flex-direction:column; align-items:flex-start; gap:4px;">
-                <div class="stat-value" style="font-size:1.5rem;">${Number(data.total_load_kwh).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                <div class="stat-label">Est. Load Loss (kWh)</div>
-            </div>
-        </div>
-
-        <div style="margin-bottom:8px;"><strong>Downstream Topology Data:</strong></div>
-        <ul style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:16px;">
-            <li>Nodes in outage zone: ${Number(data.downstream_bus_count).toLocaleString()}</li>
-            <li>Transformers offline: ${data.affected_transformer_ids.length}</li>
-        </ul>
-
-    `;
-
-    if (data.customer_details && data.customer_details.length > 0) {
-      html += `<div style="margin-bottom:8px;"><strong>Impacted Customers List:</strong></div>
-                <div style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:6px;">
-                    <table style="width:100%; font-size:0.8rem; border-collapse:collapse;">
-                        <thead style="background:var(--surface-secondary); position:sticky; top:0;">
-                            <tr>
-                                <th style="padding:4px 8px; text-align:left; border-bottom:1px solid var(--border);">Name</th>
-                                <th style="padding:4px 8px; text-align:right; border-bottom:1px solid var(--border);">Load (kWh)</th>
-                            </tr>
-                        </thead>
-                        <tbody>`;
-
-      data.customer_details.sort((a, b) => b.load_kwh - a.load_kwh).forEach(c => {
-        html += `<tr>
-                        <td style="padding:4px 8px; border-bottom:1px solid var(--divider);">${c.name || c.customer_id}</td>
-                        <td style="padding:4px 8px; border-bottom:1px solid var(--divider); text-align:right;">${c.load_kwh.toFixed(2)}</td>
-                    </tr>`;
-      });
-
-      html += `</tbody></table></div>`;
-    } else {
-      html += `<div style="padding:12px; text-align:center; color:var(--text-muted); border:1px dashed var(--border); border-radius:6px;">
-                    No customer impact detected for this point.
-                </div>`;
-    }
-
-    showNoticeModal('Outage Impact Analysis', html);
+      '</div>';
   }
 
 });
