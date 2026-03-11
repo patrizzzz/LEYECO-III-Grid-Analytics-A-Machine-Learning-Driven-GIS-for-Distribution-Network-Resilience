@@ -4,6 +4,8 @@
 
 {% block head %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 {% endblock %}
 
 {% block breadcrumb %}
@@ -31,6 +33,7 @@
 
 {% block scripts %}
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
   // Extract URL parameters for post location navigation
   const params = new URLSearchParams(window.location.search);
