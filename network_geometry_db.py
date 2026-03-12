@@ -207,6 +207,10 @@ def lines_to_geojson(lines, nodes):
         )
 
     for i, line in enumerate(lines):
+        # Double check: completely block service drops from reaching the map
+        if line.get("connection_type") == "Secondary_to_Customer":
+            continue
+
         # GeoJSON LineString: [lng, lat], [lng, lat]
         coords = [[line["lng1"], line["lat1"]], [line["lng2"], line["lat2"]]]
         length_m = line.get("length_meters")
@@ -256,6 +260,10 @@ def _add_edge(lines, bus_to_coord, from_bus, to_bus, connection_type, feeder=Non
     a = bus_to_coord.get(from_bus)
     b = bus_to_coord.get(to_bus)
     if not a or not b:
+        return
+
+    # Disable Secondary_to_Customer lines entirely for now because customers lack valid coordinates
+    if connection_type == "Secondary_to_Customer":
         return
 
     # Length filter
