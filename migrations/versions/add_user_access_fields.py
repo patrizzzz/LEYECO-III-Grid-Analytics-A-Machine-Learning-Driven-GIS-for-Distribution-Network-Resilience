@@ -25,7 +25,7 @@ depends_on = None
 def upgrade():
     # Add columns (nullable with defaults to keep migration safe on existing data)
     op.add_column('user', sa.Column('access_code', sa.String(length=128), nullable=True))
-    op.add_column('user', sa.Column('access_enabled', sa.Boolean(), nullable=True, server_default=sa.text('1')))
+    op.add_column('user', sa.Column('access_enabled', sa.Boolean(), nullable=True, server_default=sa.text('true')))
     op.add_column('user', sa.Column('created_at', sa.DateTime(), nullable=True, server_default=sa.func.now()))
 
     # Index for fast lookup by access code

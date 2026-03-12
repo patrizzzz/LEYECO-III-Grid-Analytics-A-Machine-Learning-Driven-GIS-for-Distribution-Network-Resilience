@@ -107,6 +107,7 @@ class Post(db.Model):
     height_h3 = db.Column(db.Float)
     height_hn = db.Column(db.Float)
     earth_resistivity = db.Column(db.Float)  # Ohm-meter
+    has_transformer = db.Column(db.Boolean, default=False)
     
     # Tracking
     status = db.Column(db.String(64))
@@ -133,6 +134,7 @@ class Post(db.Model):
             'meter_brand': self.meter_brand,
             'primary_bus_id': self.primary_bus_id,
             'status': self.status,
+            'has_transformer': self.has_transformer,
         }
         # Pole/post technical columns (from CSV post coordinates import)
         for key in (

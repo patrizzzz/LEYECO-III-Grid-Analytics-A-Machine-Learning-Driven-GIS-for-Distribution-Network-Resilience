@@ -32,9 +32,9 @@ if not database_url:
     db_name = os.getenv('DB_DATABASE')
     if db_user and db_name is not None:
         if db_pass:
-            database_url = f"mysql+pymysql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+            database_url = f"postgresql+psycopg2://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
         else:
-            database_url = f"mysql+pymysql://{db_user}@{db_host}:{db_port}/{db_name}"
+            database_url = f"postgresql+psycopg2://{db_user}@{db_host}:{db_port}/{db_name}"
     else:
         database_url = 'sqlite:///app.db'
 

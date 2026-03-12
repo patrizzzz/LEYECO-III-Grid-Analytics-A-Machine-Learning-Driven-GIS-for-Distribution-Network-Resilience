@@ -17,23 +17,11 @@ depends_on = None
 
 def upgrade():
     # Add coordinate columns to distribution_line_segment
-    try:
-        op.add_column('distribution_line_segment', sa.Column('latitude', sa.Float, nullable=True))
-        print("✓ Added 'latitude' column to distribution_line_segment")
-    except Exception as e:
-        print(f"ℹ️  'latitude' column already exists or error: {e}")
-    
-    try:
-        op.add_column('distribution_line_segment', sa.Column('longitude', sa.Float, nullable=True))
-        print("✓ Added 'longitude' column to distribution_line_segment")
-    except Exception as e:
-        print(f"ℹ️  'longitude' column already exists or error: {e}")
+    op.add_column('distribution_line_segment', sa.Column('latitude', sa.Float(), nullable=True))
+    op.add_column('distribution_line_segment', sa.Column('longitude', sa.Float(), nullable=True))
 
 
 def downgrade():
     # Remove coordinate columns
-    try:
-        op.drop_column('distribution_line_segment', 'latitude')
-        op.drop_column('distribution_line_segment', 'longitude')
-    except Exception:
-        pass
+    op.drop_column('distribution_line_segment', 'latitude')
+    op.drop_column('distribution_line_segment', 'longitude')

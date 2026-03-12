@@ -552,7 +552,8 @@ def api_line_connections():
     """Return all inferred line connections for visualization."""
     try:
         from models import LineConnection
-        connections = LineConnection.query.all()
+        # Filter out Secondary_to_Customer lines because they lack valid coordinates
+        connections = LineConnection.query.filter(LineConnection.connection_type != 'Secondary_to_Customer').all()
         return jsonify({'connections': [c.to_dict() for c in connections], 'count': len(connections)})
     except ImportError:
         # LineConnection model doesn't exist yet

@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from sqlalchemy.exc import SQLAlchemyError
 from extensions import db
-from models import Post, DistributionTransformer, SecondaryLineSegment, DistributionLineSegment, SecondaryServiceDrop, UploadHistory, VoltageRegulator, ShuntCapacitor, ShuntInductor, SeriesInductor, Customer, EnergyConsumption, BusNode, LineConnection
+from models import Post, DistributionTransformer, SecondaryLineSegment, DistributionLineSegment, SecondaryServiceDrop, UploadHistory, VoltageRegulator, ShuntCapacitor, ShuntInductor, SeriesInductor, Customer, EnergyConsumption, BusNode, LineConnection, BusPostMapping
 from utils.import_helpers import find_column_value, sanitize_float
 
 def normalize_header(header):
@@ -365,14 +365,29 @@ def import_transformers_from_csv(csv_file):
     except Exception as e:
         return {'error': f"Failed to read CSV: {str(e)}"}
 
-    # Pre-fetch existing transformers and connections with normalized keys
-    existing_transformers = {t.transformer_id.strip().upper(): t for t in DistributionTransformer.query.all()}
+    # Pre-fetch existing data
+    existing_transformers = {t.transformer_id: t for t in DistributionTransformer.query.all()}
+    
+    # Priority 1: BusPostMapping (legacy/specific mapping)
+    bus_map = {m.bus_id.lower().strip(): m.post_id for m in BusPostMapping.query.all()}
+    
+    # Priority 2: BusNode (Step 2 authoritative mapping) - map bus_id to pole_number string
+    bus_node_map = {n.bus_id.lower().strip(): n.pole_number for n in BusNode.query.all() if n.pole_number}
+    
+    existing_posts = {str(p.pole_number).strip().lower(): p for p in Post.query.all()}
+    # Also index by ID for direct lookup
+    post_by_id = {p.id: p for p in existing_posts.values()}
+
+    # Pre-fetch existing connections with normalized keys
     existing_connections = {
         (c.from_bus.strip().upper(), c.to_bus.strip().upper(), c.connection_type): c 
         for c in LineConnection.query.filter_by(connection_type='Primary_to_Transformer').all()
     }
+    
 
-    for row_idx, row in enumerate(reader, start=2):
+    row_idx = 1
+    for row in reader:
+        row_idx += 1
         try:
             tid_raw = find_column_value(row, ['Distribution Transformer ID'])
             if not tid_raw:
@@ -428,52 +443,54 @@ def import_transformers_from_csv(csv_file):
 
             # --- Sync to Post Table for Map Visualization ---
             buses_to_check = [str(t.from_primary_bus_id or "").strip(), str(t.to_secondary_bus_id or "").strip()]
-            p = None
+            matched_posts = set()
             
             for bus_id in buses_to_check:
                 if not bus_id: continue
-                # 1. Direct match
-                p = Post.query.filter((Post.pole_number == bus_id) | (Post.primary_bus_id == bus_id)).first()
-                
-                # 2. bus_data.csv lookup mapping
-                if not p and bus_id.lower() in bus_map:
-                    mapped = bus_map[bus_id.lower()]
-                    p = Post.query.filter((Post.pole_number == mapped) | (Post.primary_bus_id == mapped)).first()
-
-                # 3. Smart Extraction
+                # 1. Direct match with pole_number or primary_bus_id
+                p = existing_posts.get(bus_id.lower())
                 if not p:
-                    import re
-                    parts = re.split(r'[^a-zA-Z0-9]', bus_id)
-                    parts = [part for part in parts if part]
-                    candidates = set()
-                    if len(parts) > 1:
-                        candidates.add(parts[-1].lower())
-                        candidates.add(parts[-1].lstrip('0').lower())
-                        m = re.match(r'^(\d+)[a-zA-Z]*$', parts[-1])
-                        if m:
-                            candidates.add(m.group(1).lower())
-                            candidates.add(m.group(1).lstrip('0').lower())
-                        candidates.add(parts[0].replace('P', '').replace('p', '').lstrip('0').lower())
-                    else:
-                        m = re.search(r'\d+', bus_id)
-                        if m:
-                            num_str = m.group(0)
-                            candidates.add(num_str.lstrip('0').lower())
-                            candidates.add(num_str.lower())
-                    
-                    for c in candidates:
-                        p = Post.query.filter((Post.pole_number == c) | (Post.primary_bus_id == c)).first()
-                        if not p and c in bus_map:
-                            mapped_c = bus_map[c]
-                            p = Post.query.filter((Post.pole_number == mapped_c) | (Post.primary_bus_id == mapped_c)).first()
-                        if p:
-                            break
-                if p:
-                    break
+                    # Check if any post has this as its primary_bus_id (expensive but safer if not in existing_posts keys)
+                    p = Post.query.filter(Post.primary_bus_id == bus_id).first()
+                
+                # 2. bus_data.csv / BusNode lookup mapping
+                if not p:
+                    if bus_id.lower() in bus_map:
+                        mapped_post_id = bus_map[bus_id.lower()]
+                        p = post_by_id.get(mapped_post_id)
+                    elif bus_id.lower() in bus_node_map:
+                        mapped_pole_num = bus_node_map[bus_id.lower()].lower()
+                        p = existing_posts.get(mapped_pole_num)
 
-            if p:
-                p.kva_rating = t.kva_rating
-                p.transformer_bus_id = t.from_primary_bus_id or t.to_secondary_bus_id
+                if p: matched_posts.add(p)
+
+            # --- Suffix-Based Topological Mapping ---
+            # If we have matches, use them; otherwise, try topological suffix matching
+            if not matched_posts:
+                for bus_id in buses_to_check:
+                    if not bus_id: continue
+                    import re
+                    # Extract the core identification (e.g., "7" from "P...007" or "DT...007")
+                    suffix_match = re.search(r'\d+(?:-\d+)*(?:[a-zA-Z])?$', bus_id)
+                    if suffix_match:
+                        suffix = suffix_match.group(0).lower()
+                        # Check mapping for suffix
+                        if suffix in bus_node_map:
+                            p_num = bus_node_map[suffix].lower()
+                            p = existing_posts.get(p_num)
+                            if p: matched_posts.add(p)
+                        # Check direct pole number match for suffix
+                        p = existing_posts.get(suffix)
+                        if p: matched_posts.add(p)
+
+            for p in matched_posts:
+                # Update Post with transformer data
+                p.has_transformer = True
+                if t.kva_rating:
+                    p.kva_rating = t.kva_rating
+                # Store the most primary reference ID
+                if not p.transformer_bus_id:
+                    p.transformer_bus_id = t.from_primary_bus_id
             
         except Exception as e:
             stats['errors'].append(f"Row {row_idx}: {str(e)}")

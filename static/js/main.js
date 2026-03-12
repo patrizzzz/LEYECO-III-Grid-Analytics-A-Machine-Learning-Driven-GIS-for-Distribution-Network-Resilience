@@ -59,12 +59,7 @@ document.addEventListener('DOMContentLoaded', function () {
     return;
   }
 
-  const postsLayer = (L.markerClusterGroup ? L.markerClusterGroup({
-    maxClusterRadius: 60,
-    showCoverageOnHover: false,
-    spiderfyOnEveryZoom: false,
-    spiderfyOnMaxZoom: true
-  }) : L.layerGroup());
+  const postsLayer = L.layerGroup();
   const latlongLayer = L.layerGroup();
   const connectionsLayer = L.layerGroup();
   const networkLinesLayer = L.layerGroup();
@@ -305,6 +300,77 @@ document.addEventListener('DOMContentLoaded', function () {
       row.appendChild(span);
       layerList.appendChild(row);
     });
+
+    // --- Show Poles / Show Transformers toggles ---
+    let showPoles = true;
+    let showTransformers = true;
+
+    function applyPoleTransformerFilter() {
+      _allPostMarkers.forEach(function (marker) {
+        if (!marker._postData) return;
+        const p = marker._postData;
+        const isTrans = p.has_transformer === true || (p.kva_rating != null && p.kva_rating > 0);
+
+        let shouldShow = false;
+        if (isTrans && showTransformers) shouldShow = true;
+        if (!isTrans && showPoles) shouldShow = true;
+
+        if (shouldShow) {
+          if (!postsLayer.hasLayer(marker)) postsLayer.addLayer(marker);
+          // Swap icons based on toggle state
+          if (isTrans) {
+            // If poles are hidden, show standalone transformer icon; otherwise show transformer_pole
+            marker.setIcon(showPoles ? transformerPoleIcon : transformerOnlyIcon);
+          } else {
+            marker.setIcon(poleIcon);
+          }
+        } else {
+          if (postsLayer.hasLayer(marker)) postsLayer.removeLayer(marker);
+        }
+      });
+    }
+
+    // Make it globally accessible for re-application after data loads
+    window._applyPoleTransformerFilter = applyPoleTransformerFilter;
+
+    const separatorDiv = document.createElement('div');
+    separatorDiv.style.borderTop = '1px solid rgba(0,0,0,0.08)';
+    separatorDiv.style.margin = '6px 0 4px';
+    separatorDiv.style.paddingTop = '4px';
+    layerList.appendChild(separatorDiv);
+
+    // Show Poles toggle
+    const poleRow = document.createElement('label');
+    poleRow.className = 'msp-option';
+    const poleCb = document.createElement('input');
+    poleCb.type = 'checkbox';
+    poleCb.checked = true;
+    poleCb.addEventListener('change', function () {
+      showPoles = this.checked;
+      applyPoleTransformerFilter();
+    });
+    const poleSpan = document.createElement('span');
+    poleSpan.textContent = 'Show Poles';
+    poleRow.appendChild(poleCb);
+    poleRow.appendChild(poleSpan);
+    layerList.appendChild(poleRow);
+
+    // Show Transformers toggle
+    const transRow = document.createElement('label');
+    transRow.className = 'msp-option';
+    const transCb = document.createElement('input');
+    transCb.type = 'checkbox';
+    transCb.checked = true;
+    transCb.addEventListener('change', function () {
+      showTransformers = this.checked;
+      applyPoleTransformerFilter();
+    });
+    const transSpan = document.createElement('span');
+    transSpan.textContent = 'Show Transformers';
+    transRow.appendChild(transCb);
+    transRow.appendChild(transSpan);
+    layerList.appendChild(transRow);
+
     layerSection.appendChild(layerList);
 
     // === Section 3: Feeder Filter ===
@@ -503,9 +569,47 @@ document.addEventListener('DOMContentLoaded', function () {
     body.appendChild(vizSection);
     container.appendChild(header);
     container.appendChild(body);
+
     return container;
   };
-  mapSettingsControl.addTo(map);
+
+  const sidebarContainer = document.getElementById('sidebar-map-settings');
+  if (sidebarContainer) {
+    // Manually trigger onAdd to generate the settings UI
+    const controlUI = mapSettingsControl.onAdd(map);
+    // Ensure it's NOT added to the map's control layer
+    // And append the body to our sidebar container
+    const body = controlUI.querySelector('.msp-body');
+    if (body) {
+      body.style.display = 'block';
+      body.style.maxHeight = 'none'; // Let sidebar handle scroll
+      sidebarContainer.appendChild(body);
+    }
+  } else {
+    mapSettingsControl.addTo(map);
+  }
+
+  // Handle Sidebar Toggle for Map Settings
+  const mspToggle = document.getElementById('sidebar-map-settings-toggle');
+  const mspWrapper = document.getElementById('sidebar-map-settings-wrapper');
+  if (mspToggle && mspWrapper) {
+    mspToggle.addEventListener('click', function(e) {
+      e.preventDefault();
+      // Check computed style or explicit style
+      const currentDisplay = window.getComputedStyle(mspWrapper).display;
+      const isHidden = currentDisplay === 'none';
+      
+      mspWrapper.style.display = isHidden ? 'block' : 'none';
+      
+      // Rotate arrow
+      const arrow = mspToggle.querySelector('.sidebar-msp-arrow');
+      if (arrow) arrow.textContent = isHidden ? '▾' : '▸';
+      
+      // Highlight link
+      mspToggle.style.borderLeftColor = isHidden ? 'var(--primary)' : 'transparent';
+      mspToggle.style.background = isHidden ? 'var(--primary-light)' : 'transparent';
+    });
+  }
 
   // Force Leaflet to measure container and load tiles (fixes blank map)
   function refreshMapSize() {
@@ -537,6 +641,25 @@ document.addEventListener('DOMContentLoaded', function () {
     popupAnchor: [0, -68],
     tooltipAnchor: [0, -44],
     className: 'pole-icon'
+  });
+
+  const transformerPoleIcon = L.icon({
+    iconUrl: '/static/img/transformer_pole.svg',
+    iconSize: [55, 70],
+    iconAnchor: [28, 61],
+    popupAnchor: [0, -68],
+    tooltipAnchor: [0, -44],
+    className: 'pole-icon transformer-pole-icon'
+  });
+
+  // Standalone transformer icon (no pole) - used when "Show Poles" is off
+  const transformerOnlyIcon = L.icon({
+    iconUrl: '/static/img/transformer.svg',
+    iconSize: [55, 70],
+    iconAnchor: [28, 61],
+    popupAnchor: [0, -68],
+    tooltipAnchor: [0, -44],
+    className: 'pole-icon transformer-only-icon'
   });
 
   // Connection editing state
@@ -770,6 +893,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 <button class="btn btn-outline service-drop-btn" data-post-id="${p.id}">Secondary Service Drop</button>
                 <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connected Lines</button>
             </div>
+            <div class="popup-connect-actions" style="margin-top:4px;">
+                <button class="btn btn-outline btn-trace-downstream" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}">⚡ Trace Downstream</button>
+                <button class="btn btn-outline btn-outage-sim" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}">🔴 Outage Simulation</button>
+            </div>
         </div>
 
         <div id="Assets-${p.id}" class="tab-content" style="display: none;">
@@ -783,7 +910,10 @@ document.addEventListener('DOMContentLoaded', function () {
       </div>
     `;
 
-    const marker = L.marker([lat, lng], { title: p.name || `Post ${p.id}`, icon: poleIcon })
+    const isTransformer = p.has_transformer === true || (p.kva_rating != null && p.kva_rating > 0);
+    const iconToUse = isTransformer ? transformerPoleIcon : poleIcon;
+    const titleText = (p.name || `Post ${p.id}`) + (isTransformer ? ' (Transformer)' : '');
+    const marker = L.marker([lat, lng], { title: titleText, icon: iconToUse })
       .bindPopup(popupHtml, { maxWidth: 400, minWidth: 280 });
 
     // Store post data on marker for later access (connections, etc.)
@@ -806,7 +936,8 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Bind tooltip but control open/close to avoid overlapping tooltips
-    marker.bindTooltip(`ID: ${p.id}`, { permanent: false, direction: 'top' });
+    const tooltipText = `ID: ${p.id}` + (isTransformer ? ' (Transformer)' : '');
+    marker.bindTooltip(tooltipText, { permanent: false, direction: 'top' });
     marker.addTo(layer);
     _allPostMarkers.push(marker);
 
@@ -1240,6 +1371,81 @@ document.addEventListener('DOMContentLoaded', function () {
         };
       }
 
+      // --- Trace Downstream ---
+      const traceBtn = popupEl.querySelector('.btn-trace-downstream');
+      if (traceBtn) {
+        traceBtn.onclick = function () {
+          const busId = traceBtn.getAttribute('data-bus') || traceBtn.getAttribute('data-pole');
+          if (!busId) { showNoticeModal('Info', 'No bus ID available for this post.'); return; }
+          traceBtn.textContent = '⏳ Tracing...';
+          fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream')
+            .then(r => r.json())
+            .then(result => {
+              traceBtn.textContent = '⚡ Trace Downstream';
+              if (result.error) { showNoticeModal('Error', result.error); return; }
+              const buses = result.visited_buses || [];
+              let html = '<strong>Downstream Trace from ' + busId + '</strong><br>';
+              html += '<p>' + buses.length + ' buses found downstream.</p>';
+              if (buses.length > 0) {
+                html += '<div style="max-height:200px;overflow-y:auto;font-size:12px;background:#f8f9fa;padding:8px;border-radius:4px;">';
+                buses.forEach(function (b) { html += b + '<br>'; });
+                html += '</div>';
+              }
+              showNoticeModal('Trace Downstream', html);
+            })
+            .catch(err => {
+              traceBtn.textContent = '⚡ Trace Downstream';
+              showNoticeModal('Error', 'Trace failed: ' + (err.message || err));
+            });
+        };
+      }
+
+      // --- Outage Simulation ---
+      const outageBtn = popupEl.querySelector('.btn-outage-sim');
+      if (outageBtn) {
+        outageBtn.onclick = function () {
+          const busId = outageBtn.getAttribute('data-bus') || outageBtn.getAttribute('data-pole');
+          if (!busId) { showNoticeModal('Info', 'No bus ID available for this post.'); return; }
+          outageBtn.textContent = '⏳ Simulating...';
+          fetch('/api/network/simulate-outage?start_bus=' + encodeURIComponent(busId))
+            .then(r => r.json())
+            .then(result => {
+              outageBtn.textContent = '🔴 Outage Simulation';
+              if (result.error) { showNoticeModal('Error', result.error); return; }
+              let html = '<strong>Outage Impact from ' + busId + '</strong><br><br>';
+              html += '<table style="width:100%;font-size:13px;border-collapse:collapse;">';
+              html += '<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><strong>Affected Customers</strong></td><td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (result.total_customers || 0) + '</td></tr>';
+              html += '<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><strong>Total Load (kWh)</strong></td><td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (result.total_load_kwh || 0) + '</td></tr>';
+              html += '<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><strong>Downstream Buses</strong></td><td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (result.downstream_bus_count || 0) + '</td></tr>';
+              const transIds = result.affected_transformer_ids || [];
+              html += '<tr><td style="padding:4px 8px;"><strong>Affected Transformers</strong></td><td style="padding:4px 8px;">' + (transIds.length > 0 ? transIds.join(', ') : 'None') + '</td></tr>';
+              html += '</table>';
+
+              // Customer details
+              const customers = result.customer_details || [];
+              if (customers.length > 0) {
+                html += '<br><strong>Customer Details (' + customers.length + ')</strong>';
+                html += '<div style="max-height:180px;overflow-y:auto;font-size:12px;margin-top:4px;">';
+                html += '<table style="width:100%;border-collapse:collapse;">';
+                html += '<tr style="background:#f0f0f0;"><th style="padding:3px 6px;text-align:left;">ID</th><th style="padding:3px 6px;text-align:left;">Name</th><th style="padding:3px 6px;text-align:left;">Type</th><th style="padding:3px 6px;text-align:right;">kWh</th></tr>';
+                customers.forEach(function (c) {
+                  html += '<tr><td style="padding:3px 6px;border-bottom:1px solid #eee;">' + (c.customer_id || '') + '</td>';
+                  html += '<td style="padding:3px 6px;border-bottom:1px solid #eee;">' + (c.name || 'N/A') + '</td>';
+                  html += '<td style="padding:3px 6px;border-bottom:1px solid #eee;">' + (c.type || '') + '</td>';
+                  html += '<td style="padding:3px 6px;border-bottom:1px solid #eee;text-align:right;">' + (c.load_kwh || 0) + '</td></tr>';
+                });
+                html += '</table></div>';
+              }
+
+              showNoticeModal('Outage Impact Analysis', html);
+            })
+            .catch(err => {
+              outageBtn.textContent = '🔴 Outage Simulation';
+              showNoticeModal('Error', 'Simulation failed: ' + (err.message || err));
+            });
+        };
+      }
+
       // Load authoritative post details from the `post` table via API
       try {
         const detailsEl = popupEl.querySelector('.popup-post-details');
@@ -1523,7 +1729,7 @@ document.addEventListener('DOMContentLoaded', function () {
             lineWeight = 2.5;
           } else if (connType.includes('Secondary')) {
             lineWeight = 2;
-            dashArray = '5, 5'; // Dashed for secondary-to-secondary
+            dashArray = null; // Changed from '5, 5' to null to ensure solid lines
           }
 
           // Create polyline
@@ -2313,7 +2519,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function showNoticeModal(title, message) {
     const m = createNoticeModal();
     m.querySelector('.notice-title').textContent = title || 'Notice';
-    m.querySelector('.notice-message').textContent = message || '';
+    m.querySelector('.notice-message').innerHTML = message || '';
     m.style.display = 'flex';
     m.tabIndex = -1;
     m.focus();
