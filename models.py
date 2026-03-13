@@ -1,5 +1,6 @@
 from extensions import db
 from datetime import datetime
+from geoalchemy2 import Geometry
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -108,6 +109,7 @@ class Post(db.Model):
     height_hn = db.Column(db.Float)
     earth_resistivity = db.Column(db.Float)  # Ohm-meter
     has_transformer = db.Column(db.Boolean, default=False)
+    geom = db.Column(Geometry('POINT', srid=4326))
     
     # Tracking
     status = db.Column(db.String(64))
@@ -214,6 +216,7 @@ class BusNode(db.Model):
     feeder          = db.Column(db.String(64), index=True)
     lat             = db.Column(db.Float)          # Cached GPS latitude of the physical pole
     lng             = db.Column(db.Float)          # Cached GPS longitude of the physical pole
+    geom            = db.Column(Geometry('POINT', srid=4326))
     created_at      = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -279,6 +282,7 @@ class DistributionLineSegment(db.Model):
     # Coordinates for map visualization (if available)
     latitude = db.Column(db.Float)  # Latitude coordinate
     longitude = db.Column(db.Float)  # Longitude coordinate
+    geom = db.Column(Geometry('LINESTRING', srid=4326))
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
