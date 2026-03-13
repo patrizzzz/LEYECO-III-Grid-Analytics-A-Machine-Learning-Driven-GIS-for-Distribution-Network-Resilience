@@ -64,8 +64,16 @@ def run_migrations_offline():
 
     """
     url = config.get_main_option("sqlalchemy.url")
+    def include_object(object, name, type_, reflected, compare_to):
+        if type_ == "table" and name in ["spatial_ref_sys", "geometry_columns", "geography_columns", "raster_columns", "raster_overviews"]:
+            return False
+        return True
+
     context.configure(
-        url=url, target_metadata=get_metadata(), literal_binds=True
+        url=url,
+        target_metadata=get_metadata(),
+        literal_binds=True,
+        include_object=include_object
     )
 
     with context.begin_transaction():
@@ -96,10 +104,16 @@ def run_migrations_online():
 
     connectable = get_engine()
 
+    def include_object(object, name, type_, reflected, compare_to):
+        if type_ == "table" and name in ["spatial_ref_sys", "geometry_columns", "geography_columns", "raster_columns", "raster_overviews"]:
+            return False
+        return True
+
     with connectable.connect() as connection:
         context.configure(
             connection=connection,
             target_metadata=get_metadata(),
+            include_object=include_object,
             **conf_args
         )
 

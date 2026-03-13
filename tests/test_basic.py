@@ -1,37 +1,44 @@
 import pytest
 import os
 import sys
+import sqlalchemy as sa
 from unittest.mock import patch
 
 # Add the current directory to sys.path so app can be imported
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Set environment variables for testing *before* importing the app
-# to prevent it from loading production/dev database URLs from .env
-os.environ["DATABASE_URL"] = "sqlite:///:memory:"
-os.environ["TESTING"] = "True"
-os.environ["SECRET_KEY"] = "test-key"
+# Load default testing environment
+os.environ.setdefault("TESTING", "True")
+os.environ.setdefault("SECRET_KEY", "test-key")
 
 from app import app as flask_app
 from extensions import db
 
 @pytest.fixture
 def app():
-    # Crucial: isolate environment variables during testing so we never connect to the live DB
+    # Use environment variables if set (e.g. by CI), otherwise fallback to a local test DB
+    # We no longer default to sqlite because of PostGIS requirements
+    test_db_url = os.environ.get("DATABASE_URL", "postgresql://user:password@localhost:5432/app_test")
+    
     with patch.dict(os.environ, {
-        "DATABASE_URL": "",
-        "DB_DATABASE": "",
-        "DB_USERNAME": "",
-        "DB_PASSWORD": ""
+        "DATABASE_URL": test_db_url,
+        "TESTING": "True"
     }, clear=False):
         
         flask_app.config.update({
             "TESTING": True,
-            "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
+            "SQLALCHEMY_DATABASE_URI": test_db_url,
             "SECRET_KEY": "test-key"
         })
     
     with flask_app.app_context():
+        # Ensure PostGIS extension is enabled in the test database
+        try:
+            db.session.execute(sa.text("CREATE EXTENSION IF NOT EXISTS postgis"))
+            db.session.commit()
+        except Exception:
+            pass # Might already be installed or user lacks permission
+
         db.create_all()
         yield flask_app
         db.session.remove()

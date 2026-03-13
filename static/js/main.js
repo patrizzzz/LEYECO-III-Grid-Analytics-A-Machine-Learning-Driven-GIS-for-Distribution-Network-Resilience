@@ -140,6 +140,8 @@ document.addEventListener('DOMContentLoaded', function () {
   } catch (e) { /* ignore */ }
 
   const _allPostMarkers = []; // keeps references to ALL markers even when removed from layer
+  let showPoles = true;
+  let showTransformers = true;
 
   function persistActiveFeeders() {
     try {
@@ -148,24 +150,32 @@ document.addEventListener('DOMContentLoaded', function () {
     } catch (e) { /* ignore */ }
   }
 
-  function applyFeederFilter() {
+  function applyMapFilters() {
+    // Show all when: no feeders known, or all feeders are checked, or none are explicitly checked (default state)
+    const showAllFeeds = knownFeeders.size === 0 || activeFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
+    
     // Filter posts: remove/add from postsLayer
-    // Show all when: no feeders known, or all feeders are checked (Show All)
-    const showAllFeeds = knownFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
-    // activePhaseCategories covers 1, 2, 3, 0
-
     _allPostMarkers.forEach(function (marker) {
       if (!marker._postData) return;
-      const f = marker._postData.feeder || '';
-      const shouldShowFeeder = showAllFeeds || activeFeeders.has(f);
+      const p = marker._postData;
+      const f = p.feeder || '';
+      const isFeederMatch = showAllFeeds || activeFeeders.has(f);
+      
+      const isTrans = p.has_transformer === true || (p.kva_rating != null && p.kva_rating > 0);
+      let isTypeMatch = false;
+      if (isTrans && showTransformers) isTypeMatch = true;
+      if (!isTrans && showPoles) isTypeMatch = true;
 
-      // For posts, we might not filter by phase strictly unless they have phase data
-      // Assume posts show if feeder is active. If needed, we can check post phasing.
-      // But typically phase filtering applies more to lines.
-      const shouldShow = shouldShowFeeder;
+      const shouldShow = isFeederMatch && isTypeMatch;
 
       if (shouldShow) {
         if (!postsLayer.hasLayer(marker)) postsLayer.addLayer(marker);
+        // Swap icons based on toggle state
+        if (isTrans) {
+          marker.setIcon(showPoles ? transformerPoleIcon : transformerOnlyIcon);
+        } else {
+          marker.setIcon(poleIcon);
+        }
       } else {
         if (postsLayer.hasLayer(marker)) postsLayer.removeLayer(marker);
       }
@@ -228,7 +238,7 @@ document.addEventListener('DOMContentLoaded', function () {
     };
   }
 
-  let applyFeederFilterDebounced = null;
+  let applyMapFiltersDebounced = null;
 
   // Expose function so it can be called after data loads
   window._refreshFeederList = function () { };
@@ -326,37 +336,7 @@ document.addEventListener('DOMContentLoaded', function () {
       layerList.appendChild(row);
     });
 
-    // --- Show Poles / Show Transformers toggles ---
-    let showPoles = true;
-    let showTransformers = true;
-
-    function applyPoleTransformerFilter() {
-      _allPostMarkers.forEach(function (marker) {
-        if (!marker._postData) return;
-        const p = marker._postData;
-        const isTrans = p.has_transformer === true || (p.kva_rating != null && p.kva_rating > 0);
-
-        let shouldShow = false;
-        if (isTrans && showTransformers) shouldShow = true;
-        if (!isTrans && showPoles) shouldShow = true;
-
-        if (shouldShow) {
-          if (!postsLayer.hasLayer(marker)) postsLayer.addLayer(marker);
-          // Swap icons based on toggle state
-          if (isTrans) {
-            // If poles are hidden, show standalone transformer icon; otherwise show transformer_pole
-            marker.setIcon(showPoles ? transformerPoleIcon : transformerOnlyIcon);
-          } else {
-            marker.setIcon(poleIcon);
-          }
-        } else {
-          if (postsLayer.hasLayer(marker)) postsLayer.removeLayer(marker);
-        }
-      });
-    }
-
-    // Make it globally accessible for re-application after data loads
-    window._applyPoleTransformerFilter = applyPoleTransformerFilter;
+    // window._applyPoleTransformerFilter = applyMapFilters;
 
     const separatorDiv = document.createElement('div');
     separatorDiv.style.borderTop = '1px solid rgba(0,0,0,0.08)';
@@ -372,7 +352,7 @@ document.addEventListener('DOMContentLoaded', function () {
     poleCb.checked = true;
     poleCb.addEventListener('change', function () {
       showPoles = this.checked;
-      applyPoleTransformerFilter();
+      applyMapFilters();
     });
     const poleSpan = document.createElement('span');
     poleSpan.textContent = 'Show Poles';
@@ -388,7 +368,7 @@ document.addEventListener('DOMContentLoaded', function () {
     transCb.checked = true;
     transCb.addEventListener('change', function () {
       showTransformers = this.checked;
-      applyPoleTransformerFilter();
+      applyMapFilters();
     });
     const transSpan = document.createElement('span');
     transSpan.textContent = 'Show Transformers';
@@ -412,8 +392,8 @@ document.addEventListener('DOMContentLoaded', function () {
       feederList.innerHTML = '<span class="msp-hint">Loading feeders…</span>';
 
       // Build debounced filter on first use
-      if (!applyFeederFilterDebounced) {
-        applyFeederFilterDebounced = debounce(applyFeederFilter, 120);
+      if (!applyMapFiltersDebounced) {
+        applyMapFiltersDebounced = debounce(applyMapFilters, 120);
       }
 
       if (knownFeeders.size === 0) {
@@ -451,8 +431,8 @@ document.addEventListener('DOMContentLoaded', function () {
           else { activeFeeders.delete(fname); }
           // Sync "Show All"
           allCb.checked = activeFeeders.size === knownFeeders.size;
-          if (applyFeederFilterDebounced) applyFeederFilterDebounced();
-          else applyFeederFilter();
+          if (applyMapFiltersDebounced) applyMapFiltersDebounced();
+          else applyMapFilters();
         });
         const span = document.createElement('span');
         span.textContent = fname;
@@ -468,8 +448,8 @@ document.addEventListener('DOMContentLoaded', function () {
           if (allCb.checked) { activeFeeders.add(cb.dataset.feeder); }
           else { activeFeeders.delete(cb.dataset.feeder); }
         });
-        if (applyFeederFilterDebounced) applyFeederFilterDebounced();
-        else applyFeederFilter();
+        if (applyMapFiltersDebounced) applyMapFiltersDebounced();
+        else applyMapFilters();
       });
     };
 
@@ -499,8 +479,8 @@ document.addEventListener('DOMContentLoaded', function () {
         try {
           localStorage.setItem('mapActivePhases', JSON.stringify(Array.from(activePhaseCategories)));
         } catch (e) { /* ignore */ }
-        if (applyFeederFilterDebounced) applyFeederFilterDebounced();
-        else applyFeederFilter(); // Re-run filter logic
+        if (applyMapFiltersDebounced) applyMapFiltersDebounced();
+        else applyMapFilters(); // Re-run filter logic
       });
       const span = document.createElement('span');
       span.textContent = p.label;
