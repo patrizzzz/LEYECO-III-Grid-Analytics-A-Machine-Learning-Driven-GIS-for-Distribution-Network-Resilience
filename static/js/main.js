@@ -69,6 +69,31 @@ document.addEventListener('DOMContentLoaded', function () {
   const busToPostMap = {}; // map bus_id -> post data
   const poleToPostMap = {}; // map pole_number -> post data
   const bounds = L.latLngBounds();
+  
+  // --- Analysis Highlighting State ---
+  let analysisHighlightLayers = L.layerGroup().addTo(map);
+  const clearAnalysisBtn = document.createElement('button');
+  clearAnalysisBtn.className = 'analysis-clear-btn';
+  clearAnalysisBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg> Clear Analysis';
+  document.body.appendChild(clearAnalysisBtn);
+
+  clearAnalysisBtn.onclick = function() {
+    clearAnalysisHighlights();
+  };
+
+  function clearAnalysisHighlights() {
+    analysisHighlightLayers.clearLayers();
+    clearAnalysisBtn.style.display = 'none';
+    
+    // Reset any pulsing markers
+    _allPostMarkers.forEach(m => {
+        if (m.getElement()) {
+            m.getElement().classList.remove('analysis-source-node');
+        }
+    });
+
+    // Reset network lines if we modified them directly (though we'll use copies in the highlight layer)
+  }
 
   const baseLayers = {
     'Standard': osmLayer,
@@ -1384,14 +1409,25 @@ document.addEventListener('DOMContentLoaded', function () {
               traceBtn.textContent = '⚡ Trace Downstream';
               if (result.error) { showNoticeModal('Error', result.error); return; }
               const buses = result.visited_buses || [];
-              let html = '<strong>Downstream Trace from ' + busId + '</strong><br>';
-              html += '<p>' + buses.length + ' buses found downstream.</p>';
+              let html = '<div class="trace-summary-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">';
+              html += '<div style="width:40px; height:40px; border-radius:10px; background:#e0f2fe; color:#0ea5e9; display:flex; align-items:center; justify-content:center; font-size:20px;">⚡</div>';
+              html += '<div><div style="font-weight:700; font-size:16px;">Trace Downstream</div><div style="font-size:12px; color:#64748b;">Starting Node: ' + busId + '</div></div></div>';
+              
+              html += '<div style="padding:16px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:16px;">';
+              html += '<div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Total Downstream Nodes</div>';
+              html += '<div style="font-size:24px; font-weight:700; color:#0ea5e9;">' + buses.length + '</div>';
+              html += '</div>';
+
               if (buses.length > 0) {
-                html += '<div style="max-height:200px;overflow-y:auto;font-size:12px;background:#f8f9fa;padding:8px;border-radius:4px;">';
-                buses.forEach(function (b) { html += b + '<br>'; });
+                html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Buses in Trace</div>';
+                html += '<div style="max-height:180px; overflow-y:auto; font-size:12px; background:#f1f5f9; padding:10px; border-radius:8px; font-family:var(--font-mono); line-height:1.6;">';
+                buses.forEach(function (b, idx) { 
+                    html += '<span style="color:#64748b;">' + (idx+1).toString().padStart(2, '0') + '. </span>' + b + '<br>'; 
+                });
                 html += '</div>';
               }
-              showNoticeModal('Trace Downstream', html);
+              showNoticeModal('Trace Downstream Result', html);
+              visualizeNetworkAnalysis('trace', result, busId);
             })
             .catch(err => {
               traceBtn.textContent = '⚡ Trace Downstream';
@@ -1412,32 +1448,39 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(result => {
               outageBtn.textContent = '🔴 Outage Simulation';
               if (result.error) { showNoticeModal('Error', result.error); return; }
-              let html = '<strong>Outage Impact from ' + busId + '</strong><br><br>';
-              html += '<table style="width:100%;font-size:13px;border-collapse:collapse;">';
-              html += '<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><strong>Affected Customers</strong></td><td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (result.total_customers || 0) + '</td></tr>';
-              html += '<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><strong>Total Load (kWh)</strong></td><td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (result.total_load_kwh || 0) + '</td></tr>';
-              html += '<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;"><strong>Downstream Buses</strong></td><td style="padding:4px 8px;border-bottom:1px solid #eee;">' + (result.downstream_bus_count || 0) + '</td></tr>';
+              let html = '<div class="outage-summary-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">';
+              html += '<div style="width:40px; height:40px; border-radius:10px; background:#fee2e2; color:#ef4444; display:flex; align-items:center; justify-content:center; font-size:20px;">⚠️</div>';
+              html += '<div><div style="font-weight:700; font-size:16px;">Outage Impact Analysis</div><div style="font-size:12px; color:#64748b;">Source: ' + busId + '</div></div></div>';
+              
+              html += '<div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:16px;">';
+              html += '<div style="padding:12px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Affected Customers</div><div style="font-size:20px; font-weight:700; color:#ef4444;">' + (result.total_customers || 0) + '</div></div>';
+              html += '<div style="padding:12px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Total Load Loss</div><div style="font-size:20px; font-weight:700; color:#ef4444;">' + (result.total_load_kwh || 0) + ' <span style="font-size:12px; font-weight:500;">kWh</span></div></div>';
+              html += '<div style="padding:12px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Transformers</div><div style="font-size:20px; font-weight:700; color:#1e293b;">' + (result.affected_transformer_ids ? result.affected_transformer_ids.length : 0) + '</div></div>';
+              html += '<div style="padding:12px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Downstream Nodes</div><div style="font-size:20px; font-weight:700; color:#1e293b;">' + (result.downstream_bus_count || 0) + '</div></div>';
+              html += '</div>';
+
               const transIds = result.affected_transformer_ids || [];
-              html += '<tr><td style="padding:4px 8px;"><strong>Affected Transformers</strong></td><td style="padding:4px 8px;">' + (transIds.length > 0 ? transIds.join(', ') : 'None') + '</td></tr>';
-              html += '</table>';
+              if (transIds.length > 0) {
+                  html += '<div style="font-size:12px; padding:8px 12px; background:#f1f5f9; border-radius:6px; margin-bottom:16px;"><strong>Transformers:</strong> ' + transIds.join(', ') + '</div>';
+              }
 
               // Customer details
               const customers = result.customer_details || [];
               if (customers.length > 0) {
-                html += '<br><strong>Customer Details (' + customers.length + ')</strong>';
-                html += '<div style="max-height:180px;overflow-y:auto;font-size:12px;margin-top:4px;">';
-                html += '<table style="width:100%;border-collapse:collapse;">';
-                html += '<tr style="background:#f0f0f0;"><th style="padding:3px 6px;text-align:left;">ID</th><th style="padding:3px 6px;text-align:left;">Name</th><th style="padding:3px 6px;text-align:left;">Type</th><th style="padding:3px 6px;text-align:right;">kWh</th></tr>';
+                html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Affected Customers List</div>';
+                html += '<div class="table-scroll" style="max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px;">';
+                html += '<table style="width:100%; border-collapse:collapse; font-size:12px;">';
+                html += '<thead style="background:#f8fafc; position:sticky; top:0;"><tr style="border-bottom:1px solid #e2e8f0;"><th style="padding:8px; text-align:left; color:#64748b;">Customer</th><th style="padding:8px; text-align:left; color:#64748b;">Type</th><th style="padding:8px; text-align:right; color:#64748b;">kWh</th></tr></thead><tbody>';
                 customers.forEach(function (c) {
-                  html += '<tr><td style="padding:3px 6px;border-bottom:1px solid #eee;">' + (c.customer_id || '') + '</td>';
-                  html += '<td style="padding:3px 6px;border-bottom:1px solid #eee;">' + (c.name || 'N/A') + '</td>';
-                  html += '<td style="padding:3px 6px;border-bottom:1px solid #eee;">' + (c.type || '') + '</td>';
-                  html += '<td style="padding:3px 6px;border-bottom:1px solid #eee;text-align:right;">' + (c.load_kwh || 0) + '</td></tr>';
+                  html += '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:8px;"><div><strong>' + (c.name || 'N/A') + '</strong></div><div style="font-size:10px; color:#94a3b8;">' + (c.customer_id || '') + '</div></td>';
+                  html += '<td style="padding:8px;"><span style="display:inline-block; padding:2px 6px; background:#e0f2fe; color:#0369a1; border-radius:4px; font-size:10px; font-weight:600;">' + (c.type || 'RES') + '</span></td>';
+                  html += '<td style="padding:8px; text-align:right; font-weight:600;">' + (c.load_kwh || 0) + '</td></tr>';
                 });
-                html += '</table></div>';
+                html += '</tbody></table></div>';
               }
 
               showNoticeModal('Outage Impact Analysis', html);
+              visualizeNetworkAnalysis('outage', result, busId);
             })
             .catch(err => {
               outageBtn.textContent = '🔴 Outage Simulation';
@@ -1785,7 +1828,19 @@ document.addEventListener('DOMContentLoaded', function () {
       var lng2 = parseFloat(line.lng2);
       if (Number.isNaN(lat1) || Number.isNaN(lng1) || Number.isNaN(lat2) || Number.isNaN(lng2)) continue;
       var points = [[lat1, lng1], [lat2, lng2]];
-      var pathMeta = { connection_type: line.connection_type || '', circuit: line.circuit, feeder: line.feeder, phasing: line.phasing, from_bus: line.from_bus, to_bus: line.to_bus, length_meters: line.length_meters, segments: 1 };
+      var pathMeta = { 
+        connection_type: line.connection_type || '', 
+        circuit: line.circuit, 
+        feeder: line.feeder, 
+        phasing: line.phasing, 
+        from_bus: line.from_bus, 
+        to_bus: line.to_bus, 
+        length_meters: line.length_meters, 
+        segments: 1,
+        all_buses: new Set()
+      };
+      if (line.from_bus) pathMeta.all_buses.add(line.from_bus);
+      if (line.to_bus) pathMeta.all_buses.add(line.to_bus);
       used[i] = true;
       var changed = true;
       while (changed) {
@@ -1797,10 +1852,10 @@ document.addEventListener('DOMContentLoaded', function () {
           var s = lines[j];
           var s1 = [parseFloat(s.lat1), parseFloat(s.lng1)];
           var s2 = [parseFloat(s.lat2), parseFloat(s.lng2)];
-          if (samePoint(head[0], head[1], s1[0], s1[1])) { points.push(s2); pathMeta.segments++; pathMeta.to_bus = s.to_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
-          if (samePoint(head[0], head[1], s2[0], s2[1])) { points.push(s1); pathMeta.segments++; pathMeta.to_bus = s.from_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
-          if (samePoint(tail[0], tail[1], s2[0], s2[1])) { points.unshift(s1); pathMeta.segments++; pathMeta.from_bus = s.from_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
-          if (samePoint(tail[0], tail[1], s1[0], s1[1])) { points.unshift(s2); pathMeta.segments++; pathMeta.from_bus = s.to_bus; if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
+          if (samePoint(head[0], head[1], s1[0], s1[1])) { points.push(s2); pathMeta.segments++; pathMeta.to_bus = s.to_bus; if (s.from_bus) pathMeta.all_buses.add(s.from_bus); if (s.to_bus) pathMeta.all_buses.add(s.to_bus); if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
+          if (samePoint(head[0], head[1], s2[0], s2[1])) { points.push(s1); pathMeta.segments++; pathMeta.to_bus = s.from_bus; if (s.from_bus) pathMeta.all_buses.add(s.from_bus); if (s.to_bus) pathMeta.all_buses.add(s.to_bus); if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
+          if (samePoint(tail[0], tail[1], s2[0], s2[1])) { points.unshift(s1); pathMeta.segments++; pathMeta.from_bus = s.from_bus; if (s.from_bus) pathMeta.all_buses.add(s.from_bus); if (s.to_bus) pathMeta.all_buses.add(s.to_bus); if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
+          if (samePoint(tail[0], tail[1], s1[0], s1[1])) { points.unshift(s2); pathMeta.segments++; pathMeta.from_bus = s.to_bus; if (s.from_bus) pathMeta.all_buses.add(s.from_bus); if (s.to_bus) pathMeta.all_buses.add(s.to_bus); if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
         }
       }
       paths.push({ points: points, meta: pathMeta });
@@ -1854,6 +1909,7 @@ document.addEventListener('DOMContentLoaded', function () {
           poly.circuitType = meta.circuit;
           poly.phasingType = meta.phasing;
           poly._feederName = meta.feeder || '';
+          poly._allBuses = Array.from(meta.all_buses);
           if (meta.feeder) knownFeeders.add(meta.feeder);
 
           var lenStr = (meta.length_meters != null && !Number.isNaN(meta.length_meters))
@@ -3519,6 +3575,64 @@ document.addEventListener('DOMContentLoaded', function () {
       '<strong>' + (data.customer_name || data.customer_id) + '</strong>' +
       '<div style="font-size:0.75rem;color:var(--text-secondary); margin-top:1px;">' + (data.destination_post.name || 'Post #' + data.destination_post.id) + '</div>' +
       '</div>';
+  }
+
+  // ── 7. Network Analysis Visualization ──
+  function visualizeNetworkAnalysis(type, data, sourceBusId) {
+    clearAnalysisHighlights();
+    clearAnalysisBtn.style.display = 'flex';
+
+    const visitedBuses = new Set(data.visited_buses || data.downstream_buses || []);
+    if (visitedBuses.size === 0) return;
+
+    // 1. Highlight source node
+    const sourcePost = busToPostMap[sourceBusId] || poleToPostMap[sourceBusId];
+    if (sourcePost && postMarkers[sourcePost.id]) {
+        const marker = postMarkers[sourcePost.id];
+        if (marker.getElement()) {
+            marker.getElement().classList.add('analysis-source-node');
+        }
+    }
+
+    // 2. Highlight affected poles/transformers
+    visitedBuses.forEach(bid => {
+        const p = busToPostMap[bid] || poleToPostMap[bid];
+        if (p && postMarkers[p.id]) {
+            const m = postMarkers[p.id];
+            // Create a small highlight circle around affected nodes if they are "secondary"
+            // For now, let's just make sure they are visible.
+            if (bid !== sourceBusId) {
+                const hl = L.circleMarker(m.getLatLng(), {
+                    radius: 12,
+                    color: type === 'outage' ? '#ef4444' : '#0066ff',
+                    weight: 2,
+                    opacity: 0.8,
+                    fillOpacity: 0.3,
+                    className: 'analysis-affected-marker'
+                }).addTo(analysisHighlightLayers);
+            }
+        }
+    });
+
+    // 3. Highlight network lines
+    networkLinesLayer.eachLayer(layer => {
+        if (layer instanceof L.Polyline && layer._allBuses) {
+            // If any of the polyline's buses are in the visited set, highlight it
+            const isAffected = layer._allBuses.some(bid => visitedBuses.has(bid));
+            if (isAffected) {
+                const highlightPoly = L.polyline(layer.getLatLngs(), {
+                    className: type === 'outage' ? 'analysis-highlight-outage' : 'analysis-highlight-trace',
+                    interactive: false
+                }).addTo(analysisHighlightLayers);
+            }
+        }
+    });
+
+    // 4. Zoom to fit if needed
+    const highlightBounds = analysisHighlightLayers.getBounds();
+    if (highlightBounds.isValid()) {
+        map.fitBounds(highlightBounds, { padding: [50, 50], maxZoom: 18 });
+    }
   }
 
 });
