@@ -10,7 +10,6 @@ instance/
 
 # Auto-added patterns for test/debug/data files
 debug_*.py
-test_*.py
 verify_*.py
 check_*.py
 inspect_*.py
