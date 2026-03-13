@@ -1498,12 +1498,81 @@ h3 {
 
   0%,
   100% {
-    opacity: 0.6;
+    opacity: 1;
   }
 
   50% {
-    opacity: 0.8;
+    opacity: 0.6;
   }
+}
+
+/* --- Analysis Highlighting --- */
+.analysis-highlight-trace {
+    stroke: #0066ff !important;
+    stroke-width: 6px !important;
+    stroke-opacity: 0.8 !important;
+    filter: drop-shadow(0 0 5px rgba(0, 102, 255, 0.5));
+    transition: all 0.3s ease;
+}
+
+.analysis-highlight-outage {
+    stroke: #ef4444 !important;
+    stroke-width: 6px !important;
+    stroke-opacity: 0.8 !important;
+    filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.5));
+    transition: all 0.3s ease;
+}
+
+.analysis-source-node {
+    animation: analysis-pulse 1.5s infinite;
+}
+
+@keyframes analysis-pulse {
+    0% { transform: scale(1); filter: brightness(1.2) drop-shadow(0 0 0px rgba(59, 130, 246, 0.7)); }
+    50% { transform: scale(1.3); filter: brightness(1.5) drop-shadow(0 0 15px rgba(59, 130, 246, 0.9)); }
+    100% { transform: scale(1); filter: brightness(1.2) drop-shadow(0 0 0px rgba(59, 130, 246, 0.7)); }
+}
+
+.analysis-affected-marker {
+    filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.6));
+    animation: marker-arrive 0.5s ease-out backwards;
+}
+
+@keyframes marker-arrive {
+    from { transform: scale(0); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+/* Floating Clear Button */
+.analysis-clear-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 1000;
+    background: var(--surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    padding: 10px 20px;
+    border-radius: var(--radius-full);
+    display: none; /* Hidden by default */
+    align-items: center;
+    gap: 8px;
+    box-shadow: var(--shadow-lg);
+    font-weight: 600;
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.analysis-clear-btn:hover {
+    background: var(--danger-light);
+    color: var(--danger);
+    border-color: var(--danger);
+    transform: translateY(-2px);
+}
+
+.analysis-clear-btn svg {
+    width: 18px;
+    height: 18px;
 }
 
 /* Loading spinner animation */
