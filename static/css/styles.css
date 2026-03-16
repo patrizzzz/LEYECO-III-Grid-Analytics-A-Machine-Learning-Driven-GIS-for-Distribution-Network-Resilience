@@ -3458,56 +3458,6 @@ body.dark-theme .msp-color-input {
   background: linear-gradient(135deg, #1e3a5f, #14532d);
 }
 
-/* ── Breadcrumbs ── */
-.breadcrumbs {
-  padding: 0 0 var(--space-8) 0;
-  background: transparent;
-  display: flex;
-  align-items: center;
-}
-
-.breadcrumbs__list {
-  display: flex;
-  align-items: center;
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.breadcrumbs__item {
-  display: flex;
-  align-items: center;
-}
-
-.breadcrumbs__item:not(:last-child)::after {
-  content: "›";
-  margin: 0 8px;
-  font-size: 1.1rem;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-.breadcrumbs__link {
-  color: var(--text-secondary);
-  text-decoration: none;
-  transition: all 0.2s ease;
-}
-
-.breadcrumbs__link:hover {
-  color: var(--primary);
-}
-
-.breadcrumbs__item--active {
-  color: var(--text-primary);
-  font-weight: 600;
-}
-
-body.dark-theme .breadcrumbs__item--active {
-  color: #fff;
-}
 
 /* ── Modals ── */
 .modal-overlay {

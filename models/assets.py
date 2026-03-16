@@ -70,6 +70,7 @@ class Post(db.Model):
     geom = db.Column(Geometry('POINT', srid=4326))
     
     status = db.Column(db.String(64))
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -136,6 +137,7 @@ class BusPostMapping(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     bus_id = db.Column(db.String(64), nullable=False, index=True)
     post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     post = db.relationship('Post', backref=db.backref('bus_mappings', lazy='dynamic'))
 
     def __repr__(self):
@@ -153,6 +155,7 @@ class BusNode(db.Model):
     lat             = db.Column(db.Float)
     lng             = db.Column(db.Float)
     geom            = db.Column(Geometry('POINT', srid=4326))
+    upload_id       = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at      = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -205,6 +208,7 @@ class DistributionLineSegment(db.Model):
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
     geom = db.Column(Geometry('LINESTRING', srid=4326))
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -248,6 +252,7 @@ class LineConnection(db.Model):
     feeder = db.Column(db.String(64), index=True)
     circuit = db.Column(db.String(64))
     phasing = db.Column(db.String(32))
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     __table_args__ = (db.UniqueConstraint('from_bus', 'to_bus', 'connection_type', name='unique_connection'),)
     def __repr__(self):
@@ -274,6 +279,7 @@ class SecondaryLineSegment(db.Model):
     conductor_type = db.Column(db.String(32))
     conductor_size = db.Column(db.String(32))
     conductor_unit = db.Column(db.String(32))
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -309,6 +315,7 @@ class DistributionTransformer(db.Model):
     xr_ratio = db.Column(db.Float)
     no_load_loss_kw = db.Column(db.Float)
     exciting_current_pct = db.Column(db.Float)
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -341,6 +348,7 @@ class SecondaryServiceDrop(db.Model):
     conductor_type = db.Column(db.String(32))
     conductor_size = db.Column(db.String(32))
     conductor_unit = db.Column(db.String(16))
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):

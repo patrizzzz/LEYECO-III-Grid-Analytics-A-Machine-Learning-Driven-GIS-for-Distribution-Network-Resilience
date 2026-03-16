@@ -34,6 +34,7 @@ class PrimaryLineImporter(BaseImporter):
             seg.to_bus_id = self.get_val(row, 'to_bus_id')
             seg.phasing = self.get_val(row, 'phasing')
             seg.length_meters = sanitize_float(self.get_val(row, 'length_meters'))
+            seg.upload_id = self.current_upload_id
             
             if seg.from_bus_id and seg.to_bus_id:
                 conn = LineConnection.query.filter_by(from_bus=seg.from_bus_id, to_bus=seg.to_bus_id, connection_type='Primary_to_Primary').first()
@@ -71,6 +72,7 @@ class SecondaryLineImporter(BaseImporter):
             
             seg.length_meters = sanitize_float(self.get_val(row, 'length_meters'))
             seg.conductor_type = self.get_val(row, 'conductor_type')
+            seg.upload_id = self.current_upload_id
 
 class ServiceDropImporter(BaseImporter):
     file_type = 'service_drops'
@@ -137,4 +139,5 @@ class ServiceDropImporter(BaseImporter):
             drop.length_meters_2 = sanitize_float(self.get_val(row, 'length_meters_2'))
             drop.conductor_type = self.get_val(row, 'conductor_type')
             drop.conductor_size = self.get_val(row, 'conductor_size')
+            drop.upload_id = self.current_upload_id
 
