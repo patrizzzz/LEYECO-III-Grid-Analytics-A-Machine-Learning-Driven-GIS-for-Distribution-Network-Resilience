@@ -560,6 +560,71 @@ def get_network_geometry(app):
             empty_result["error"] = str(e)
             return empty_result
 
+def get_network_geometry_optimized(app):
+    """
+    High-performance PostGIS-based GeoJSON generation.
+    Bypasses Python dict-to-JSON loops by constructing the JSON directly in PostgreSQL.
+    """
+    with app.app_context():
+        try:
+            from sqlalchemy import text
+            from extensions import db
+
+            # Note: We use jsonb_build_object and ST_AsGeoJSON for speed
+            query = text("""
+                WITH node_features AS (
+                    SELECT 
+                        jsonb_build_object(
+                            'type', 'Feature',
+                            'geometry', ST_AsGeoJSON(geom)::jsonb,
+                            'properties', jsonb_build_object(
+                                'feature_type', 'node',
+                                'pole_number', pole_number,
+                                'feeder', feeder,
+                                'id', id
+                            )
+                        ) as feature
+                    FROM post
+                    WHERE geom IS NOT NULL
+                ),
+                edge_features AS (
+                    -- Combine all line tables for GeoJSON export
+                    SELECT 
+                        jsonb_build_object(
+                            'type', 'Feature',
+                            'geometry', ST_AsGeoJSON(geom)::jsonb,
+                            'properties', jsonb_build_object(
+                                'feature_type', 'edge',
+                                'segment_id', segment_id,
+                                'connection_type', 'Primary_Line',
+                                'from_bus', from_bus_id,
+                                'to_bus', to_bus_id
+                            )
+                        ) as feature
+                    FROM distribution_line_segment
+                    WHERE geom IS NOT NULL
+                ),
+                all_features AS (
+                    SELECT feature FROM node_features
+                    UNION ALL
+                    SELECT feature FROM edge_features
+                )
+                SELECT jsonb_build_object(
+                    'type', 'FeatureCollection',
+                    'features', jsonb_agg(feature)
+                )
+                FROM all_features;
+            """)
+            
+            result = db.session.execute(query).scalar()
+            return {
+                "geojson": result or {"type": "FeatureCollection", "features": []},
+                "stats": {"optimized": True}
+            }
+        except Exception as e:
+            app.logger.exception("get_network_geometry_optimized failed: %s", e)
+            return {"error": str(e)}
+
 def build_topology_graph(app):
     """
     Builds an UNDIRECTED adjacency list graph of the electrical network.

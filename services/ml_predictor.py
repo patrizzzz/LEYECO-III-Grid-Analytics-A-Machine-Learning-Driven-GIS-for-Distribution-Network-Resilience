@@ -52,32 +52,33 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
         if csv_path is None:
             # Look in project root (one level up from services/)
             root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            csv_path = os.path.join(root_dir, 'example2.csv')
+            csv_path = os.path.join(root_dir, 'data', 'samples', 'example2.csv')
         df = pd.read_csv(csv_path)
 
     # Clean column names (remove newlines/extra whitespace)
     df.columns = [c.replace('\n', ' ').replace('\r', ' ').strip() for c in df.columns]
     df.columns = [' '.join(c.split()) for c in df.columns]
 
-    # --- 1b. Load stress data if available ---
-    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    stress_path = os.path.join(root_dir, 'transformer_load_stress.csv')
-    df_stress = pd.DataFrame()
-    if os.path.exists(stress_path):
-        df_stress = pd.read_csv(stress_path)
-        # Ensure ID columns match for merge
-        df = df.merge(df_stress[['transformer_id', 'utilization_percent']], 
-                     left_on='Distribution Transformer ID', right_on='transformer_id', 
-                     how='left').drop(columns=['transformer_id'])
-
-    # Ensure we have a transformer ID column
+    # Ensure we have a transformer ID column before merging stress data
     id_col = None
     for candidate in ['Distribution Transformer ID', 'transformer_id']:
         if candidate in df.columns:
             id_col = candidate
             break
+            
     if id_col is None:
         raise ValueError("Could not find transformer ID column in data")
+
+    # --- 1b. Load stress data if available ---
+    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    stress_path = os.path.join(root_dir, 'data', 'samples', 'transformer_load_stress.csv')
+    if os.path.exists(stress_path):
+        df_stress = pd.read_csv(stress_path)
+        # Ensure ID columns match for merge
+        if 'transformer_id' in df_stress.columns:
+            df = df.merge(df_stress[['transformer_id', 'utilization_percent']], 
+                         left_on=id_col, right_on='transformer_id', 
+                         how='left').drop(columns=['transformer_id'])
 
     # --- 2. Feature engineering ---
     # Numerical features - strictly limited to electrical characteristics
@@ -178,7 +179,10 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
             'pct_z': float(row.get('%Z', 0)) if pd.notna(row.get('%Z')) else 0,
             'xr_ratio': float(row.get('X/R Ratio', 0)) if pd.notna(row.get('X/R Ratio')) else 0,
             'no_load_loss_kw': float(row.get('No-Load Loss (kW)', 0)) if pd.notna(row.get('No-Load Loss (kW)')) else 0,
-            'exciting_current_pct': float(row.get('Exciting Current (%)', 0)) if pd.notna(row.get('Exciting Current (%)')) else 0,
+            'primary_voltage_kv': float(row.get('Primary Voltage Rating(kV)', 0)) if pd.notna(row.get('Primary Voltage Rating(kV)')) else 0,
+            'secondary_voltage_kv': float(row.get('Secondary Voltage Rating (kV)', 0)) if pd.notna(row.get('Secondary Voltage Rating (kV)')) else 0,
+            'primary_tap_kv': float(row.get('Primary Tap Voltage (kV)', 0)) if pd.notna(row.get('Primary Tap Voltage (kV)')) else 0,
+            'secondary_tap_kv': float(row.get('Secondary Tap Voltage (kV)', 0)) if pd.notna(row.get('Secondary Tap Voltage (kV)')) else 0,
             'risk_score': risk_score,
             'risk_level': risk_level,
             'is_anomaly': bool(predictions[i] == -1),
