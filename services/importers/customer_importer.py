@@ -31,6 +31,7 @@ class CustomerImporter(BaseImporter):
             cust.name = self.get_val(row, 'name')
             cust.customer_type = self.get_val(row, 'type')
             cust.service_voltage = self.get_val(row, 'voltage')
+            cust.upload_id = self.current_upload_id
 
 class ConsumptionImporter(BaseImporter):
     file_type = 'energy_consumption'
@@ -60,7 +61,8 @@ class ConsumptionImporter(BaseImporter):
                 'customer_id': str(cid).strip(),
                 'billing_period': self.get_val(row, 'period'),
                 'kwh_consumed': sanitize_float(self.get_val(row, 'kwh')),
-                'power_factor': sanitize_float(self.get_val(row, 'pf'))
+                'power_factor': sanitize_float(self.get_val(row, 'pf')),
+                'upload_id': self.current_upload_id
             })
         
         if not mappings:
@@ -72,7 +74,7 @@ class ConsumptionImporter(BaseImporter):
         
         if missing_cids:
             for cid in missing_cids:
-                db.session.add(Customer(customer_id=cid, name=f'Customer {cid}'))
+                db.session.add(Customer(customer_id=cid, name=f'Customer {cid}', upload_id=self.current_upload_id))
             db.session.flush()  # Flush so FKs resolve before bulk insert
         
         db.session.bulk_insert_mappings(EnergyConsumption, mappings)
@@ -107,6 +109,7 @@ class LoadCurveImporter(BaseImporter):
                 
             curve.customer_type = self.get_val(row, 'customer_type')
             curve.description = self.get_val(row, 'description')
+            curve.upload_id = self.current_upload_id
             
             # Dynamic mapping for hours
             for i in range(1, 25):

@@ -11,6 +11,7 @@ class Customer(db.Model):
     phase = db.Column(db.String(32))
     lat = db.Column(db.Float)
     lng = db.Column(db.Float)
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -33,6 +34,7 @@ class EnergyConsumption(db.Model):
     billing_period = db.Column(db.String(64))
     kwh_consumed = db.Column(db.Float)
     power_factor = db.Column(db.Float)
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     customer = db.relationship('Customer', backref=db.backref('consumption_records', lazy=True))
@@ -79,7 +81,7 @@ class LoadCurve(db.Model):
     hour_22 = db.Column(db.Float, default=1.0)
     hour_23 = db.Column(db.Float, default=1.0)
     hour_24 = db.Column(db.Float, default=1.0)
-    
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):

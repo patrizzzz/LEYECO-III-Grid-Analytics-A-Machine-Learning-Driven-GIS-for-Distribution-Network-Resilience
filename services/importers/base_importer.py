@@ -51,8 +51,24 @@ class BaseImporter:
             return {'error': f"Failed to read CSV: {self.filename}"}
 
         try:
+            # Create a placeholder history record to get an ID that we can use for all rows
+            h = UploadHistory(
+                file_type=self.file_type,
+                filename=self.filename,
+                status='processing'
+            )
+            db.session.add(h)
+            db.session.flush()
+            self.current_upload_id = h.id
+            
             self.process_rows(reader)
-            self.commit_changes()
+            
+            # Update history with final stats
+            h.record_count = self.stats['created'] + self.stats['updated']
+            h.status = 'success'
+            
+            db.session.commit()
+            self.stats['upload_id'] = h.id
             return self.stats
         except Exception as e:
             db.session.rollback()

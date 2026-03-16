@@ -142,12 +142,60 @@ def api_load_curves_bulk_import():
 def api_upload_history():
     try:
         history = UploadHistory.query.order_by(UploadHistory.upload_date.desc()).all()
-        latest = {k: None for k in ['bus_nodes', 'posts', 'primary_lines', 'transformers', 'secondary_lines', 'service_drops', 'voltage_regulators', 'shunt_capacitors', 'shunt_inductors', 'series_inductors', 'customers', 'energy_consumption', 'load_curves']}
+        # Summary for the dashboard/resources main view
+        summary = {k: None for k in ['bus_nodes', 'posts', 'primary_lines', 'transformers', 'secondary_lines', 'service_drops', 'voltage_regulators', 'shunt_capacitors', 'shunt_inductors', 'series_inductors', 'customers', 'energy_consumption', 'load_curves']}
         for h in history:
-            if h.file_type in latest and latest[h.file_type] is None:
-                latest[h.file_type] = h.to_dict()
-        return jsonify(latest)
+            if h.file_type in summary and summary[h.file_type] is None:
+                summary[h.file_type] = h.to_dict()
+        return jsonify(summary)
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@import_api_bp.route('/data/upload-history-full', methods=['GET'])
+@admin_required
+def api_upload_history_full():
+    try:
+        history = UploadHistory.query.order_by(UploadHistory.upload_date.desc()).all()
+        return jsonify([h.to_dict() for h in history])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@import_api_bp.route('/data/upload/<int:upload_id>', methods=['DELETE'])
+@admin_required
+def api_delete_upload(upload_id):
+    try:
+        h = UploadHistory.query.get(upload_id)
+        if not h:
+            return jsonify({'error': 'Upload not found'}), 404
+            
+        # Define tables to clean up
+        models_to_clean = [
+            EnergyConsumption, Customer, SecondaryServiceDrop, SecondaryLineSegment, 
+            DistributionLineSegment, DistributionTransformer, 
+            VoltageRegulator, ShuntCapacitor, ShuntInductor, SeriesInductor,
+            BusNode, Post, LoadCurve
+        ]
+        
+        counts = {}
+        for model in models_to_clean:
+            # Delete records associated with this upload
+            deleted = model.query.filter_by(upload_id=upload_id).delete()
+            counts[model.__tablename__] = deleted
+            
+        # For Post, we might need to reset has_transformer flags on other posts if tx were deleted
+        # But for now, let's keep it simple: if the post is deleted, the tx is gone anyway.
+        
+        db.session.delete(h)
+        db.session.commit()
+        
+        return jsonify({
+            'result': 'success', 
+            'message': f"Deleted upload {upload_id} and associated records",
+            'deleted_counts': counts
+        })
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Failed to delete upload {upload_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
 @import_api_bp.route('/data/delete-all', methods=['POST'])

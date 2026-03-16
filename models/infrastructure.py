@@ -1,4 +1,5 @@
 from extensions import db
+from datetime import datetime
 
 class VoltageRegulator(db.Model):
     __tablename__ = 'voltage_regulator'
@@ -24,6 +25,8 @@ class VoltageRegulator(db.Model):
     pt_ratio = db.Column(db.Float)
     no_load_loss_kw = db.Column(db.Float)
     exciting_current_pct = db.Column(db.Float)
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -40,6 +43,8 @@ class ShuntCapacitor(db.Model):
     kvar_rating_b = db.Column(db.Float)
     kvar_rating_c = db.Column(db.Float)
     power_loss_watts = db.Column(db.Float)
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -58,6 +63,8 @@ class ShuntInductor(db.Model):
     reactance_a = db.Column(db.Float)
     reactance_b = db.Column(db.Float)
     reactance_c = db.Column(db.Float)
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}
@@ -77,6 +84,8 @@ class SeriesInductor(db.Model):
     reactance_a = db.Column(db.Float)
     reactance_b = db.Column(db.Float)
     reactance_c = db.Column(db.Float)
+    upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
         return {c.name: getattr(self, c.name) for c in self.__table__.columns}

@@ -43,6 +43,7 @@ class PostImporter(BaseImporter):
             # PostGIS/SQLAlchemy requires lat/lng if the model says nullable=False
             post.lat = lat_val if lat_val is not None else 0.0
             post.lng = lng_val if lng_val is not None else 0.0
+            post.upload_id = self.current_upload_id
             # ... and so on
 
 class BusNodeImporter(BaseImporter):
@@ -76,6 +77,7 @@ class BusNodeImporter(BaseImporter):
             node.pole_number = self.get_val(row, 'pole_number')
             node.nominal_voltage = sanitize_float(self.get_val(row, 'nominal_voltage'))
             node.feeder = self.get_val(row, 'feeder')
+            node.upload_id = self.current_upload_id
             
             # Inherit coordinates from Post
             if node.pole_number:
@@ -142,6 +144,7 @@ class TransformerImporter(BaseImporter):
             tx.xr_ratio = sanitize_float(self.get_val(row, 'xr_ratio'))
             tx.no_load_loss_kw = sanitize_float(self.get_val(row, 'no_load_loss_kw'))
             tx.exciting_current_pct = sanitize_float(self.get_val(row, 'exciting_current_pct'))
+            tx.upload_id = self.current_upload_id
             
             # Integrated Healing Logic
             linked_post = LinkageService.fuzzy_match_transformer_to_post(tx, all_posts, bus_node_map=bus_node_map)

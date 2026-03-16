@@ -261,17 +261,20 @@
                     Inductors</span></a>
               </div>
             </li>
-            <!-- Export & Danger accordion -->
             <li class="sidebar__item" style="height: auto;">
-              <a class="sidebar__link res-cat-toggle" href="#" data-cat="cat-export" data-tooltip="Export &amp; Danger"
+              <a class="sidebar__link res-cat-toggle" href="#" data-cat="cat-management" data-tooltip="Management"
                 style="padding-left: 1rem; border-left: 2px solid transparent;">
-                <span class="icon" style="opacity: 0.5; font-size: 14px;">📤</span>
-                <span class="text" style="font-size: 0.8rem;">Export &amp; Danger</span>
+                <span class="icon" style="opacity: 0.5; font-size: 14px;">🛠️</span>
+                <span class="text" style="font-size: 0.8rem;">Management</span>
                 <span class="text res-cat-arrow" style="font-size: 0.65rem; margin-left: auto;">▸</span>
               </a>
             </li>
-            <li class="sidebar__item res-cat-items" id="cat-export" style="height: auto; display: none;">
+            <li class="sidebar__item res-cat-items" id="cat-management" style="height: auto; display: none;">
               <div style="padding: 2px 0 4px 1.6rem;">
+                <a class="sidebar__link res-upload-link" href="#" data-panel="panel-manage-files"
+                  style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
+                  <span class="icon" style="opacity:0.4;font-size:12px;">📂</span><span class="text">Manage
+                    Files</span></a>
                 <a class="sidebar__link res-upload-link" href="#" data-panel="panel-export"
                   style="padding: 4px 8px; font-size: 0.75rem; border-left: 2px solid transparent;">
                   <span class="icon" style="opacity:0.4;font-size:12px;">📊</span><span class="text">Master CSV
@@ -346,7 +349,6 @@
 
       <main class="content">
         <div class="content-inner">
-          {% block breadcrumb %}{% endblock %}
           {% block content %}{% endblock %}
         </div>
       </main>
