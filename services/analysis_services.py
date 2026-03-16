@@ -3,15 +3,14 @@ import numpy as np
 import os
 from datetime import datetime
 from extensions import db
-from models import Post, DistributionTransformer, SecondaryServiceDrop, Customer, EnergyConsumption
-from network_geometry_db import build_topology_graph, trace_feeder_bfs, trace_downstream_bfs
+from models import Post, DistributionTransformer, SecondaryServiceDrop, Customer, EnergyConsumption, LoadCurve
+from .network_geometry_db import build_topology_graph, trace_feeder_bfs, trace_downstream_bfs
+from .topology_service import TopologyService
 
 def calculate_outage_impact(start_bus_id):
     """
     Calculates the impact of an outage starting from a specific bus node.
-    Uses DIRECTED BFS starting from all bus IDs associated with the local pole 
-    to ensure both primary and secondary impacts are captured.
-    Returns:
+    Uses SQL RECURSIVE CTE for high-performance downstream tracing.
     """
     from flask import current_app
     from models import Post, BusNode
@@ -26,16 +25,19 @@ def calculate_outage_impact(start_bus_id):
         if getattr(post, 'sec_bus_id', None): root_buses.add(post.sec_bus_id)
         if getattr(post, 'transformer_bus_id', None): root_buses.add(post.transformer_bus_id)
         
-        # Also find any BusNodes that point to this pole
         bns = BusNode.query.filter_by(pole_number=post.pole_number).all()
         for bn in bns:
             root_buses.add(bn.bus_id)
     else:
-        # Fallback if no post is found
         root_buses.add(start_bus_id)
 
-    # 2. Trace DOWNSTREAM-ONLY network from all root buses using directed graph
-    downstream_buses = trace_downstream_bfs(current_app, list(root_buses))
+    # 2. Trace DOWNSTREAM-ONLY network using high-performance SQL CTE
+    all_downstream = set()
+    for rb in root_buses:
+        path = TopologyService.trace_downstream_sql(rb)
+        all_downstream.update(path)
+    
+    downstream_buses = list(all_downstream)
     
     if not downstream_buses:
         return {
@@ -105,22 +107,38 @@ def calculate_transformer_load_stress():
     Calculates load stress for all transformers in the database.
     Integrates logic from calculate_load_stress.py using DB models.
     """
-    # Load curve data from CSV (still useful as lookup)
-    # Assuming the app's root directory is used
-    base_dir = os.path.abspath(os.path.dirname(__file__))
-    curve_path = os.path.join(base_dir, "load_curve_data.csv")
-    
+    # Load curve data from Database
     try:
-        df_curves = pd.read_csv(curve_path, encoding='latin-1')
-        df_curves.columns = [c.replace('\n', ' ').replace('\r', ' ').strip() for c in df_curves.columns]
-        df_curves.columns = [' '.join(c.split()) for c in df_curves.columns]
+        curves = LoadCurve.query.all()
+        curve_map = {}
+        curve_multi_map = {}
+        hour_cols = [f"hour_{i}" for i in range(1, 25)]
         
-        hour_cols = [f"Hour {i}" for i in range(1, 25)]
-        df_curves['daily_sum'] = df_curves[hour_cols].sum(axis=1)
-        curve_map = df_curves.set_index('Customer Type')['daily_sum'].to_dict()
-        curve_multi_map = df_curves.set_index('Customer Type')[hour_cols].to_dict('index')
+        for c in curves:
+            ctype = c.customer_type
+            if not ctype: continue
+            
+            multipliers = {f"Hour {i}": getattr(c, f"hour_{i}") for i in range(1, 25)}
+            daily_sum = sum(multipliers.values())
+            
+            curve_map[ctype] = daily_sum
+            curve_multi_map[ctype] = multipliers
+            
+        # If DB is empty, try fallback to original CSV if it exists
+        if not curves:
+            base_dir = os.path.abspath(os.path.dirname(__file__))
+            curve_path = os.path.join(base_dir, "load_curve_data.csv")
+            if os.path.exists(curve_path):
+                df_curves = pd.read_csv(curve_path, encoding='latin-1')
+                df_curves.columns = [c.replace('\n', ' ').replace('\r', ' ').strip() for c in df_curves.columns]
+                df_curves.columns = [' '.join(c.split()) for c in df_curves.columns]
+                
+                h_cols = [f"Hour {i}" for i in range(1, 25)]
+                df_curves['daily_sum'] = df_curves[h_cols].sum(axis=1)
+                curve_map.update(df_curves.set_index('Customer Type')['daily_sum'].to_dict())
+                curve_multi_map.update(df_curves.set_index('Customer Type')[h_cols].to_dict('index'))
     except Exception as e:
-        # Fallback if CSV is missing
+        current_app.logger.warning(f"Failed to fetch load curves from DB: {e}")
         curve_map = {}
         curve_multi_map = {}
 
@@ -168,24 +186,14 @@ def calculate_transformer_load_stress():
         sec_bus_id = (trans.to_secondary_bus_id or "").strip()
         if not sec_bus_id: continue
 
-        # --- BFS to find all downstream service drops ---
-        service_drops = []
-        visited = {sec_bus_id}
-        queue = [sec_bus_id]
+        # --- Optimized SQL Tracing to find all downstream service drops ---
+        downstream_ids = TopologyService.trace_downstream_sql(sec_bus_id)
         
-        while queue:
-            curr = queue.pop(0)
-            
-            # Find drops at this bus
-            if curr in drops_by_bus:
-                service_drops.extend(drops_by_bus[curr])
-            
-            # Traverse lines
-            for nxt in adj.get(curr, []):
-                if nxt not in visited:
-                    visited.add(nxt)
-                    queue.append(nxt)
-        # --- End BFS ---
+        # Filter for service drops and customers in the downstream set
+        service_drops = [sd for sd in SecondaryServiceDrop.query.filter(
+            SecondaryServiceDrop.from_bus_id.in_(downstream_ids)
+        ).all()]
+        # --- End Optimized Tracing ---
         
         hourly_totals = np.zeros(24)
         for sd in service_drops:
@@ -239,12 +247,34 @@ def get_grid_health_analytics():
     stress_results = calculate_transformer_load_stress()
     stress_map = {r['transformer_id']: r for r in stress_results}
     
+    # 1b. Fallback: If service drops are empty, estimate customer counts per transformer
+    #     by distributing total customers proportionally based on kVA rating.
+    total_sd_customers = sum(r.get('customer_count', 0) for r in stress_results)
+    total_db_customers = Customer.query.count()
+    
+    if total_sd_customers == 0 and total_db_customers > 0 and stress_results:
+        # No service drops uploaded — distribute customers proportionally by kVA
+        total_kva_all = sum((stress_map[tid].get('capacity_kva', 0) or 1) for tid in stress_map) or 1
+        for tid, sdata in stress_map.items():
+            kva = sdata.get('capacity_kva', 0) or 1
+            estimated_count = max(1, round(total_db_customers * (kva / total_kva_all)))
+            sdata['customer_count'] = estimated_count
+            sdata['customer_count_estimated'] = True
+    
     # 2. Get ML Failure Risk Analysis
     transformers = DistributionTransformer.query.all()
     if not transformers:
         return {'summary': {'total': 0, 'critical': 0, 'high': 0, 'medium': 0, 'low': 0}, 'details': [], 'model_info': {}}
         
-    db_records = [t.to_dict() for t in transformers]
+    db_records = []
+    for t in transformers:
+        record = t.to_dict()
+        tid = t.transformer_id
+        stress = stress_map.get(tid, {})
+        # Inject stress metrics so ML model sees them as features
+        record['utilization_percent'] = stress.get('utilization_percent', 0)
+        db_records.append(record)
+        
     ml_results = predict_transformer_risk(source='db', db_records=db_records)
 
     # Compute average kVA for the criticality formula
@@ -296,6 +326,12 @@ def get_grid_health_analytics():
         util_pct = stress.get('utilization_percent', 0)
         cust_count = stress.get('customer_count', 0)
         kva = ml_pred.get('kva_rating', 0) or 0
+        
+        # Fallback: if this transformer has no stress data but customers exist in DB,
+        # estimate a minimum customer count based on kVA proportion
+        if cust_count == 0 and total_db_customers > 0 and kva > 0:
+            fallback_count = max(1, round(total_db_customers * (kva / max(total_kva, 1))))
+            cust_count = fallback_count
         
         merged['utilization_percent'] = util_pct
         merged['customer_count'] = cust_count
@@ -444,37 +480,19 @@ def find_customer_post_location(customer_id):
             if p and p.lat and p.lng: return p
         return None
 
-    # 3. BFS from the SSD bus to find a DistributionTransformer or direct Post
-    start_bus = ssd.from_bus_id.strip()
-    visited = {start_bus}
-    queue = [start_bus]
+    # 3. Use high-performance SQL trace to find the upstream path
+    upstream_ids = TopologyService.trace_upstream_sql(ssd.from_bus_id.strip())
     
-    while queue:
-        curr = queue.pop(0)
-        
-        # Check if this bus is a pole
+    # Check the path for the first Post or Transformer primary node
+    for curr in upstream_ids:
         post = get_post_by_bus_or_pole(curr)
         if post:
             return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
-        
-        # Check if this bus is connected to a transformer secondary
+            
         dt = DistributionTransformer.query.filter_by(to_secondary_bus_id=curr).first()
         if dt:
-            # Trace back to transformer's primary post
             p_post = get_post_by_bus_or_pole(dt.from_primary_bus_id)
             if p_post:
                 return {'lat': p_post.lat, 'lng': p_post.lng, 'id': p_post.id, 'name': p_post.name}
-            
-        # Otherwise, find connected secondary lines and continue BFS
-        lines = SecondaryLineSegment.query.filter(
-            (SecondaryLineSegment.from_bus_id == curr) |
-            (SecondaryLineSegment.to_bus_id == curr)
-        ).all()
-        
-        for line in lines:
-            nxt = line.from_bus_id if line.to_bus_id == curr else line.to_bus_id
-            if nxt not in visited:
-                visited.add(nxt)
-                queue.append(nxt)
 
     return None

@@ -127,14 +127,14 @@ document.addEventListener('DOMContentLoaded', function () {
   } catch (e) { /* ignore */ }
 
   // --- Phase filter state ---
-  // Categories: '1' (Single Phase), '2' (Double Phase), '3' (Three Phase), '0' (Other/Unknown)
-  let activePhaseCategories = new Set(['1', '2', '3', '0']);
+  // Categories: '1' (Single Phase), '2' (Double Phase), '3' (Three Phase)
+  let activePhaseCategories = new Set(['1', '2', '3']);
   try {
     const savedPhasesRaw = localStorage.getItem('mapActivePhases');
     if (savedPhasesRaw) {
       const savedPhases = JSON.parse(savedPhasesRaw);
       if (Array.isArray(savedPhases) && savedPhases.length > 0) {
-        activePhaseCategories = new Set(savedPhases.filter(function (p) { return p === '0' || p === '1' || p === '2' || p === '3'; }));
+        activePhaseCategories = new Set(savedPhases.filter(function (p) { return p === '1' || p === '2' || p === '3'; }));
       }
     }
   } catch (e) { /* ignore */ }
@@ -142,6 +142,8 @@ document.addEventListener('DOMContentLoaded', function () {
   const _allPostMarkers = []; // keeps references to ALL markers even when removed from layer
   let showPoles = true;
   let showTransformers = true;
+  let showPrimaryLines = true;
+  let showSecondaryLines = true;
 
   function persistActiveFeeders() {
     try {
@@ -202,10 +204,19 @@ document.addEventListener('DOMContentLoaded', function () {
           const f = layer._feederName || '';
           const isFeederVisible = showAllFeeds || activeFeeders.has(f);
 
+          // Primary/Secondary Line Check
+          let isTypeVisible = true;
+          const cType = (layer._connType || '').toLowerCase();
+          const isPrimary = cType.includes('primary') || cType.includes('distribution_line');
+          const isSecondary = cType.includes('secondary');
+          
+          if (isPrimary && !showPrimaryLines) isTypeVisible = false;
+          if (isSecondary && !showSecondaryLines) isTypeVisible = false;
+
           // Phase Check
           let isPhaseVisible = true;
-          // Check if all phases are active (size 4), otherwise filter
-          if (activePhaseCategories.size < 4) {
+          // Check if all phases are active (size 3), otherwise filter
+          if (activePhaseCategories.size < 3) {
             const pStr = String(layer.phasingType || '').toUpperCase().trim();
             // Count unique phases (A, B, C)
             let distinctPhases = 0;
@@ -222,7 +233,7 @@ document.addEventListener('DOMContentLoaded', function () {
             isPhaseVisible = activePhaseCategories.has(category);
           }
 
-          if (isFeederVisible && isPhaseVisible) {
+          if (isFeederVisible && isPhaseVisible && isTypeVisible) {
             if (!layerGroup.hasLayer(layer)) {
               layerGroup.addLayer(layer);
               // If there's a click-buffer associated, we might need a better way to track it,
@@ -390,6 +401,38 @@ document.addEventListener('DOMContentLoaded', function () {
     transRow.appendChild(transSpan);
     layerList.appendChild(transRow);
 
+    // Show Primary Lines toggle
+    const priLineRow = document.createElement('label');
+    priLineRow.className = 'msp-option';
+    const priLineCb = document.createElement('input');
+    priLineCb.type = 'checkbox';
+    priLineCb.checked = true;
+    priLineCb.addEventListener('change', function () {
+      showPrimaryLines = this.checked;
+      applyMapFilters();
+    });
+    const priLineSpan = document.createElement('span');
+    priLineSpan.textContent = 'Show Primary Lines';
+    priLineRow.appendChild(priLineCb);
+    priLineRow.appendChild(priLineSpan);
+    layerList.appendChild(priLineRow);
+
+    // Show Secondary Lines toggle
+    const secLineRow = document.createElement('label');
+    secLineRow.className = 'msp-option';
+    const secLineCb = document.createElement('input');
+    secLineCb.type = 'checkbox';
+    secLineCb.checked = true;
+    secLineCb.addEventListener('change', function () {
+      showSecondaryLines = this.checked;
+      applyMapFilters();
+    });
+    const secLineSpan = document.createElement('span');
+    secLineSpan.textContent = 'Show Secondary Lines';
+    secLineRow.appendChild(secLineCb);
+    secLineRow.appendChild(secLineSpan);
+    layerList.appendChild(secLineRow);
+
     layerSection.appendChild(layerList);
 
     // === Section 3: Feeder Filter ===
@@ -477,8 +520,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const phases = [
       { id: '1', label: 'Single Phase' },
       { id: '2', label: 'Double Phase' },
-      { id: '3', label: 'Three Phase' },
-      { id: '0', label: 'Other' }
+      { id: '3', label: 'Three Phase' }
     ];
 
     phases.forEach(function (p) {
@@ -1606,70 +1648,76 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // Load canonical posts (filtered to PH)
-  fetch('/api/posts?in_ph=1&per_page=1000')
-    .then(r => {
-      if (!r.ok) throw new Error(`API error: ${r.status}`);
-      return r.json();
-    })
-    .then(response => {
-      console.log('Posts API response:', response);
+  function loadPosts() {
+    console.log('🔄 Loading posts...');
+    return fetch('/api/posts?in_ph=1&per_page=1000')
+      .then(r => {
+        if (!r.ok) throw new Error(`API error: ${r.status}`);
+        return r.json();
+      })
+      .then(response => {
+        console.log('Posts API response:', response);
 
-      // Handle both old array format and new paginated format
-      const posts = Array.isArray(response) ? response : (response.data || []);
-      console.log('Posts to render on map:', posts.length, posts);
+        // Handle both old array format and new paginated format
+        const posts = Array.isArray(response) ? response : (response.data || []);
+        console.log('Posts to render on map:', posts.length, posts);
 
-      if (!posts || posts.length === 0) {
-        console.warn('No posts found - map may appear empty');
-      }
+        if (!posts || posts.length === 0) {
+          console.warn('No posts found - map may appear empty');
+        }
 
-      let addedCount = 0;
-      posts.forEach(p => {
-        if (p && p.lat && p.lng) {
-          addPostMarker(postsLayer, p);
-          addedCount++;
+        let addedCount = 0;
+        posts.forEach(p => {
+          if (p && p.lat && p.lng) {
+            addPostMarker(postsLayer, p);
+            addedCount++;
+          } else {
+            console.warn('Skipping post with missing coords:', p);
+          }
+        });
+
+        console.log(`Added ${addedCount} markers to posts layer`);
+
+        // Add postsLayer to map by default
+        postsLayer.addTo(map);
+        console.log('Posts layer added to map');
+
+        // Fit map if we added markers (use isValid() guard — isEmpty() isn't available in this Leaflet build)
+        if (typeof bounds.isValid === 'function' ? bounds.isValid() : !bounds.isEmpty) {
+          try {
+            map.fitBounds(bounds.pad(0.12));
+            console.log('Map bounds fitted');
+          } catch (e) {
+            console.warn('Failed to fit bounds:', e);
+          }
         } else {
-          console.warn('Skipping post with missing coords:', p);
+          console.log('Bounds not valid - using default map view');
         }
-      });
 
-      console.log(`Added ${addedCount} markers to posts layer`);
-
-      // Add postsLayer to map by default
-      postsLayer.addTo(map);
-      console.log('Posts layer added to map');
-
-      // Fit map if we added markers (use isValid() guard — isEmpty() isn't available in this Leaflet build)
-      if (typeof bounds.isValid === 'function' ? bounds.isValid() : !bounds.isEmpty) {
+        // If a target post id was provided via URL params, center/fly to it and open popup
         try {
-          map.fitBounds(bounds.pad(0.12));
-          console.log('Map bounds fitted');
-        } catch (e) {
-          console.warn('Failed to fit bounds:', e);
-        }
-      } else {
-        console.log('Bounds not valid - using default map view');
-      }
+          const targetId = window._targetPostId;
+          if (targetId) {
+            const tid = parseInt(targetId, 10);
+            console.log('Targeting post ID:', tid);
+            // small timeout to ensure markers have been added to the layer
+            setTimeout(function () {
+              const marker = postMarkers[tid];
+              if (marker && marker.getLatLng) {
+                try { map.flyTo(marker.getLatLng(), 17); } catch (e) { map.setView(marker.getLatLng(), 17); }
+                try { marker.openPopup(); } catch (e) { }
+              } else {
+                console.warn('Target marker not found:', tid);
+              }
+            }, 250);
+          }
+        } catch (e) { console.error('Error in target post handling:', e); }
+      })
+      .catch(err => console.error('Failed to load posts:', err));
+  }
 
-      // If a target post id was provided via URL params, center/fly to it and open popup
-      try {
-        const targetId = window._targetPostId;
-        if (targetId) {
-          const tid = parseInt(targetId, 10);
-          console.log('Targeting post ID:', tid);
-          // small timeout to ensure markers have been added to the layer
-          setTimeout(function () {
-            const marker = postMarkers[tid];
-            if (marker && marker.getLatLng) {
-              try { map.flyTo(marker.getLatLng(), 17); } catch (e) { map.setView(marker.getLatLng(), 17); }
-              try { marker.openPopup(); } catch (e) { }
-            } else {
-              console.warn('Target marker not found:', tid);
-            }
-          }, 250);
-        }
-      } catch (e) { console.error('Error in target post handling:', e); }
-    })
-    .catch(err => console.error('Failed to load posts:', err));
+  // Initial load
+  loadPosts();
 
   // Load raw latlongdata layer
   fetch('/api/latlongdata')
@@ -1777,7 +1825,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
           // Store circuit type for dynamic styling
           polyline.circuitType = conn.circuit;
-          polyline.phasingType = conn.phasing; // Store phasing for color updates
+          polyline.phasingType = conn.phasing; 
+          polyline._connType = connType;
 
           // Add popup
           const popupText = `
@@ -1842,6 +1891,17 @@ document.addEventListener('DOMContentLoaded', function () {
         for (var j = 0; j < lines.length; j++) {
           if (used[j]) continue;
           var s = lines[j];
+
+          // NEW: Enforce metadata matching. Only merge if type, feeder, circuit, and phasing match.
+          // This prevents primary lines from being merged into secondary lines (or vice versa),
+          // which would corrupt the filter categorization on the resulting polyline.
+          if ((s.connection_type || '') !== (pathMeta.connection_type || '') ||
+              (s.feeder || '') !== (pathMeta.feeder || '') ||
+              (s.circuit || '') !== (pathMeta.circuit || '') ||
+              (s.phasing || '') !== (pathMeta.phasing || '')) {
+            continue;
+          }
+
           var s1 = [parseFloat(s.lat1), parseFloat(s.lng1)];
           var s2 = [parseFloat(s.lat2), parseFloat(s.lng2)];
           if (samePoint(head[0], head[1], s1[0], s1[1])) { points.push(s2); pathMeta.segments++; pathMeta.to_bus = s.to_bus; if (s.from_bus) pathMeta.all_buses.add(s.from_bus); if (s.to_bus) pathMeta.all_buses.add(s.to_bus); if (s.length_meters != null && !Number.isNaN(s.length_meters)) pathMeta.length_meters = (pathMeta.length_meters || 0) + s.length_meters; used[j] = true; changed = true; break; }
@@ -1901,6 +1961,7 @@ document.addEventListener('DOMContentLoaded', function () {
           poly.circuitType = meta.circuit;
           poly.phasingType = meta.phasing;
           poly._feederName = meta.feeder || '';
+          poly._connType = connType;
           poly._allBuses = Array.from(meta.all_buses);
           if (meta.feeder) knownFeeders.add(meta.feeder);
 

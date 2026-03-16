@@ -1,0 +1,8 @@
+DATABASE_URL: postgresql+psycopg2://postgres:0000@localhost:8080/mapping
+POST_COUNT: 0
+BUS_COUNT: 2271
+TRANSFORMER_COUNT: 0
+
+LATEST UPLOAD HISTORY:
+DATE: 2026-03-16 02:49:32.916720 | TYPE: primary_lines | FILE: EXAMPLEDATA.csv | STATUS: success | COUNT: 239
+DATE: 2026-03-16 02:49:20.244733 | TYPE: bus_nodes | FILE: bus_data.csv | STATUS: success | COUNT: 2335

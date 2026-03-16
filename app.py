@@ -52,11 +52,14 @@ with app.app_context():
 # Register Blueprints
 from routes.auth_routes import auth_bp
 from routes.main_routes import main_bp
-from routes.api_routes import api_bp
+from routes.api import asset_api_bp, import_api_bp, analysis_api_bp, user_api_bp
 
 app.register_blueprint(auth_bp)
 app.register_blueprint(main_bp)
-app.register_blueprint(api_bp, url_prefix='/api')
+app.register_blueprint(asset_api_bp, url_prefix='/api')
+app.register_blueprint(import_api_bp, url_prefix='/api')
+app.register_blueprint(analysis_api_bp, url_prefix='/api')
+app.register_blueprint(user_api_bp, url_prefix='/api')
 
 # Helper: make current user available in templates
 from routes.auth_routes import get_current_user
