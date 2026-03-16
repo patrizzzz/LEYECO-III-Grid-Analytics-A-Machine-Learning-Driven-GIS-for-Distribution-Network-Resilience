@@ -604,8 +604,8 @@ def api_latlongdata():
     """Return normalized rows from `latlongdata` table as JSON."""
     try:
         # Check if table exists/desc
-        desc = db.session.execute(text('DESCRIBE latlongdata')).fetchall()
-        col_names = [row[0] for row in desc]
+        res = db.session.execute(text('SELECT * FROM latlongdata LIMIT 0'))
+        col_names = list(res.keys())
         lower_cols = [c.lower() for c in col_names]
         expected = ['post_id', 'latitude', 'longitude']
         mapping = {}
@@ -618,7 +618,7 @@ def api_latlongdata():
                 return jsonify({'error': 'latlongdata must have at least 3 columns'}), 400
             mapping = {'post_id': col_names[0], 'latitude': col_names[1], 'longitude': col_names[2]}
 
-        sql = text(f"SELECT `{mapping['post_id']}` AS post_id, `{mapping['latitude']}` AS latitude, `{mapping['longitude']}` AS longitude FROM latlongdata")
+        sql = text(f'SELECT "{mapping["post_id"]}" AS post_id, "{mapping["latitude"]}" AS latitude, "{mapping["longitude"]}" AS longitude FROM latlongdata')
         rows = db.session.execute(sql).fetchall()
 
         out = []
