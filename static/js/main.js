@@ -184,47 +184,61 @@ document.addEventListener('DOMContentLoaded', function () {
     // Persist feeder selection whenever filter is applied
     persistActiveFeeders();
 
-    // Filter network lines: remove/add from networkLinesLayer
-    const allLines = [];
-    networkLinesLayer.eachLayer(function (layer) { allLines.push(layer); });
+    // Filter network lines and connections: remove/add from their respective layers
     if (!window._hiddenNetworkLines) window._hiddenNetworkLines = [];
-    const allNetLines = allLines.concat(window._hiddenNetworkLines);
-    window._hiddenNetworkLines = [];
+    if (!window._hiddenConnections) window._hiddenConnections = [];
 
-    allNetLines.forEach(function (layer) {
-      if (layer instanceof L.Polyline) {
-        // Feeder Check
-        const f = layer._feederName || '';
-        const isFeederVisible = showAllFeeds || activeFeeders.has(f);
+    // Helper to filter a layer group
+    function filterLineLayer(layerGroup, hiddenArray) {
+      const currentLayers = [];
+      layerGroup.eachLayer(function (layer) { currentLayers.push(layer); });
+      
+      const allLines = currentLayers.concat(hiddenArray);
+      const newHidden = [];
 
-        // Phase Check
-        let isPhaseVisible = true;
-        // Check if all phases are active (size 4), otherwise filter
-        if (activePhaseCategories.size < 4) {
-          const pStr = String(layer.phasingType || '').toUpperCase().trim();
-          // Count unique phases (A, B, C)
-          let distinctPhases = 0;
-          if (pStr.includes('A')) distinctPhases++;
-          if (pStr.includes('B')) distinctPhases++;
-          if (pStr.includes('C')) distinctPhases++;
+      allLines.forEach(function (layer) {
+        if (layer instanceof L.Polyline && !(layer.options && layer.options.className === 'click-buffer')) {
+          // Feeder Check
+          const f = layer._feederName || '';
+          const isFeederVisible = showAllFeeds || activeFeeders.has(f);
 
-          // Determine category
-          let category = '0'; // default Other
-          if (distinctPhases === 1) category = '1';
-          else if (distinctPhases === 2) category = '2';
-          else if (distinctPhases === 3) category = '3';
+          // Phase Check
+          let isPhaseVisible = true;
+          // Check if all phases are active (size 4), otherwise filter
+          if (activePhaseCategories.size < 4) {
+            const pStr = String(layer.phasingType || '').toUpperCase().trim();
+            // Count unique phases (A, B, C)
+            let distinctPhases = 0;
+            if (pStr.includes('A')) distinctPhases++;
+            if (pStr.includes('B')) distinctPhases++;
+            if (pStr.includes('C')) distinctPhases++;
 
-          isPhaseVisible = activePhaseCategories.has(category);
+            // Determine category
+            let category = '0'; // default Other
+            if (distinctPhases === 1) category = '1';
+            else if (distinctPhases === 2) category = '2';
+            else if (distinctPhases === 3) category = '3';
+
+            isPhaseVisible = activePhaseCategories.has(category);
+          }
+
+          if (isFeederVisible && isPhaseVisible) {
+            if (!layerGroup.hasLayer(layer)) {
+              layerGroup.addLayer(layer);
+              // If there's a click-buffer associated, we might need a better way to track it,
+              // but for now, we'll focus on the visible lines.
+            }
+          } else {
+            if (layerGroup.hasLayer(layer)) layerGroup.removeLayer(layer);
+            newHidden.push(layer);
+          }
         }
+      });
+      return newHidden;
+    }
 
-        if (isFeederVisible && isPhaseVisible) {
-          if (!networkLinesLayer.hasLayer(layer)) networkLinesLayer.addLayer(layer);
-        } else {
-          if (networkLinesLayer.hasLayer(layer)) networkLinesLayer.removeLayer(layer);
-          window._hiddenNetworkLines.push(layer);
-        }
-      }
-    });
+    window._hiddenNetworkLines = filterLineLayer(networkLinesLayer, window._hiddenNetworkLines);
+    window._hiddenConnections = filterLineLayer(connectionsLayer, window._hiddenConnections);
   }
 
   // Simple debounce helper for expensive filter operations
@@ -590,8 +604,6 @@ document.addEventListener('DOMContentLoaded', function () {
       body.style.maxHeight = 'none'; // Let sidebar handle scroll
       sidebarContainer.appendChild(body);
     }
-  } else {
-    mapSettingsControl.addTo(map);
   }
 
   // Handle Sidebar Toggle for Map Settings

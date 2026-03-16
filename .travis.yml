@@ -1,0 +1,31 @@
+language: python
+python: "3.10"
+dist: focal
+
+services:
+  - docker
+
+addons:
+  apt:
+    packages:
+      - libpq-dev
+
+env:
+  global:
+    - DATABASE_URL=postgresql://user:password@localhost:5432/app_test
+    - SECRET_KEY=test-secret-key
+
+before_install:
+  - docker run -d --name postgres -p 5432:5432 -e POSTGRES_DB=app_test -e POSTGRES_USER=user -e POSTGRES_PASSWORD=password postgis/postgis:15-3.3
+  - docker ps -a
+
+install:
+  - python -m pip install --upgrade pip
+  - pip install -r requirements.txt
+
+# Wait for postgres to be ready
+before_script:
+  - sleep 15
+
+script:
+  - pytest
