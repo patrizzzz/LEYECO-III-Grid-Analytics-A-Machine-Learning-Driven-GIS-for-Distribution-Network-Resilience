@@ -71,7 +71,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const bounds = L.latLngBounds();
   
   // --- Analysis Highlighting State ---
-  let analysisHighlightLayers = L.layerGroup().addTo(map);
+  let analysisHighlightLayers = L.featureGroup().addTo(map);
   const clearAnalysisBtn = document.createElement('button');
   clearAnalysisBtn.className = 'analysis-clear-btn';
   clearAnalysisBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg> Clear Analysis';
@@ -153,8 +153,8 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function applyMapFilters() {
-    // Show all when: no feeders known, or all feeders are checked, or none are explicitly checked (default state)
-    const showAllFeeds = knownFeeders.size === 0 || activeFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
+    // Show all when: no feeders known, or all feeders are checked
+    const showAllFeeds = knownFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
     
     // Filter posts: remove/add from postsLayer
     _allPostMarkers.forEach(function (marker) {
@@ -457,6 +457,13 @@ document.addEventListener('DOMContentLoaded', function () {
         feederList.innerHTML = '<span class="msp-hint">No feeders found</span>';
         return;
       }
+
+      // If no saved state and activeFeeders is empty, initialize it with all known feeders
+      const savedFeedersRaw = localStorage.getItem('mapActiveFeeders');
+      if (!savedFeedersRaw && activeFeeders.size === 0) {
+        knownFeeders.forEach(f => activeFeeders.add(f));
+      }
+
       feederList.innerHTML = '';
       // "Show All" option
       const allRow = document.createElement('label');
@@ -941,7 +948,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 </button>
             </div>
              <div class="popup-connect-actions">
-                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}">Primary line-overhead</button>
+                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}" data-bus-id="${p.primary_bus_id || p.pole_number || ''}">Primary line-overhead</button>
                 <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Distribution Transformer</button>
             </div>
         </div>
@@ -1079,14 +1086,34 @@ document.addEventListener('DOMContentLoaded', function () {
       if (primaryLineBtn) {
         primaryLineBtn.onclick = function () {
           const postId = primaryLineBtn.getAttribute('data-post-id');
-          if (!postId) return;
-          fetch('/api/posts/' + postId)
+          const busId = primaryLineBtn.getAttribute('data-bus-id');
+          if (!busId && !postId) return;
+
+          // Try fetching primary line data by bus ID first
+          const lookupId = busId || postId;
+          fetch('/api/primary-lines/by-bus/' + encodeURIComponent(lookupId))
             .then(function (r) { return r.json(); })
-            .then(function (data) {
-              if (data && data.error) return;
-              showPrimaryLineOverheadModal(data);
+            .then(function (result) {
+              if (result && result.primary_lines && result.primary_lines.length > 0) {
+                // If line segments found, show the first one's technical data
+                showPrimaryLineOverheadModal(result.primary_lines[0]);
+              } else {
+                // Fallback to fetching the post detail (legacy or if no segments exist)
+                fetch('/api/posts/' + postId)
+                  .then(function (r) { return r.json(); })
+                  .then(function (data) {
+                    if (data && !data.error) showPrimaryLineOverheadModal(data);
+                  });
+              }
             })
-            .catch(function () { });
+            .catch(function () {
+              // Final fallback to post if endpoint fails
+              fetch('/api/posts/' + postId)
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                  if (data && !data.error) showPrimaryLineOverheadModal(data);
+                });
+            });
         };
       }
 
@@ -1434,7 +1461,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const traceBtn = popupEl.querySelector('.btn-trace-downstream');
       if (traceBtn) {
         traceBtn.onclick = function () {
-          const busId = traceBtn.getAttribute('data-bus') || traceBtn.getAttribute('data-pole');
+          const busId = traceBtn.getAttribute('data-pole') || traceBtn.getAttribute('data-bus');
           if (!busId) { showNoticeModal('Info', 'No bus ID available for this post.'); return; }
           traceBtn.textContent = '⏳ Tracing...';
           fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream')
@@ -1474,8 +1501,8 @@ document.addEventListener('DOMContentLoaded', function () {
       const outageBtn = popupEl.querySelector('.btn-outage-sim');
       if (outageBtn) {
         outageBtn.onclick = function () {
-          const busId = outageBtn.getAttribute('data-bus') || outageBtn.getAttribute('data-pole');
-          if (!busId) { showNoticeModal('Info', 'No bus ID available for this post.'); return; }
+          const busId = outageBtn.getAttribute('data-pole') || outageBtn.getAttribute('data-bus');
+          if (!busId) { showNoticeModal('Info', 'No pole or bus ID available for this post.'); return; }
           outageBtn.textContent = '⏳ Simulating...';
           fetch('/api/network/simulate-outage?start_bus=' + encodeURIComponent(busId))
             .then(r => r.json())
@@ -3276,22 +3303,21 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // ── 1. Build combined expandable search HTML ──
   var combinedSearchHTML = `
-    <div style="display:flex; align-items:center; gap:8px;">
-      <div id="search-bar-expanded" class="search-bar-expanded" style="display:none;">
-        <div style="position:relative; width: 250px;">
-          <input id="customer-search-input" class="top-search-input"
-            type="text" placeholder="Customer ID…"
-            autocomplete="off" spellcheck="false" 
-            style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 14px;" />
-          <div id="customer-search-suggestions" class="customer-search-suggestions" style="display:none; position:absolute; top:100%; left:0; width:100%; background:white; border:1px solid #ccc; z-index:1000; border-radius:4px; margin-top:4px; max-height:200px; overflow-y:auto; box-shadow:0 4px 6px rgba(0,0,0,0.1);"></div>
-        </div>
-      </div>
+    <div class="search-flex-container" style="display:flex; align-items:center; flex-direction:row-reverse; gap:8px;">
       <div class="expandable-search-wrapper">
-        <button id="search-icon-btn" class="search-icon-btn" title="Search Customer" style="width: 36px; height: 36px; background-color: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 6px;">
+        <button id="search-icon-btn" class="search-icon-btn" title="Search Customer">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" width="20" height="20">
             <path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/>
           </svg>
         </button>
+      </div>
+      <div id="search-bar-expanded" class="search-bar-expanded">
+        <div style="position:relative; width: 100%;">
+          <input id="customer-search-input" class="top-search-input"
+            type="text" placeholder="Customer ID…"
+            autocomplete="off" spellcheck="false" />
+          <div id="customer-search-suggestions" class="customer-search-suggestions"></div>
+        </div>
       </div>
     </div>
   `;
@@ -3324,10 +3350,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function toggleSearchBar(show) {
     if (show === undefined) {
-      show = searchBarExpanded.style.display === 'none';
+      show = !searchBarExpanded.classList.contains('active');
     }
 
-    searchBarExpanded.style.display = show ? 'block' : 'none';
+    searchBarExpanded.classList.toggle('active', show);
     searchIconBtn.setAttribute('aria-expanded', show);
 
     if (show) {
@@ -3370,13 +3396,13 @@ document.addEventListener('DOMContentLoaded', function () {
     var query = e.target.value.trim();
 
     if (!query || query.length < 1) {
-      customerSearchSuggestions.style.display = 'none';
+      customerSearchSuggestions.classList.remove('active');
       return;
     }
 
     // Show loading state
     customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading">🔍 Searching...</div>';
-    customerSearchSuggestions.style.display = 'block';
+    customerSearchSuggestions.classList.add('active');
 
     customerSearchTimeout = setTimeout(function () {
       fetch('/api/customers?q=' + encodeURIComponent(query) + '&per_page=5')
@@ -3384,7 +3410,7 @@ document.addEventListener('DOMContentLoaded', function () {
         .then(function (data) {
           if (!data.data || data.data.length === 0) {
             customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-empty">No customers found</div>';
-            customerSearchSuggestions.style.display = 'block';
+            customerSearchSuggestions.classList.add('active');
             return;
           }
 
@@ -3397,7 +3423,7 @@ document.addEventListener('DOMContentLoaded', function () {
           }).join('');
 
           customerSearchSuggestions.innerHTML = html;
-          customerSearchSuggestions.style.display = 'block';
+          customerSearchSuggestions.classList.add('active');
 
           // Add click handlers to suggestions
           var items = customerSearchSuggestions.querySelectorAll('.customer-search-item');
@@ -3418,7 +3444,7 @@ document.addEventListener('DOMContentLoaded', function () {
         .catch(function (err) {
           console.error('Customer search error:', err);
           customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-error">⚠️ Error loading customers</div>';
-          customerSearchSuggestions.style.display = 'block';
+          customerSearchSuggestions.classList.add('active');
         });
     }, 300);
   });
@@ -3426,7 +3452,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // Hide suggestions and close search when clicking elsewhere
   document.addEventListener('click', function (e) {
     if (!searchBarExpanded.contains(e.target) && e.target !== searchIconBtn && !searchIconBtn.contains(e.target)) {
-      customerSearchSuggestions.style.display = 'none';
+      customerSearchSuggestions.classList.remove('active');
     }
   });
 
@@ -3442,7 +3468,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         selectedCustomerData = data;
         customerSearchInput.value = data.customer.customer_id;
-        customerSearchSuggestions.style.display = 'none';
+        customerSearchSuggestions.classList.remove('active');
 
         // Highlight customer location on map if post location exists
         if (data.connected_post) {

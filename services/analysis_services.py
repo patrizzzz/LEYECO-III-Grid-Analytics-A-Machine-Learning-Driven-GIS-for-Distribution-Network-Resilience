@@ -14,22 +14,10 @@ def calculate_outage_impact(start_bus_id):
     """
     from flask import current_app
     from models import Post, BusNode
+    from .network_geometry_db import resolve_all_bus_ids
 
-    # 1. Resolve starting point to a Post and collect all associated bus IDs
-    post = Post.query.filter((Post.primary_bus_id == start_bus_id) | (Post.pole_number == start_bus_id)).first()
-    
-    root_buses = set()
-    if post:
-        if post.pole_number: root_buses.add(post.pole_number)
-        if post.primary_bus_id: root_buses.add(post.primary_bus_id)
-        if getattr(post, 'sec_bus_id', None): root_buses.add(post.sec_bus_id)
-        if getattr(post, 'transformer_bus_id', None): root_buses.add(post.transformer_bus_id)
-        
-        bns = BusNode.query.filter_by(pole_number=post.pole_number).all()
-        for bn in bns:
-            root_buses.add(bn.bus_id)
-    else:
-        root_buses.add(start_bus_id)
+    # 1. Resolve starting point to all associated bus IDs
+    root_buses = resolve_all_bus_ids(start_bus_id)
 
     # 2. Trace DOWNSTREAM-ONLY network using high-performance SQL CTE
     all_downstream = set()
@@ -45,7 +33,8 @@ def calculate_outage_impact(start_bus_id):
             'total_load_kwh': 0,
             'affected_transformer_ids': [],
             'customer_details': [],
-            'downstream_bus_count': 0
+            'downstream_bus_count': 0,
+            'visited_buses': []
         }
 
     # 2. Find all Service Drops connected to these buses
@@ -65,8 +54,7 @@ def calculate_outage_impact(start_bus_id):
     unique_customer_ids = list(set(affected_customer_ids))
     customers = Customer.query.filter(Customer.customer_id.in_(unique_customer_ids)).all()
     
-    # Pre-fetch all consumption data into a string-keyed dictionary to avoid type mismatch
-    # Aggressively normalize IDs to handle "0001" vs "1" or padding issues
+    # Pre-fetch consumption data
     all_consump = EnergyConsumption.query.all()
     consump_map = {}
     for ec in all_consump:
@@ -83,7 +71,6 @@ def calculate_outage_impact(start_bus_id):
             
         c_id_norm = str(c.customer_id).strip().lower().lstrip('0')
         load = consump_map.get(c_id_norm, 0)
-
         
         total_load += load
         
@@ -99,7 +86,8 @@ def calculate_outage_impact(start_bus_id):
         'total_load_kwh': round(total_load, 2),
         'affected_transformer_ids': affected_transformer_ids,
         'customer_details': customer_details,
-        'downstream_bus_count': len(downstream_buses)
+        'downstream_bus_count': len(downstream_buses),
+        'visited_buses': downstream_buses
     }
 
 def calculate_transformer_load_stress():
@@ -236,12 +224,19 @@ def calculate_transformer_load_stress():
 
     return results
 
-def get_grid_health_analytics():
+def get_grid_health_analytics(force_refresh=False):
     """
     Consolidates ML failure risk and load stress data into a single health report.
     Used by Layer 2 (API) to provide a combined GeoJSON-friendly summary.
     """
-    from .ml_predictor import predict_transformer_risk
+    from .ml_predictor import predict_transformer_risk, export_snapshot, load_snapshot
+    
+    # 0. Try loading from snapshot first (unless force_refresh is True)
+    if not force_refresh:
+        snapshot = load_snapshot()
+        if snapshot:
+            snapshot['is_snapshot'] = True
+            return snapshot
     
     # 1. Get Load Stress Analysis
     stress_results = calculate_transformer_load_stress()
@@ -380,12 +375,22 @@ def get_grid_health_analytics():
         'low': sum(1 for r in combined_details if r['risk_level'] == 'Low'),
     }
 
-    return {
+    analysis_final = {
         'summary': summary,
         'details': combined_details,
         'model_info': ml_results.get('model_info', {}),
-        'timestamp': datetime.utcnow().isoformat()
+        'timestamp': datetime.utcnow().isoformat(),
+        'is_snapshot': False
     }
+
+    # 7. Export an initial snapshot if one doesn't exist, or if forced to refresh, to "freeze" results
+    try:
+        if force_refresh or not load_snapshot():
+            export_snapshot(analysis_final)
+    except Exception as e:
+        current_app.logger.warning(f"Failed to auto-export snapshot: {e}")
+
+    return analysis_final
 
 
 def get_service_drops_for_post(post_id):

@@ -8,6 +8,7 @@ import numpy as np
 from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 import os
+import joblib
 
 
 def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
@@ -218,6 +219,43 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
         'summary': summary,
         'model_info': model_info,
     }
+
+
+def export_snapshot(results, filename=None):
+    """
+    Export analysis results to a .pkl file.
+    """
+    if filename is None:
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        snapshots_dir = os.path.join(root_dir, 'data', 'snapshots')
+        if not os.path.exists(snapshots_dir):
+            os.makedirs(snapshots_dir)
+        timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+        filename = os.path.join(snapshots_dir, f'analysis_snapshot_{timestamp}.pkl')
+    
+    joblib.dump(results, filename)
+    return filename
+
+
+def load_snapshot(filename=None):
+    """
+    Load analysis results from a .pkl file.
+    """
+    if filename is None:
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        snapshots_dir = os.path.join(root_dir, 'data', 'snapshots')
+        if not os.path.exists(snapshots_dir):
+            return None
+            
+        files = [os.path.join(snapshots_dir, f) for f in os.listdir(snapshots_dir) if f.endswith('.pkl')]
+        if not files:
+            return None
+        # Load the latest snapshot
+        filename = max(files, key=os.path.getmtime)
+        
+    if os.path.exists(filename):
+        return joblib.load(filename)
+    return None
 
 
 if __name__ == '__main__':

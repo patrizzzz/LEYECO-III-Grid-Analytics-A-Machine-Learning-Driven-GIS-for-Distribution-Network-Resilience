@@ -655,16 +655,28 @@
             <!-- Table -->
             <div class="pred-table-wrap">
                 <div class="pred-table-toolbar">
-                    <h3>Risk-Ranked Transformers</h3>
-                    <button class="btn-legend" id="btn-show-legend">
-                        <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <h3 style="margin: 0;">Risk Ranking</h3>
+                        <span id="snapshot-badge" class="risk-badge" style="display: none; background: rgba(14, 165, 233, 0.12); color: #0ea5e9;"></span>
+                        <button class="btn-legend" id="btn-refresh" title="Run a fresh analysis">
+                            <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                <path fill-rule="evenodd" d="M8 3a5 5 0 1 0 4.546 2.914.5.5 0 0 1 .908-.417A6 6 0 1 1 8 2v1z"/>
+                                <path d="M8 4.466V.534a.25.25 0 0 1 .41-.192l2.36 1.966c.12.1.12.284 0 .384L8.41 4.658A.25.25 0 0 1 8 4.466z"/>
+                            </svg>
+                            Refresh Analysis
+                        </button>
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button class="btn-legend" id="btn-show-legend">
+                            <svg width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
                             <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z" />
                             <path
                                 d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z" />
                         </svg>
                         View Legend
                     </button>
-                    <input type="text" class="pred-search" id="pred-search" placeholder="Search transformer ID…">
+                    <input type="text" class="pred-search" id="pred-search" placeholder="Search ID…">
+                    </div>
                 </div>
                 <div class="pred-table-scroll" id="pred-table-scroll">
                     <table class="pred-table">
@@ -773,6 +785,26 @@
     </div>
 </div>
 
+<!-- Confirm Refresh Modal -->
+<div class="legend-modal-overlay" id="confirm-refresh-overlay">
+    <div class="legend-modal" style="max-width: 420px; text-align: center;">
+        <div class="legend-modal-header"
+            style="justify-content: center; background: rgba(14, 165, 233, 0.05); border-bottom: none;">
+            <h3 style="color: #0ea5e9; font-size: 1.25rem;">Refresh Analysis?</h3>
+        </div>
+        <div class="legend-modal-body">
+            <p style="color: var(--text-secondary); margin-bottom: 24px; font-size: 0.95rem; line-height: 1.5;">
+                Running a fresh analysis will query all transformer and customer data again. This may take a moment. Ensure your dataset is completely uploaded.
+            </p>
+            <div style="display: flex; gap: 12px; justify-content: center;">
+                <button class="btn btn-secondary" id="btn-cancel-refresh" style="padding: 8px 24px; background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; transition: background 0.15s;">Cancel</button>
+                <button class="btn btn-primary" id="btn-confirm-refresh"
+                    style="padding: 8px 24px; background: #0ea5e9; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.15s;">Proceed</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -786,13 +818,34 @@
         let sortDir = 'asc';
 
         // --- Fetch Data ---
-        async function loadPredictions() {
+        async function loadPredictions(forceRefresh = false) {
             try {
-                const resp = await fetch('/api/ml/transformer-risk');
+                if (forceRefresh) {
+                    document.querySelector('#pred-loading span').textContent = 'Forcing fresh ML analysis...';
+                    document.getElementById('pred-loading').style.display = 'flex';
+                    document.getElementById('pred-content').style.display = 'none';
+                }
+                const url = forceRefresh ? '/api/ml/transformer-risk?refresh=true' : '/api/ml/transformer-risk';
+                const resp = await fetch(url);
                 const json = await resp.json();
                 if (json.error) throw new Error(json.error);
                 allData = json.predictions || [];
                 filteredData = [...allData];
+                
+                const badge = document.getElementById('snapshot-badge');
+                if (json.is_snapshot) {
+                    badge.style.display = 'inline-flex';
+                    badge.style.background = 'rgba(14, 165, 233, 0.12)';
+                    badge.style.color = '#0ea5e9';
+                    const dt = new Date(json.timestamp);
+                    badge.textContent = 'Snapshot: ' + dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                } else {
+                    badge.style.display = 'inline-flex';
+                    badge.style.background = 'rgba(34, 197, 94, 0.12)';
+                    badge.style.color = '#22c55e';
+                    badge.textContent = 'Live Analysis';
+                }
+
                 renderCards(json.summary);
                 renderTable();
                 renderCharts(json.summary, allData);
@@ -958,6 +1011,34 @@
                 currentPage = 1;
                 renderTable();
             });
+
+            // Refresh Logic
+            const refreshOverlay = document.getElementById('confirm-refresh-overlay');
+            const btnRefreshTrigger = document.getElementById('btn-refresh');
+            const btnConfirmRefresh = document.getElementById('btn-confirm-refresh');
+            const btnCancelRefresh = document.getElementById('btn-cancel-refresh');
+
+            btnRefreshTrigger.addEventListener('click', () => {
+                refreshOverlay.style.display = 'flex';
+                void refreshOverlay.offsetWidth;
+                refreshOverlay.classList.add('active');
+            });
+
+            const closeRefreshModal = () => {
+                refreshOverlay.classList.remove('active');
+                setTimeout(() => { refreshOverlay.style.display = 'none'; }, 200);
+            };
+
+            btnCancelRefresh.addEventListener('click', closeRefreshModal);
+            refreshOverlay.addEventListener('click', (e) => {
+                if (e.target === refreshOverlay) closeRefreshModal();
+            });
+
+            btnConfirmRefresh.addEventListener('click', () => {
+                closeRefreshModal();
+                loadPredictions(true);
+            });
+            // End Refresh Logic
 
             document.querySelectorAll('.pred-table thead th[data-sort]').forEach(th => {
                 th.addEventListener('click', () => sortData(th.dataset.sort));

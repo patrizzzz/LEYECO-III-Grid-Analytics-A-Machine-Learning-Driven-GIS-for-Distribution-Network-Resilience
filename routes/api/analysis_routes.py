@@ -106,8 +106,15 @@ def api_transformer_location(transformer_id):
 @analysis_api_bp.route('/ml/transformer-risk', methods=['GET'])
 def api_ml_transformer_risk():
     try:
-        result = get_grid_health_analytics()
-        return jsonify({'predictions': result.get('details', []), 'summary': result.get('summary', {}), 'model_info': result.get('model_info', {}), 'timestamp': result.get('timestamp', '')}), 200
+        force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+        result = get_grid_health_analytics(force_refresh=force_refresh)
+        return jsonify({
+            'predictions': result.get('details', []),
+            'summary': result.get('summary', {}),
+            'model_info': result.get('model_info', {}),
+            'timestamp': result.get('timestamp', ''),
+            'is_snapshot': result.get('is_snapshot', False)
+        }), 200
     except Exception as e: return jsonify({'error': str(e), 'predictions': []}), 500
 
 @analysis_api_bp.route('/ml/transformer-load-stress', methods=['GET'])
@@ -122,15 +129,25 @@ def api_trace_feeder():
     start_bus = request.args.get('start_bus')
     if not start_bus: return jsonify({'error': 'Missing start_bus'}), 400
     try:
-        from network_geometry_db import trace_feeder_bfs, trace_downstream_bfs, trace_upstream_bfs
+        from services.network_geometry_db import trace_feeder_bfs, trace_downstream_bfs, trace_upstream_bfs, resolve_all_bus_ids
+        from models import BusNode
         direction = request.args.get('direction', 'both').lower()
-        post = Post.query.filter((Post.primary_bus_id == start_bus) | (Post.pole_number == start_bus)).first()
-        actual_start_bus = post.primary_bus_id if post else start_bus
-        if direction == 'downstream': visited = list(trace_downstream_bfs(current_app, actual_start_bus))
-        elif direction == 'upstream': visited = list(trace_upstream_bfs(current_app, actual_start_bus))
-        else: visited = trace_feeder_bfs(current_app, actual_start_bus)
+
+        # Gather ALL bus IDs using shared utility
+        actual_start_bus = resolve_all_bus_ids(start_bus)
+
+        if direction == 'downstream':
+            visited = list(trace_downstream_bfs(current_app, actual_start_bus))
+        elif direction == 'upstream':
+            visited = list(trace_upstream_bfs(current_app, actual_start_bus))
+        else:
+            # For 'both' direction, use undirected BFS with first candidate
+            visited = trace_feeder_bfs(current_app, actual_start_bus[0])
         return jsonify({'status': 'success', 'start_bus': actual_start_bus, 'count': len(visited), 'visited_buses': visited}), 200
-    except Exception as e: return jsonify({'error': str(e)}), 500
+    except Exception as e:
+        import traceback
+        current_app.logger.error(f"Trace feeder error: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
 
 @analysis_api_bp.route('/network/simulate-outage', methods=['GET'])
 def api_simulate_outage():
