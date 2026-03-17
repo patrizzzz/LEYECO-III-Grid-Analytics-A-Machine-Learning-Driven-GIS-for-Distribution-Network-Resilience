@@ -12,7 +12,8 @@ from utils.network_utils import infer_connections_from_posts
 from services.importers import (
     PostImporter, TransformerImporter, SecondaryLineImporter, ServiceDropImporter,
     CustomerImporter, ConsumptionImporter, BusNodeImporter, PrimaryLineImporter,
-    LoadCurveImporter
+    LoadCurveImporter, VoltageRegulatorImporter, ShuntCapacitorImporter,
+    ShuntInductorImporter, SeriesInductorImporter
 )
 
 import_api_bp = Blueprint('import_api', __name__)
@@ -137,6 +138,55 @@ def api_load_curves_bulk_import():
         stats = LoadCurveImporter(file).run()
         return jsonify(stats), 200 if 'error' not in stats else 500
     return jsonify({'error': 'File processing failed'}), 500
+
+
+@import_api_bp.route('/voltage-regulators/bulk-import', methods=['POST'])
+@admin_required
+def api_voltage_regulators_import():
+    if 'file' not in request.files: return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '': return jsonify({'error': 'No selected file'}), 400
+    if file:
+        stats = VoltageRegulatorImporter(file).run()
+        return jsonify(stats), 200 if 'error' not in stats else 500
+    return jsonify({'error': 'File processing failed'}), 500
+
+
+@import_api_bp.route('/shunt-capacitors/bulk-import', methods=['POST'])
+@admin_required
+def api_shunt_capacitors_import():
+    if 'file' not in request.files: return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '': return jsonify({'error': 'No selected file'}), 400
+    if file:
+        stats = ShuntCapacitorImporter(file).run()
+        return jsonify(stats), 200 if 'error' not in stats else 500
+    return jsonify({'error': 'File processing failed'}), 500
+
+
+@import_api_bp.route('/shunt-inductors/bulk-import', methods=['POST'])
+@admin_required
+def api_shunt_inductors_import():
+    if 'file' not in request.files: return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '': return jsonify({'error': 'No selected file'}), 400
+    if file:
+        stats = ShuntInductorImporter(file).run()
+        return jsonify(stats), 200 if 'error' not in stats else 500
+    return jsonify({'error': 'File processing failed'}), 500
+
+
+@import_api_bp.route('/series-inductors/bulk-import', methods=['POST'])
+@admin_required
+def api_series_inductors_import():
+    if 'file' not in request.files: return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '': return jsonify({'error': 'No selected file'}), 400
+    if file:
+        stats = SeriesInductorImporter(file).run()
+        return jsonify(stats), 200 if 'error' not in stats else 500
+    return jsonify({'error': 'File processing failed'}), 500
+
 
 @import_api_bp.route('/data/upload-history', methods=['GET'])
 def api_upload_history():

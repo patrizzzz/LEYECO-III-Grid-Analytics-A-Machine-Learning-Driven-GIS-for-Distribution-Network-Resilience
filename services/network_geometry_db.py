@@ -23,7 +23,59 @@ import math
 import re
 
 
+
+def resolve_all_bus_ids(identifier):
+    """
+    Given a starting string (pole number or bus ID), resolves all 
+    associated topological identifiers from Post and BusNode tables.
+    Handles padding like "120" -> "P0000000120".
+    """
+    from models import Post, BusNode
+    if identifier is None:
+        return []
+    
+    s_id = str(identifier).strip()
+    candidate_bus_ids = set()
+
+    # Try exact match or padded match in Post table
+    padded = s_id
+    if s_id.isdigit():
+        padded = f"P0000000{s_id}"[-11:] # Standard P + 10 digits
+
+    posts = Post.query.filter(
+        (Post.primary_bus_id == s_id) | 
+        (Post.pole_number == s_id) |
+        (Post.pole_number == padded)
+    ).all()
+
+    for post in posts:
+        if post.primary_bus_id: candidate_bus_ids.add(post.primary_bus_id)
+        if post.transformer_bus_id: candidate_bus_ids.add(post.transformer_bus_id)
+        if getattr(post, 'sec_bus_id', None): candidate_bus_ids.add(post.sec_bus_id)
+        
+        # Also check BusNode for this pole
+        pole_num = post.pole_number or s_id
+        for bn in BusNode.query.filter_by(pole_number=pole_num).all():
+            if bn.bus_id: candidate_bus_ids.add(bn.bus_id)
+
+    if not candidate_bus_ids:
+        # Try BusNode directly with s_id/padded as pole_number
+        query = BusNode.query.filter(
+            (BusNode.bus_id == s_id) |
+            (BusNode.pole_number == s_id) |
+            (BusNode.pole_number == padded)
+        ).all()
+        for bn in query:
+            if bn.bus_id: candidate_bus_ids.add(bn.bus_id)
+
+    if not candidate_bus_ids:
+        candidate_bus_ids.add(s_id)
+        
+    return list(candidate_bus_ids)
+
+
 def _haversine_meters(lat1, lng1, lat2, lng2):
+
     """
     Return great-circle distance between two (lat, lng) points in meters.
     Uses WGS84 Earth radius ~6371000 m.
@@ -906,6 +958,14 @@ def trace_upstream_bfs(app, start_bus_ids):
 
     visited_set = set()
     queue = []
+    
+    # Identify substation bus IDs (Pole 1 explicitly requested by user)
+    substation_buses = set()
+    try:
+        from models import BusNode
+        for bn in BusNode.query.filter_by(pole_number='1').all():
+            if bn.bus_id: substation_buses.add(bn.bus_id)
+    except: pass
 
     for sid in start_bus_ids:
         if sid and sid in graph:
@@ -914,6 +974,11 @@ def trace_upstream_bfs(app, start_bus_ids):
 
     while queue:
         node = queue.pop(0)
+        
+        # Stop upstream tracing if we hit the designated substation
+        if node == '1' or node in substation_buses:
+            continue
+
         for neighbor in graph.get(node, []):
             if neighbor not in visited_set:
                 visited_set.add(neighbor)

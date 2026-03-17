@@ -1,0 +1,42 @@
+{
+  "VR": {
+    "stats": {
+      "created": 239,
+      "updated": 0,
+      "skipped": 0,
+      "errors": [],
+      "upload_id": 15
+    },
+    "db_count": 239
+  },
+  "SC": {
+    "stats": {
+      "created": 0,
+      "updated": 239,
+      "skipped": 0,
+      "errors": [],
+      "upload_id": 16
+    },
+    "db_count": 238
+  },
+  "SI": {
+    "stats": {
+      "created": 239,
+      "updated": 0,
+      "skipped": 0,
+      "errors": [],
+      "upload_id": 17
+    },
+    "db_count": 239
+  },
+  "SeriesI": {
+    "stats": {
+      "created": 239,
+      "updated": 0,
+      "skipped": 0,
+      "errors": [],
+      "upload_id": 18
+    },
+    "db_count": 239
+  }
+}

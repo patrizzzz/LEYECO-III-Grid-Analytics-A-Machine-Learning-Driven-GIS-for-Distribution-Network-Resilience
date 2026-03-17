@@ -1,5 +1,5 @@
 from services.importers.base_importer import BaseImporter, sanitize_float
-from models import Post, BusNode, DistributionTransformer, UploadHistory
+from models import Post, BusNode, DistributionTransformer, UploadHistory, VoltageRegulator, ShuntCapacitor, ShuntInductor, SeriesInductor
 from extensions import db
 from services.linkage_service import LinkageService
 
@@ -84,6 +84,7 @@ class BusNodeImporter(BaseImporter):
                 p = existing_posts.get(str(node.pole_number).strip().lower())
                 if p:
                     node.lat, node.lng = p.lat, p.lng
+                    p.feeder = node.feeder
 
 class TransformerImporter(BaseImporter):
     file_type = 'transformers'
@@ -152,3 +153,201 @@ class TransformerImporter(BaseImporter):
                 linked_post.has_transformer = True
                 linked_post.kva_rating = tx.kva_rating
                 linked_post.transformer_bus_id = tx.from_primary_bus_id or tx.to_secondary_bus_id
+
+
+class VoltageRegulatorImporter(BaseImporter):
+    file_type = 'voltage_regulators'
+    model_class = VoltageRegulator
+    header_mappings = {
+        'regulator_id': ['Voltage Regulator ID', 'Regulator ID', 'regulator_id'],
+        'from_bus_id': ['From \nBus ID', 'From Bus ID', 'from_bus'],
+        'to_bus_id': ['To  \nBus ID', 'To Bus ID', 'to_bus'],
+        'regulated_bus_id': ['Regulated Bus ID'],
+        'phase_type': ['Phase Type'],
+        'phasing': ['Phasing'],
+        'phase_sense': ['Phase Sense'],
+        'kva_rating': ['KVA Rating ', 'kVA Rating', 'kva'],
+        'kv_rating': ['KV Rating ', 'kV Rating', 'kv'],
+        'target_voltage': ['Target Voltage (120V base)', 'Target Voltage'],
+        'bandwidth': ['Bandwidth     (120V base)', 'Bandwidth'],
+        'r_setting_a': ['R-Setting Phase A'],
+        'r_setting_b': ['R-Setting Phase B'],
+        'r_setting_c': ['R-Setting Phase C'],
+        'x_setting_a': ['X-Setting Phase A'],
+        'x_setting_b': ['X-Setting Phase B'],
+        'x_setting_c': ['X-Setting Phase C'],
+        'primary_current_rating': ['Primary Current Rating (A)', 'Primary Current Rating'],
+        'pt_ratio': ['PT Ratio'],
+        'no_load_loss_kw': ['No-Load Loss (kW)'],
+        'exciting_current_pct': ['Exciting Current (%)'],
+    }
+
+    def process_rows(self, reader):
+        existing = {str(r.regulator_id).strip().lower(): r for r in VoltageRegulator.query.all() if r.regulator_id}
+        for row in reader:
+            reg_id = self.get_val(row, 'regulator_id')
+            if not reg_id: continue
+            key = str(reg_id).strip().lower()
+            record = existing.get(key)
+            if not record:
+                record = VoltageRegulator(regulator_id=reg_id)
+                db.session.add(record)
+                existing[key] = record
+                self.stats['created'] += 1
+            else:
+                self.stats['updated'] += 1
+
+            record.from_bus_id = self.get_val(row, 'from_bus_id')
+            record.to_bus_id = self.get_val(row, 'to_bus_id')
+            record.regulated_bus_id = self.get_val(row, 'regulated_bus_id')
+            record.phase_type = self.get_val(row, 'phase_type')
+            record.phasing = self.get_val(row, 'phasing')
+            record.phase_sense = self.get_val(row, 'phase_sense')
+            record.kva_rating = sanitize_float(self.get_val(row, 'kva_rating'))
+            record.kv_rating = sanitize_float(self.get_val(row, 'kv_rating'))
+            record.target_voltage = sanitize_float(self.get_val(row, 'target_voltage'))
+            record.bandwidth = sanitize_float(self.get_val(row, 'bandwidth'))
+            record.r_setting_a = sanitize_float(self.get_val(row, 'r_setting_a'))
+            record.r_setting_b = sanitize_float(self.get_val(row, 'r_setting_b'))
+            record.r_setting_c = sanitize_float(self.get_val(row, 'r_setting_c'))
+            record.x_setting_a = sanitize_float(self.get_val(row, 'x_setting_a'))
+            record.x_setting_b = sanitize_float(self.get_val(row, 'x_setting_b'))
+            record.x_setting_c = sanitize_float(self.get_val(row, 'x_setting_c'))
+            record.primary_current_rating = sanitize_float(self.get_val(row, 'primary_current_rating'))
+            record.pt_ratio = sanitize_float(self.get_val(row, 'pt_ratio'))
+            record.no_load_loss_kw = sanitize_float(self.get_val(row, 'no_load_loss_kw'))
+            record.exciting_current_pct = sanitize_float(self.get_val(row, 'exciting_current_pct'))
+            record.upload_id = self.current_upload_id
+
+
+class ShuntCapacitorImporter(BaseImporter):
+    file_type = 'shunt_capacitors'
+    model_class = ShuntCapacitor
+    header_mappings = {
+        'capacitor_id': ['Shunt Capacitor ID', 'Capacitor ID', 'capacitor_id'],
+        'bus_connected_id': ['Bus Connected \n(Bus ID)', 'Bus Connected ID'],
+        'phase_type': ['Phase Type'],
+        'phasing': ['Phasing'],
+        'voltage_rating_kv': ['Voltage Rating (kV)'],
+        'kvar_rating_a': ['KVAR Rating Phase A', 'kVAR Rating Phase A'],
+        'kvar_rating_b': ['KVAR Rating Phase B', 'kVAR Rating Phase B'],
+        'kvar_rating_c': ['KVAR Rating Phase C', 'kVAR Rating Phase C'],
+        'power_loss_watts': ['Power Loss (Watts)'],
+    }
+
+    def process_rows(self, reader):
+        existing = {str(r.capacitor_id).strip().lower(): r for r in ShuntCapacitor.query.all() if r.capacitor_id}
+        for row in reader:
+            cap_id = self.get_val(row, 'capacitor_id')
+            if not cap_id: continue
+            key = str(cap_id).strip().lower()
+            record = existing.get(key)
+            if not record:
+                record = ShuntCapacitor(capacitor_id=cap_id)
+                db.session.add(record)
+                existing[key] = record
+                self.stats['created'] += 1
+            else:
+                self.stats['updated'] += 1
+
+            record.bus_connected_id = self.get_val(row, 'bus_connected_id')
+            record.phase_type = self.get_val(row, 'phase_type')
+            record.phasing = self.get_val(row, 'phasing')
+            record.voltage_rating_kv = sanitize_float(self.get_val(row, 'voltage_rating_kv'))
+            record.kvar_rating_a = sanitize_float(self.get_val(row, 'kvar_rating_a'))
+            record.kvar_rating_b = sanitize_float(self.get_val(row, 'kvar_rating_b'))
+            record.kvar_rating_c = sanitize_float(self.get_val(row, 'kvar_rating_c'))
+            record.power_loss_watts = sanitize_float(self.get_val(row, 'power_loss_watts'))
+            record.upload_id = self.current_upload_id
+
+
+class ShuntInductorImporter(BaseImporter):
+    file_type = 'shunt_inductors'
+    model_class = ShuntInductor
+    header_mappings = {
+        'inductor_id': ['Shunt Inductor ID', 'Inductor ID', 'inductor_id'],
+        'bus_connected_id': ['Bus Connected\n(Bus ID)', 'Bus Connected \n(Bus ID)', 'Bus Connected ID'],
+        'phase_type': ['Phase Type'],
+        'phasing': ['Phasing'],
+        'voltage_rating_kv': ['Voltage Rating (kV)'],
+        'resistance_a': ['Resistance Phase A (Ohms)', 'Resistance Phase A'],
+        'resistance_b': ['Resistance Phase B (Ohms)', 'Resistance Phase B'],
+        'resistance_c': ['Resistance Phase C (Ohms)', 'Resistance Phase C'],
+        'reactance_a': ['Reactance\nPhase A (Ohms)', 'Reactance \nPhase A (Ohms)', 'Reactance Phase A'],
+        'reactance_b': ['Reactance \nPhase B (Ohms)', 'Reactance Phase B'],
+        'reactance_c': ['Reactance \nPhase C (Ohms)', 'Reactance Phase C'],
+    }
+
+    def process_rows(self, reader):
+        existing = {str(r.inductor_id).strip().lower(): r for r in ShuntInductor.query.all() if r.inductor_id}
+        for row in reader:
+            ind_id = self.get_val(row, 'inductor_id')
+            if not ind_id: continue
+            key = str(ind_id).strip().lower()
+            record = existing.get(key)
+            if not record:
+                record = ShuntInductor(inductor_id=ind_id)
+                db.session.add(record)
+                existing[key] = record
+                self.stats['created'] += 1
+            else:
+                self.stats['updated'] += 1
+
+            record.bus_connected_id = self.get_val(row, 'bus_connected_id')
+            record.phase_type = self.get_val(row, 'phase_type')
+            record.phasing = self.get_val(row, 'phasing')
+            record.voltage_rating_kv = sanitize_float(self.get_val(row, 'voltage_rating_kv'))
+            record.resistance_a = sanitize_float(self.get_val(row, 'resistance_a'))
+            record.resistance_b = sanitize_float(self.get_val(row, 'resistance_b'))
+            record.resistance_c = sanitize_float(self.get_val(row, 'resistance_c'))
+            record.reactance_a = sanitize_float(self.get_val(row, 'reactance_a'))
+            record.reactance_b = sanitize_float(self.get_val(row, 'reactance_b'))
+            record.reactance_c = sanitize_float(self.get_val(row, 'reactance_c'))
+            record.upload_id = self.current_upload_id
+
+
+class SeriesInductorImporter(BaseImporter):
+    file_type = 'series_inductors'
+    model_class = SeriesInductor
+    header_mappings = {
+        'inductor_id': ['Series Inductor ID', 'Inductor ID', 'inductor_id'],
+        'from_bus_id': ['From \nBus ID', 'From Bus ID'],
+        'to_bus_id': ['To  \nBus ID', 'To Bus ID'],
+        'phase_type': ['Phase Type'],
+        'phasing': ['Phasing'],
+        'voltage_rating_kv': ['Voltage Rating (kV)'],
+        'resistance_a': ['Resistance Phase A (Ohms)', 'Resistance Phase A'],
+        'resistance_b': ['Resistance Phase B (Ohms)', 'Resistance Phase B'],
+        'resistance_c': ['Resistance Phase C (Ohms)', 'Resistance Phase C'],
+        'reactance_a': ['Reactance Phase A (Ohms)', 'Reactance Phase A'],
+        'reactance_b': ['Reactance Phase B (Ohms)', 'Reactance Phase B'],
+        'reactance_c': ['Reactance Phase C (Ohms)', 'Reactance Phase C'],
+    }
+
+    def process_rows(self, reader):
+        existing = {str(r.inductor_id).strip().lower(): r for r in SeriesInductor.query.all() if r.inductor_id}
+        for row in reader:
+            ind_id = self.get_val(row, 'inductor_id')
+            if not ind_id: continue
+            key = str(ind_id).strip().lower()
+            record = existing.get(key)
+            if not record:
+                record = SeriesInductor(inductor_id=ind_id)
+                db.session.add(record)
+                existing[key] = record
+                self.stats['created'] += 1
+            else:
+                self.stats['updated'] += 1
+
+            record.from_bus_id = self.get_val(row, 'from_bus_id')
+            record.to_bus_id = self.get_val(row, 'to_bus_id')
+            record.phase_type = self.get_val(row, 'phase_type')
+            record.phasing = self.get_val(row, 'phasing')
+            record.voltage_rating_kv = sanitize_float(self.get_val(row, 'voltage_rating_kv'))
+            record.resistance_a = sanitize_float(self.get_val(row, 'resistance_a'))
+            record.resistance_b = sanitize_float(self.get_val(row, 'resistance_b'))
+            record.resistance_c = sanitize_float(self.get_val(row, 'resistance_c'))
+            record.reactance_a = sanitize_float(self.get_val(row, 'reactance_a'))
+            record.reactance_b = sanitize_float(self.get_val(row, 'reactance_b'))
+            record.reactance_c = sanitize_float(self.get_val(row, 'reactance_c'))
+            record.upload_id = self.current_upload_id
