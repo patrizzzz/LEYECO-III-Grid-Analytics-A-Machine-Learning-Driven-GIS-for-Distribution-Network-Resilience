@@ -979,8 +979,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const isTransformer = p.has_transformer === true || (p.kva_rating != null && p.kva_rating > 0);
     const iconToUse = isTransformer ? transformerPoleIcon : poleIcon;
     const titleText = (p.name || `Post ${p.id}`) + (isTransformer ? ' (Transformer)' : '');
-    const marker = L.marker([lat, lng], { title: titleText, icon: iconToUse })
-      .bindPopup(popupHtml, { maxWidth: 400, minWidth: 280 });
+    const marker = L.marker([lat, lng], { title: titleText, icon: iconToUse });
 
     // Store post data on marker for later access (connections, etc.)
     marker._postData = p;
@@ -1027,9 +1026,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     bounds.extend([lat, lng]);
 
-    // support connection mode: click marker to add to connection
     marker.on('click', function (e) {
-      // If selection mode is active, toggle selection instead of normal connection flow
       if (window._selectionMode) {
         toggleSelect(p.id, lat, lng, marker);
         return;
@@ -1037,15 +1034,50 @@ document.addEventListener('DOMContentLoaded', function () {
 
       if (connectionMode) {
         addPointToConnection({ post_id: p.id, lat: lat, lng: lng });
+        return;
       }
-    });
+      
+      const inspectorContent = document.getElementById('inspector-content');
+      const layoutEl = document.querySelector('.premium-layout');
+      if (inspectorContent && layoutEl) {
+        layoutEl.classList.add('inspector-open');
 
-    // Attach popup button handlers on popupopen
-    marker.on('popupopen', function () {
-      const popupEl = marker.getPopup().getElement();
-      if (!popupEl) return;
+        // Manage active marker state
+        if (window._selectionIndicatorMarker) {
+          map.removeLayer(window._selectionIndicatorMarker);
+        }
+        window._selectionIndicatorMarker = L.marker([lat, lng], {
+          icon: L.divIcon({
+            className: 'custom-selection-indicator',
+            html: '<div class="selection-tooltip">Selected</div>',
+            iconSize: [80, 30],
+            iconAnchor: [40, 85] // Position above the 70px pole icon
+          }),
+          interactive: false,
+          zIndexOffset: 1000
+        }).addTo(map);
 
-      // Tab switching logic
+        inspectorContent.innerHTML = `
+          <div class="inspector-view-layer">
+            <div class="inspector-header">
+              <h3 style="margin:0; font-size:1.1rem; color:var(--text-primary);">Asset Inspector</h3>
+              <button id="close-inspector-inner" class="btn-icon" style="background:var(--surface-secondary);border-radius:50%;">✕</button>
+            </div>
+            <div class="inspector-body">
+              ${popupHtml}
+            </div>
+          </div>
+        `;
+        
+        document.getElementById('close-inspector-inner').onclick = () => {
+          layoutEl.classList.remove('inspector-open');
+          if (window._selectionIndicatorMarker) {
+            map.removeLayer(window._selectionIndicatorMarker);
+            window._selectionIndicatorMarker = null;
+          }
+        };
+
+        const popupEl = inspectorContent;
       const tabLinks = popupEl.querySelectorAll('.tab-link');
       const tabContents = popupEl.querySelectorAll('.tab-content');
       tabLinks.forEach(link => {
@@ -1529,13 +1561,18 @@ document.addEventListener('DOMContentLoaded', function () {
               const customers = result.customer_details || [];
               if (customers.length > 0) {
                 html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Affected Customers List</div>';
-                html += '<div class="table-scroll" style="max-height:200px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px;">';
-                html += '<table style="width:100%; border-collapse:collapse; font-size:12px;">';
-                html += '<thead style="background:#f8fafc; position:sticky; top:0;"><tr style="border-bottom:1px solid #e2e8f0;"><th style="padding:8px; text-align:left; color:#64748b;">Customer</th><th style="padding:8px; text-align:left; color:#64748b;">Type</th><th style="padding:8px; text-align:right; color:#64748b;">kWh</th></tr></thead><tbody>';
+                html += '<div class="table-scroll" style="max-height:220px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px; scrollbar-gutter: stable;">';
+                html += '<table style="width:100%; border-collapse:collapse; font-size:12px; table-layout: fixed;">';
+                html += '<thead style="background:#f8fafc; position:sticky; top:0; z-index:10;"><tr style="border-bottom:1px solid #e2e8f0;">';
+                html += '<th style="padding:10px 8px; text-align:left; color:#64748b; width: 55%;">Customer</th>';
+                html += '<th style="padding:10px 8px; text-align:left; color:#64748b; width: 22%;">Type</th>';
+                html += '<th style="padding:10px 12px; text-align:right; color:#64748b; width: 23%;">kWh</th></tr></thead><tbody>';
                 customers.forEach(function (c) {
-                  html += '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:8px;"><div><strong>' + (c.name || 'N/A') + '</strong></div><div style="font-size:10px; color:#94a3b8;">' + (c.customer_id || '') + '</div></td>';
-                  html += '<td style="padding:8px;"><span style="display:inline-block; padding:2px 6px; background:#e0f2fe; color:#0369a1; border-radius:4px; font-size:10px; font-weight:600;">' + (c.type || 'RES') + '</span></td>';
-                  html += '<td style="padding:8px; text-align:right; font-weight:600;">' + (c.load_kwh || 0) + '</td></tr>';
+                  const kwhFormatted = (c.load_kwh || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                  html += '<tr style="border-bottom:1px solid #f1f5f9; transition: background 0.2s;"><td style="padding:10px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">';
+                  html += '<div><strong title="' + (c.name || 'N/A') + '">' + (c.name || 'N/A') + '</strong></div><div style="font-size:10px; color:#94a3b8;">' + (c.customer_id || '') + '</div></td>';
+                  html += '<td style="padding:10px 8px;"><span style="display:inline-block; padding:2px 8px; background:#e0f2fe; color:#0369a1; border-radius:4px; font-size:10px; font-weight:700;">' + (c.type || 'RES') + '</span></td>';
+                  html += '<td style="padding:10px 12px; text-align:right; font-weight:600; color: #334155;">' + kwhFormatted + '</td></tr>';
                 });
                 html += '</tbody></table></div>';
               }
@@ -1689,6 +1726,7 @@ document.addEventListener('DOMContentLoaded', function () {
           // trigger file download
           window.location = '/api/export/post/' + p.id;
         });
+      }
       }
     });
 
@@ -2135,85 +2173,45 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
 
-  // Success/result modal (replaces alert after connecting)
-  let _resultModal = null;
-  function createResultModal() {
-    if (_resultModal) return _resultModal;
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay result-modal-overlay';
-    overlay.setAttribute('aria-label', 'Connection result');
-    overlay.innerHTML = `
-      <div class="modal result-modal">
-        <div class="modal-header result-modal-header">
-          <h3 class="result-modal-title">Connection saved</h3>
-          <button class="modal-close result-modal-close" aria-label="Close">✕</button>
-        </div>
-        <div class="modal-body result-modal-body">
-          <p class="result-modal-message"></p>
-          <div class="result-modal-details"></div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn result-modal-ok">OK</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.querySelector('.result-modal-close').addEventListener('click', closeResultModal);
-    overlay.querySelector('.result-modal-ok').addEventListener('click', closeResultModal);
-    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeResultModal(); });
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeResultModal(); });
-    _resultModal = overlay;
-    return _resultModal;
-  }
   function showResultModal(options) {
-    const m = createResultModal();
-    const titleEl = m.querySelector('.result-modal-title');
-    const messageEl = m.querySelector('.result-modal-message');
-    const detailsEl = m.querySelector('.result-modal-details');
-    const header = m.querySelector('.result-modal-header');
-    if (options.error) {
-      titleEl.textContent = 'Connection failed';
-      header.className = 'modal-header result-modal-header result-modal-header-error';
-      messageEl.textContent = options.message || options.error;
-      detailsEl.innerHTML = '';
-    } else if (options.customTitle) {
-      // allow arbitrary title for reuse (eg. deletion notices)
-      titleEl.textContent = options.customTitle;
-      header.className = 'modal-header result-modal-header';
-      messageEl.textContent = options.message || '';
-      detailsEl.innerHTML = '';
-    } else {
-      titleEl.textContent = options.count === 0 && options.id != null ? 'Post added' : (options.count > 1 ? 'Connections saved' : 'Connection saved');
-      header.className = 'modal-header result-modal-header';
-      messageEl.textContent = options.message || (options.name ? `"${options.name}" has been saved.` : 'Connection has been saved.');
-      const length = options.length != null ? options.length : 0;
-      const count = options.count != null ? options.count : (options.id != null ? 1 : 0);
-
-      let gridHtml = '';
-      if (count > 1) {
-        gridHtml += `<div class="kv-item"><div class="kv-label">Segments saved</div><div class="kv-value">${count} post-to-post</div></div>`;
-        gridHtml += `<div class="kv-item"><div class="kv-label">Total length</div><div class="kv-value">${formatMeters(length)}</div></div>`;
-      } else if (count === 0 && options.id != null) {
-        gridHtml += `<div class="kv-item"><div class="kv-label">Post ID</div><div class="kv-value">${options.id}</div></div>`;
+      let title = '';
+      let msg = '';
+      let isError = false;
+      
+      if (options.error) {
+        title = 'Connection failed';
+        msg = options.message || options.error;
+        isError = true;
+      } else if (options.customTitle) {
+        title = options.customTitle;
+        msg = options.message || '';
       } else {
-        gridHtml += `<div class="kv-item"><div class="kv-label">Connection ID</div><div class="kv-value">${options.id != null ? options.id : '—'}</div></div>`;
-        gridHtml += `<div class="kv-item"><div class="kv-label">Length</div><div class="kv-value">${formatMeters(length)}</div></div>`;
+        title = options.count === 0 && options.id != null ? 'Post added' : (options.count > 1 ? 'Connections saved' : 'Connection saved');
+        msg = options.message || (options.name ? `"${options.name}" has been saved.` : 'Connection has been saved.');
       }
-
-      detailsEl.innerHTML = `
-        <div class="info-card">
-          <div class="kv-grid">
-            ${gridHtml}
-          </div>
-        </div>
-      `;
-    }
-    m.style.display = 'flex';
-    m.tabIndex = -1;
-    m.focus();
-  }
-  function closeResultModal() {
-    if (_resultModal) _resultModal.style.display = 'none';
+      
+      let html = `<div class="info-card ${isError ? 'error-card' : ''}">`;
+      html += `<p style="margin-bottom: 15px; ${isError ? 'color: var(--danger); font-weight: 500;' : ''}">${msg}</p>`;
+      
+      if (!isError && !options.customTitle) {
+          const length = options.length != null ? options.length : 0;
+          const count = options.count != null ? options.count : (options.id != null ? 1 : 0);
+          
+          html += '<div class="kv-grid">';
+          if (count > 1) {
+            html += `<div class="kv-item"><div class="kv-label">Segments saved</div><div class="kv-value">${count} post-to-post</div></div>`;
+            html += `<div class="kv-item"><div class="kv-label">Total length</div><div class="kv-value">${formatMeters(length)}</div></div>`;
+          } else if (count === 0 && options.id != null) {
+            html += `<div class="kv-item"><div class="kv-label">Post ID</div><div class="kv-value">${options.id}</div></div>`;
+          } else {
+            html += `<div class="kv-item"><div class="kv-label">Connection ID</div><div class="kv-value">${options.id != null ? options.id : '—'}</div></div>`;
+            html += `<div class="kv-item"><div class="kv-label">Length</div><div class="kv-value">${formatMeters(length)}</div></div>`;
+          }
+          html += '</div>';
+      }
+      html += '</div>';
+      
+      renderInInspector(title, html);
   }
 
   // --- Primary line-overhead modal (post technical data) ---
@@ -2240,68 +2238,20 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'height_hn', label: 'Height Hn' },
     { key: 'earth_resistivity', label: 'Earth resistivity' }
   ];
-  function createPrimaryLineOverheadModal() {
-    if (_primaryLineOverheadModal) return _primaryLineOverheadModal;
-    var overlay = document.createElement('div');
-    overlay.className = 'modal-overlay primary-line-overhead-modal-overlay';
-    overlay.setAttribute('aria-label', 'Primary line-overhead');
-    overlay.innerHTML = [
-      '<div class="modal result-modal" style="max-width: 500px; width: 90vw;">',
-      '  <div class="modal-header result-modal-header">',
-      '    <h3 class="result-modal-title">Primary line-overhead</h3>',
-      '    <button class="modal-close primary-line-overhead-close" aria-label="Close">✕</button>',
-      '  </div>',
-      '  <div class="modal-body result-modal-body primary-line-overhead-body enhanced-body" style="max-height: 70vh; overflow-y: auto;">',
-      '    <div class="primary-line-overhead-content"></div>',
-      '  </div>',
-      '  <div class="modal-footer"><button class="btn result-modal-ok primary-line-overhead-ok">OK</button></div>',
-      '</div>'
-    ].join('');
-    document.body.appendChild(overlay);
-    overlay.querySelector('.primary-line-overhead-close').addEventListener('click', closePrimaryLineOverheadModal);
-    overlay.querySelector('.primary-line-overhead-ok').addEventListener('click', closePrimaryLineOverheadModal);
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) closePrimaryLineOverheadModal(); });
-    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closePrimaryLineOverheadModal(); });
-    _primaryLineOverheadModal = overlay;
-    return _primaryLineOverheadModal;
-  }
   function showPrimaryLineOverheadModal(data) {
-    var m = createPrimaryLineOverheadModal();
-    var contentDiv = m.querySelector('.primary-line-overhead-content');
-    var title = m.querySelector('.result-modal-title');
-    title.textContent = 'Primary line-overhead' + (data && data.name ? ' — ' + data.name : '');
-
-    contentDiv.innerHTML = '';
-
-    const card = document.createElement('div');
-    card.className = 'info-card';
-
-    // Optional: Add a header to the card if needed, but for now just the grid
-    // card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Attributes</h4></div>`; 
-
-    const grid = document.createElement('div');
-    grid.className = 'kv-grid';
-
+    let title = 'Primary line-overhead' + (data && data.name ? ' — ' + data.name : '');
+    let html = '<div class="info-card"><div class="kv-grid">';
+    
     PRIMARY_LINE_OVERHEAD_FIELDS.forEach(function (f) {
       var val = data && data[f.key];
       if (val === undefined || val === null || val === '') val = '—';
       else if (typeof val === 'number') val = Number(val);
-
-      const item = document.createElement('div');
-      item.className = 'kv-item';
-      item.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
-      grid.appendChild(item);
+      
+      html += `<div class="kv-item"><div class="kv-label">${f.label}</div><div class="kv-value">${val}</div></div>`;
     });
-
-    card.appendChild(grid);
-    contentDiv.appendChild(card);
-
-    m.style.display = 'flex';
-    m.tabIndex = -1;
-    m.focus();
-  }
-  function closePrimaryLineOverheadModal() {
-    if (_primaryLineOverheadModal) _primaryLineOverheadModal.style.display = 'none';
+    
+    html += '</div></div>';
+    renderInInspector(title, html);
   }
 
   // --- Distribution Transformer modal ---
@@ -2327,45 +2277,9 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'exciting_current_pct', label: 'Exciting Current (%)' },
     { key: 'created_at', label: 'Created At' }
   ];
-  function createDistributionTransformerModal() {
-    if (_distributionTransformerModal) return _distributionTransformerModal;
-    var overlay = document.createElement('div');
-    overlay.className = 'modal-overlay distribution-transformer-modal-overlay';
-    overlay.setAttribute('aria-label', 'Distribution Transformer');
-    overlay.innerHTML = [
-      '<div class="modal result-modal" style="max-width: 520px; width: 90vw;">',
-      '  <div class="modal-header result-modal-header">',
-      '    <h3 class="result-modal-title">Distribution Transformer</h3>',
-      '    <button class="modal-close distribution-transformer-close" aria-label="Close">✕</button>',
-      '  </div>',
-      '  <div class="modal-body result-modal-body distribution-transformer-body enhanced-body" style="max-height: 70vh; overflow-y: auto;">',
-      '    <div class="distribution-transformer-content"></div>',
-      '  </div>',
-      '  <div class="modal-footer"><button class="btn result-modal-ok distribution-transformer-ok">OK</button></div>',
-      '</div>'
-    ].join('');
-    document.body.appendChild(overlay);
-    overlay.querySelector('.distribution-transformer-close').addEventListener('click', closeDistributionTransformerModal);
-    overlay.querySelector('.distribution-transformer-ok').addEventListener('click', closeDistributionTransformerModal);
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeDistributionTransformerModal(); });
-    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDistributionTransformerModal(); });
-    _distributionTransformerModal = overlay;
-    return _distributionTransformerModal;
-  }
   function showDistributionTransformerModal(data) {
-    var m = createDistributionTransformerModal();
-    var contentDiv = m.querySelector('.distribution-transformer-content');
-    var title = m.querySelector('.result-modal-title');
-    title.textContent = 'Distribution Transformer' + (data && data.transformer_id ? ' — ' + data.transformer_id : '');
-
-    contentDiv.innerHTML = '';
-
-    const card = document.createElement('div');
-    card.className = 'info-card';
-    // card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Equipment Details</h4></div>`;
-
-    const grid = document.createElement('div');
-    grid.className = 'kv-grid';
+    let title = 'Distribution Transformer' + (data && data.transformer_id ? ' — ' + data.transformer_id : '');
+    let html = '<div class="info-card"><div class="kv-grid">';
 
     DISTRIBUTION_TRANSFORMER_FIELDS.forEach(function (f) {
       var val = data && data[f.key];
@@ -2381,21 +2295,11 @@ document.addEventListener('DOMContentLoaded', function () {
         val = Number(val);
       }
 
-      const item = document.createElement('div');
-      item.className = 'kv-item';
-      item.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
-      grid.appendChild(item);
+      html += `<div class="kv-item"><div class="kv-label">${f.label}</div><div class="kv-value">${val}</div></div>`;
     });
 
-    card.appendChild(grid);
-    contentDiv.appendChild(card);
-
-    m.style.display = 'flex';
-    m.tabIndex = -1;
-    m.focus();
-  }
-  function closeDistributionTransformerModal() {
-    if (_distributionTransformerModal) _distributionTransformerModal.style.display = 'none';
+    html += '</div></div>';
+    renderInInspector(title, html);
   }
 
   // --- Secondary Line modal ---
@@ -2414,78 +2318,29 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'neutral_wire_size', label: 'Neutral Wire Size' }
   ];
 
-  function createSecondaryLineModal() {
-    if (_secondaryLineModal) return _secondaryLineModal;
-    var overlay = document.createElement('div');
-    overlay.className = 'modal-overlay secondary-line-modal-overlay';
-    overlay.setAttribute('aria-label', 'Secondary Lines');
-    overlay.innerHTML = [
-      '<div class="modal result-modal" style="max-width: 600px; width: 90vw;">',
-      '  <div class="modal-header result-modal-header">',
-      '    <h3 class="result-modal-title">Secondary Lines</h3>',
-      '    <button class="modal-close secondary-line-close" aria-label="Close">✕</button>',
-      '  </div>',
-      '  <div class="modal-body result-modal-body secondary-line-body enhanced-body" style="max-height: 70vh; overflow-y: auto;">',
-      '    <div class="secondary-line-content"></div>',
-      '  </div>',
-      '  <div class="modal-footer"><button class="btn result-modal-ok secondary-line-ok">OK</button></div>',
-      '</div>'
-    ].join('');
-    document.body.appendChild(overlay);
-    overlay.querySelector('.secondary-line-close').addEventListener('click', closeSecondaryLineModal);
-    overlay.querySelector('.secondary-line-ok').addEventListener('click', closeSecondaryLineModal);
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeSecondaryLineModal(); });
-    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSecondaryLineModal(); });
-    _secondaryLineModal = overlay;
-    return _secondaryLineModal;
-  }
-
   function showSecondaryLineModal(data) {
-    var m = createSecondaryLineModal();
-    var contentDiv = m.querySelector('.secondary-line-content');
-    var title = m.querySelector('.result-modal-title');
-
-    title.textContent = 'Secondary Lines (' + (data.count || 0) + ')';
-    contentDiv.innerHTML = '';
+    let title = 'Secondary Lines (' + (data.count || 0) + ')';
+    let html = '';
 
     if (!data.secondary_lines || data.secondary_lines.length === 0) {
-      contentDiv.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center; color:var(--text-secondary);">No secondary lines found for this bus.</div></div>';
+      html = '<div class="info-card"><div class="kv-value" style="text-align:center; color:var(--text-secondary);">No secondary lines found for this bus.</div></div>';
     } else {
-      // Create a list or series of DLs for multiple lines
       data.secondary_lines.forEach(function (line, idx) {
-
-        var card = document.createElement('div');
-        card.className = 'info-card';
-
         var lineId = line.secondary_line_id ? line.secondary_line_id : `Line #${idx + 1}`;
-        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">${lineId}</h4></div>`;
-
-        var grid = document.createElement('div');
-        grid.className = 'kv-grid';
+        html += `<div class="info-card"><div class="info-card-header"><h4 class="info-card-title">${lineId}</h4></div><div class="kv-grid">`;
 
         SECONDARY_LINE_FIELDS.forEach(function (f) {
           var val = line[f.key];
-          if (val === undefined || val === null || val === '') return; // Skip empty
+          if (val === undefined || val === null || val === '') return;
           if (typeof val === 'number') val = Number(val);
 
-          var item = document.createElement('div');
-          item.className = 'kv-item';
-          item.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
-          grid.appendChild(item);
+          html += `<div class="kv-item"><div class="kv-label">${f.label}</div><div class="kv-value">${val}</div></div>`;
         });
-
-        card.appendChild(grid);
-        contentDiv.appendChild(card);
+        html += '</div></div>';
       });
     }
 
-    m.style.display = 'flex';
-    m.tabIndex = -1;
-    m.focus();
-  }
-
-  function closeSecondaryLineModal() {
-    if (_secondaryLineModal) _secondaryLineModal.style.display = 'none';
+    renderInInspector(title, html);
   }
 
   // --- Secondary Service Drop modal ---
@@ -2502,156 +2357,77 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'length_meters_2', label: 'Length-2 (m)' }
   ];
 
-  function createServiceDropModal() {
-    if (_serviceDropModal) return _serviceDropModal;
-    var overlay = document.createElement('div');
-    overlay.className = 'modal-overlay service-drop-modal-overlay';
-    overlay.setAttribute('aria-label', 'Service Drops');
-    overlay.innerHTML = [
-      '<div class="modal result-modal" style="max-width: 600px; width: 90vw;">',
-      '  <div class="modal-header result-modal-header">',
-      '    <h3 class="result-modal-title">Secondary Service Drops</h3>',
-      '    <button class="modal-close service-drop-close" aria-label="Close">✕</button>',
-      '  </div>',
-      '  <div class="modal-body result-modal-body service-drop-body enhanced-body" style="max-height: 60vh; overflow-y: auto; padding: 12px 16px;">',
-      '    <div class="service-drop-content"></div>',
-      '  </div>',
-      '  <div class="modal-footer"><button class="btn result-modal-ok service-drop-ok">OK</button></div>',
-      '</div>'
-    ].join('');
-    document.body.appendChild(overlay);
-    overlay.querySelector('.service-drop-close').addEventListener('click', closeServiceDropModal);
-    overlay.querySelector('.service-drop-ok').addEventListener('click', closeServiceDropModal);
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeServiceDropModal(); });
-    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeServiceDropModal(); });
-    _serviceDropModal = overlay;
-    return _serviceDropModal;
-  }
-
   function showServiceDropModal(data) {
-    var m = createServiceDropModal();
-    var contentDiv = m.querySelector('.service-drop-content');
-    var title = m.querySelector('.result-modal-title');
-
-    title.textContent = 'Service Drops (' + (data.count || 0) + ')';
-    contentDiv.innerHTML = '';
+    let title = 'Service Drops (' + (data.count || 0) + ')';
+    let html = '';
 
     if (!data.service_drops || data.service_drops.length === 0) {
-      contentDiv.innerHTML = '<div class="info-card" style="text-align:center; color:var(--text-secondary);">No service drops found for this bus.</div>';
+      html = '<div class="info-card" style="text-align:center; color:var(--text-secondary);">No service drops found for this bus.</div>';
     } else {
       data.service_drops.forEach(function (drop, idx) {
-        var card = document.createElement('div');
-        card.className = 'info-card';
-
-        // Header
-        var header = document.createElement('div');
-        header.className = 'info-card-header';
-
-        var title = document.createElement('div');
-        title.className = 'info-card-title';
-        title.textContent = 'Drop #' + (idx + 1) + (drop.service_drop_id ? ' (' + drop.service_drop_id + ')' : '');
-        header.appendChild(title);
-
+        let cardHtml = '<div class="info-card">';
+        
+        let dropTitle = 'Drop #' + (idx + 1) + (drop.service_drop_id ? ' (' + drop.service_drop_id + ')' : '');
+        cardHtml += `<div class="info-card-header"><div class="info-card-title">${dropTitle}</div>`;
+        
         if (drop.to_customer_id) {
-          var cBtn = document.createElement('button');
-          cBtn.className = 'btn btn-sm';
-          cBtn.style.fontSize = '0.8rem';
-          cBtn.style.padding = '4px 12px';
-          cBtn.textContent = 'View Customer Info';
-          cBtn.onclick = function () { showCustomerInfoModal(drop.to_customer_id); };
-          header.appendChild(cBtn);
+          // Add a custom data attribute instead of an inline onclick handler to avoid evaluating JS directly here
+          cardHtml += `<button class="btn btn-sm view-customer-btn" data-cust-id="${drop.to_customer_id}" style="font-size: 0.8rem; padding: 4px 12px;">View Customer Info</button>`;
         }
-        card.appendChild(header);
-
-        // Grid
-        var grid = document.createElement('div');
-        grid.className = 'kv-grid';
+        cardHtml += '</div><div class="kv-grid">';
 
         SERVICE_DROP_FIELDS.forEach(function (f) {
           var val = drop[f.key];
           if (val === undefined || val === null || val === '') return;
-
-          var item = document.createElement('div');
-          item.className = 'kv-item';
-
-          var label = document.createElement('div');
-          label.className = 'kv-label';
-          label.textContent = f.label;
-
-          var value = document.createElement('div');
-          value.className = 'kv-value';
-          value.textContent = val;
-
-          item.appendChild(label);
-          item.appendChild(value);
-          grid.appendChild(item);
+          cardHtml += `<div class="kv-item"><div class="kv-label">${f.label}</div><div class="kv-value">${val}</div></div>`;
         });
-        card.appendChild(grid);
-        contentDiv.appendChild(card);
+        
+        cardHtml += '</div></div>';
+        html += cardHtml;
       });
     }
 
-    m.style.display = 'flex';
-    m.tabIndex = -1;
-    m.focus();
-  }
+    renderInInspector(title, html);
 
-  function closeServiceDropModal() {
-    if (_serviceDropModal) _serviceDropModal.style.display = 'none';
+    // Attach event listeners for customer view since we used custom HTML
+    const inspectorContent = document.getElementById('inspector-content');
+    if (inspectorContent) {
+        const btns = inspectorContent.querySelectorAll('.view-customer-btn');
+        btns.forEach(btn => {
+            btn.onclick = () => showCustomerInfoModal(btn.getAttribute('data-cust-id'));
+        });
+    }
   }
 
   // --- Confirmation modal (replaces window.confirm) ---
   let _confirmModal = null;
-  function createConfirmModal() {
-    if (_confirmModal) return _confirmModal;
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay confirm-modal-overlay';
-    overlay.setAttribute('aria-label', 'Confirm');
-    overlay.innerHTML = `
-      <div class="modal">
-        <div class="modal-header">
-          <h3 class="confirm-title">Confirm</h3>
-          <button class="modal-close confirm-close" aria-label="Close">✕</button>
-        </div>
-        <div class="modal-body confirm-body">
-          <p class="confirm-message"></p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn confirm-cancel">Cancel</button>
-          <button class="btn btn-danger confirm-ok">Delete</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.querySelector('.confirm-close').addEventListener('click', () => { overlay.style.display = 'none'; });
-    overlay.querySelector('.confirm-cancel').addEventListener('click', () => { overlay.style.display = 'none'; });
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
-    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') overlay.style.display = 'none'; });
-    _confirmModal = overlay;
-    return _confirmModal;
-  }
   function showConfirmModal(message, opts) {
     opts = opts || {};
-    const m = createConfirmModal();
-    m.querySelector('.confirm-title').textContent = opts.title || 'Confirm';
-    m.querySelector('.confirm-message').textContent = message || '';
-    const ok = m.querySelector('.confirm-ok');
-    ok.textContent = opts.okText || 'Delete';
-    const cancel = m.querySelector('.confirm-cancel');
-    cancel.textContent = opts.cancelText || 'Cancel';
-    m.style.display = 'flex';
-    m.tabIndex = -1;
-    m.focus();
     return new Promise((resolve) => {
-      function cleanup() {
-        ok.removeEventListener('click', onOk);
-        cancel.removeEventListener('click', onCancel);
-        m.style.display = 'none';
+      let html = `
+        <div class="info-card">
+          <p style="margin-bottom: 20px; font-weight: 500; font-size: 1.05rem;">${message}</p>
+          <div style="display: flex; gap: 10px; justify-content: flex-end; padding-top: 10px; border-top: 1px solid var(--border);">
+            <button class="btn btn-secondary inspector-confirm-cancel">${opts.cancelText || 'Cancel'}</button>
+            <button class="btn btn-danger inspector-confirm-ok">${opts.okText || 'Confirm'}</button>
+          </div>
+        </div>
+      `;
+      renderInInspector(opts.title || 'Confirm', html);
+
+      const inspectorContent = document.getElementById('inspector-content');
+      if (inspectorContent) {
+        const okBtn = inspectorContent.querySelector('.inspector-confirm-ok');
+        const cancelBtn = inspectorContent.querySelector('.inspector-confirm-cancel');
+        
+        function cleanup() {
+            const layoutEl = document.querySelector('.premium-layout');
+            if (layoutEl) layoutEl.classList.remove('inspector-open');
+        }
+        
+        if (okBtn) okBtn.onclick = () => { cleanup(); resolve(true); };
+        if (cancelBtn) cancelBtn.onclick = () => { cleanup(); resolve(false); };
       }
-      function onOk() { cleanup(); resolve(true); }
-      function onCancel() { cleanup(); resolve(false); }
-      ok.addEventListener('click', onOk);
-      cancel.addEventListener('click', onCancel);
     });
   }
 
@@ -2684,13 +2460,110 @@ document.addEventListener('DOMContentLoaded', function () {
     _noticeModal = overlay;
     return _noticeModal;
   }
+
+  // --- Global Inspector Renderer ---
+  function renderInInspector(title, htmlString) {
+    const inspectorContent = document.getElementById('inspector-content');
+    const layoutEl = document.querySelector('.premium-layout');
+    if (inspectorContent && layoutEl) {
+        layoutEl.classList.add('inspector-open');
+        
+        // Hide existing children to create a history stack
+        const children = Array.from(inspectorContent.children);
+        let hasPrevious = false;
+        
+        children.forEach(child => {
+            if (child.style.display !== 'none' && !child.classList.contains('inspector-hidden-for-subview')) {
+                hasPrevious = true;
+                child.dataset.oldDisplay = child.style.display || '';
+                child.style.display = 'none';
+                child.classList.add('inspector-hidden-for-subview');
+            }
+        });
+
+        const newView = document.createElement('div');
+        newView.className = 'inspector-view-layer';
+        newView.style.display = 'block';
+        
+        newView.innerHTML = `
+          <div class="inspector-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+              ${hasPrevious ? `<button class="btn-icon btn-inspector-back" style="background:transparent; padding:4px;" title="Go Back">←</button>` : ''}
+              <h3 style="margin:0; font-size:1.1rem; color:var(--text-primary);">${title}</h3>
+            </div>
+            <button class="btn-icon close-inspector-layer" style="background:var(--surface-secondary);border-radius:50%;">✕</button>
+          </div>
+          <div class="inspector-body">${htmlString}</div>
+          
+          <div class="inspector-footer">
+             ${hasPrevious ? `<button class="btn btn-secondary btn-inspector-footer-back">Back</button>` : ''}
+             <button class="btn btn-primary btn-inspector-ok">OK</button>
+          </div>
+        `;
+        
+        inspectorContent.appendChild(newView);
+
+        const closeHandler = () => {
+            layoutEl.classList.remove('inspector-open');
+            // Clean up all dynamically added subviews and restore original root
+            const allLayers = inspectorContent.querySelectorAll('.inspector-view-layer');
+            allLayers.forEach(layer => layer.remove());
+            
+            const rootLayer = inspectorContent.querySelector('.inspector-root-layer');
+            if (rootLayer) {
+                rootLayer.style.display = rootLayer.dataset.oldDisplay || 'block';
+                rootLayer.classList.remove('inspector-hidden-for-subview');
+            }
+
+            if (window._selectionIndicatorMarker) {
+                if (window._mapInstance) {
+                   window._mapInstance.removeLayer(window._selectionIndicatorMarker);
+                } else if (typeof map !== 'undefined') {
+                   map.removeLayer(window._selectionIndicatorMarker);
+                }
+                window._selectionIndicatorMarker = null;
+            }
+        };
+
+        const backHandler = () => {
+            newView.remove(); // Remove this current layer
+            
+            // Find the most recently hidden layer and restore it
+            const hiddenLayers = Array.from(inspectorContent.children).filter(c => c.classList.contains('inspector-hidden-for-subview'));
+            if (hiddenLayers.length > 0) {
+                const lastHidden = hiddenLayers[hiddenLayers.length - 1];
+                lastHidden.style.display = lastHidden.dataset.oldDisplay || 'block';
+                lastHidden.classList.remove('inspector-hidden-for-subview');
+            }
+        };
+
+        const closeBtn = newView.querySelector('.close-inspector-layer');
+        if (closeBtn) closeBtn.onclick = closeHandler;
+        
+        const okBtn = newView.querySelector('.btn-inspector-ok');
+        // OK acts as "Back" if there's a history, otherwise it closes.
+        if (okBtn) okBtn.onclick = hasPrevious ? backHandler : closeHandler;
+
+        const backBtnTop = newView.querySelector('.btn-inspector-back');
+        if (backBtnTop) backBtnTop.onclick = backHandler;
+
+        const backBtnFooter = newView.querySelector('.btn-inspector-footer-back');
+        if (backBtnFooter) backBtnFooter.onclick = backHandler;
+
+    } else {
+        // Fallback if inspector is not present in the DOM (e.g. some other page)
+        const m = createNoticeModal();
+        m.querySelector('.notice-title').textContent = title || 'Notice';
+        m.querySelector('.notice-message').innerHTML = htmlString || '';
+        m.style.display = 'flex';
+        m.tabIndex = -1;
+        m.focus();
+    }
+  }
+
   function showNoticeModal(title, message) {
-    const m = createNoticeModal();
-    m.querySelector('.notice-title').textContent = title || 'Notice';
-    m.querySelector('.notice-message').innerHTML = message || '';
-    m.style.display = 'flex';
-    m.tabIndex = -1;
-    m.focus();
+     const html = `<div class="info-card"><p style="margin:0; font-size:1.05rem;">${message || ''}</p></div>`;
+     renderInInspector(title || 'Notice', html);
   }
 
   // Save a connection from the current points
@@ -2872,66 +2745,30 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'primary_current_rating', label: 'Pri. Current (A)' }
   ];
 
-  function createVRModal() {
-    if (_vrModal) return _vrModal;
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
-      <div class="modal result-modal">
-        <div class="modal-header">
-          <h3 class="result-modal-title">Voltage Regulators</h3>
-          <button class="modal-close vr-close">✕</button>
-        </div>
-        <div class="modal-body result-modal-body vr-content enhanced-body" style="max-height: 70vh; overflow-y: auto;"></div>
-        <div class="modal-footer">
-          <button class="btn btn-primary vr-ok">Close</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.querySelector('.vr-close').addEventListener('click', () => overlay.style.display = 'none');
-    overlay.querySelector('.vr-ok').addEventListener('click', () => overlay.style.display = 'none');
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
-    _vrModal = overlay;
-    return _vrModal;
-  }
-
   function showVoltageRegulatorModal(data) {
-    const m = createVRModal();
-    const content = m.querySelector('.vr-content');
-    const title = m.querySelector('.result-modal-title');
-    title.textContent = 'Voltage Regulators (' + (data.count || 0) + ')';
-    content.innerHTML = '';
-
+    let title = 'Voltage Regulators (' + (data.count || 0) + ')';
+    let html = '';
     if (!data.items || data.items.length === 0) {
-      content.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
+      html = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
     } else {
       data.items.forEach((item, idx) => {
-        const card = document.createElement('div');
-        card.className = 'info-card';
-        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.regulator_id || ''})</h4></div>`;
-
-        const grid = document.createElement('div');
-        grid.className = 'kv-grid';
-
+        let card = '<div class="info-card">';
+        card += `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.regulator_id || ''})</h4></div>`;
+        card += '<div class="kv-grid">';
         VR_FIELDS.forEach(f => {
           let val = item[f.key];
           if (val !== undefined && val !== null && val !== '') {
-            const itemEl = document.createElement('div');
-            itemEl.className = 'kv-item';
-            itemEl.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
-            grid.appendChild(itemEl);
+            card += `<div class="kv-item"><div class="kv-label">${f.label}</div><div class="kv-value">${val}</div></div>`;
           }
         });
-        card.appendChild(grid);
-        content.appendChild(card);
+        card += '</div></div>';
+        html += card;
       });
     }
-    m.style.display = 'flex';
+    renderInInspector(title, html);
   }
 
   // Shunt Capacitor
-  let _scModal = null;
   const SC_FIELDS = [
     { key: 'capacitor_id', label: 'ID' },
     { key: 'bus_connected_id', label: 'Bus' },
@@ -2944,66 +2781,30 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'power_loss_watts', label: 'Power Loss (W)' }
   ];
 
-  function createSCModal() {
-    if (_scModal) return _scModal;
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
-      <div class="modal result-modal">
-        <div class="modal-header">
-          <h3 class="result-modal-title">Shunt Capacitors</h3>
-          <button class="modal-close sc-close">✕</button>
-        </div>
-        <div class="modal-body result-modal-body sc-content enhanced-body" style="max-height: 70vh; overflow-y: auto;"></div>
-        <div class="modal-footer">
-          <button class="btn btn-primary sc-ok">Close</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.querySelector('.sc-close').addEventListener('click', () => overlay.style.display = 'none');
-    overlay.querySelector('.sc-ok').addEventListener('click', () => overlay.style.display = 'none');
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
-    _scModal = overlay;
-    return _scModal;
-  }
-
   function showShuntCapacitorModal(data) {
-    const m = createSCModal();
-    const content = m.querySelector('.sc-content');
-    const title = m.querySelector('.result-modal-title');
-    title.textContent = 'Shunt Capacitors (' + (data.count || 0) + ')';
-    content.innerHTML = '';
-
+    let title = 'Shunt Capacitors (' + (data.count || 0) + ')';
+    let html = '';
     if (!data.items || data.items.length === 0) {
-      content.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
+      html = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
     } else {
       data.items.forEach((item, idx) => {
-        const card = document.createElement('div');
-        card.className = 'info-card';
-        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.capacitor_id || ''})</h4></div>`;
-
-        const grid = document.createElement('div');
-        grid.className = 'kv-grid';
-
+        let card = '<div class="info-card">';
+        card += `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.capacitor_id || ''})</h4></div>`;
+        card += '<div class="kv-grid">';
         SC_FIELDS.forEach(f => {
           let val = item[f.key];
           if (val !== undefined && val !== null && val !== '') {
-            const itemEl = document.createElement('div');
-            itemEl.className = 'kv-item';
-            itemEl.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
-            grid.appendChild(itemEl);
+            card += `<div class="kv-item"><div class="kv-label">${f.label}</div><div class="kv-value">${val}</div></div>`;
           }
         });
-        card.appendChild(grid);
-        content.appendChild(card);
+        card += '</div></div>';
+        html += card;
       });
     }
-    m.style.display = 'flex';
+    renderInInspector(title, html);
   }
 
   // Shunt Inductor
-  let _siModal = null;
   const SI_FIELDS = [
     { key: 'inductor_id', label: 'ID' },
     { key: 'bus_connected_id', label: 'Bus' },
@@ -3014,66 +2815,30 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'reactance_a', label: 'X (A)' }
   ];
 
-  function createSIModal() {
-    if (_siModal) return _siModal;
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
-      <div class="modal result-modal">
-        <div class="modal-header">
-          <h3 class="result-modal-title">Shunt Inductors</h3>
-          <button class="modal-close si-close">✕</button>
-        </div>
-        <div class="modal-body result-modal-body si-content enhanced-body" style="max-height: 70vh; overflow-y: auto;"></div>
-        <div class="modal-footer">
-          <button class="btn btn-primary si-ok">Close</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.querySelector('.si-close').addEventListener('click', () => overlay.style.display = 'none');
-    overlay.querySelector('.si-ok').addEventListener('click', () => overlay.style.display = 'none');
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
-    _siModal = overlay;
-    return _siModal;
-  }
-
   function showShuntInductorModal(data) {
-    const m = createSIModal();
-    const content = m.querySelector('.si-content');
-    const title = m.querySelector('.result-modal-title');
-    title.textContent = 'Shunt Inductors (' + (data.count || 0) + ')';
-    content.innerHTML = '';
-
+    let title = 'Shunt Inductors (' + (data.count || 0) + ')';
+    let html = '';
     if (!data.items || data.items.length === 0) {
-      content.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
+      html = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
     } else {
       data.items.forEach((item, idx) => {
-        const card = document.createElement('div');
-        card.className = 'info-card';
-        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.inductor_id || ''})</h4></div>`;
-
-        const grid = document.createElement('div');
-        grid.className = 'kv-grid';
-
+        let card = '<div class="info-card">';
+        card += `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.inductor_id || ''})</h4></div>`;
+        card += '<div class="kv-grid">';
         SI_FIELDS.forEach(f => {
           let val = item[f.key];
           if (val !== undefined && val !== null && val !== '') {
-            const itemEl = document.createElement('div');
-            itemEl.className = 'kv-item';
-            itemEl.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
-            grid.appendChild(itemEl);
+            card += `<div class="kv-item"><div class="kv-label">${f.label}</div><div class="kv-value">${val}</div></div>`;
           }
         });
-        card.appendChild(grid);
-        content.appendChild(card);
+        card += '</div></div>';
+        html += card;
       });
     }
-    m.style.display = 'flex';
+    renderInInspector(title, html);
   }
 
   // Series Inductor
-  let _eriModal = null;
   const ERI_FIELDS = [
     { key: 'inductor_id', label: 'ID' },
     { key: 'from_bus_id', label: 'From Bus' },
@@ -3085,193 +2850,88 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'reactance_a', label: 'X (A)' }
   ];
 
-  function createERIModal() {
-    if (_eriModal) return _eriModal;
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
-      <div class="modal result-modal">
-        <div class="modal-header">
-          <h3 class="result-modal-title">Series Inductors</h3>
-          <button class="modal-close eri-close">✕</button>
-        </div>
-        <div class="modal-body result-modal-body eri-content enhanced-body" style="max-height: 70vh; overflow-y: auto;"></div>
-        <div class="modal-footer">
-          <button class="btn btn-primary eri-ok">Close</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.querySelector('.eri-close').addEventListener('click', () => overlay.style.display = 'none');
-    overlay.querySelector('.eri-ok').addEventListener('click', () => overlay.style.display = 'none');
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.style.display = 'none'; });
-    _eriModal = overlay;
-    return _eriModal;
-  }
-
   function showSeriesInductorModal(data) {
-    const m = createERIModal();
-    const content = m.querySelector('.eri-content');
-    const title = m.querySelector('.result-modal-title');
-    title.textContent = 'Series Inductors (' + (data.count || 0) + ')';
-    content.innerHTML = '';
-
+    let title = 'Series Inductors (' + (data.count || 0) + ')';
+    let html = '';
     if (!data.items || data.items.length === 0) {
-      content.innerHTML = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
+      html = '<div class="info-card"><div class="kv-value" style="text-align:center;">No items found.</div></div>';
     } else {
       data.items.forEach((item, idx) => {
-        const card = document.createElement('div');
-        card.className = 'info-card';
-        card.innerHTML = `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.inductor_id || ''})</h4></div>`;
-
-        const grid = document.createElement('div');
-        grid.className = 'kv-grid';
-
+        let card = '<div class="info-card">';
+        card += `<div class="info-card-header"><h4 class="info-card-title">Item #${idx + 1} (${item.inductor_id || ''})</h4></div>`;
+        card += '<div class="kv-grid">';
         ERI_FIELDS.forEach(f => {
           let val = item[f.key];
           if (val !== undefined && val !== null && val !== '') {
-            const itemEl = document.createElement('div');
-            itemEl.className = 'kv-item';
-            itemEl.innerHTML = `<div class="kv-label">${f.label}</div><div class="kv-value">${val}</div>`;
-            grid.appendChild(itemEl);
+            card += `<div class="kv-item"><div class="kv-label">${f.label}</div><div class="kv-value">${val}</div></div>`;
           }
         });
-        card.appendChild(grid);
-        content.appendChild(card);
+        card += '</div></div>';
+        html += card;
       });
     }
-    m.style.display = 'flex';
+    renderInInspector(title, html);
+  }
+
+  function showConnectionsModal(connections, postId) {
+    let title = 'Connected Lines for Post #' + postId;
+    let html = '<div class="connections-list" style="max-height: 400px; overflow-y: auto; padding-right: 4px;">';
+    
+    html += connections.map(conn => `
+      <div class="connection-item info-card" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; margin-bottom: 8px;">
+          <div class="connection-info">
+              <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 2px;">
+                  ${conn.name || 'Unknown Segment'}
+              </div>
+              <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                  ${conn.type} • ID: ${conn.id}
+              </div>
+              <div style="font-size: 0.8rem; color: #666; margin-top: 2px;">
+                  ${conn.from_bus} → ${conn.to_bus}
+              </div>
+          </div>
+          <button class="btn btn-sm btn-disconnect" data-id="${conn.id}">Disconnect</button>
+      </div>
+    `).join('');
+    html += '</div>';
+
+    renderInInspector(title, html);
+
+    // Rebind handlers
+    const inspectorContent = document.getElementById('inspector-content');
+    if (inspectorContent) {
+        inspectorContent.querySelectorAll('.btn-disconnect').forEach(btn => {
+            btn.onclick = function () {
+                const id = this.getAttribute('data-id');
+                // showConfirmModal is still a popup dialog, which is appropriate for confirmations!
+                showConfirmModal(`Are you sure you want to disconnect ${id}? (This is a simulation)`, { title: 'Disconnect', okText: 'Disconnect', cancelText: 'Cancel' })
+                  .then(confirmed => {
+                    if (confirmed) {
+                      showNoticeModal('Info', `Disconnected ${id} (Mock Action)`);
+                      this.closest('.connection-item').style.opacity = '0.5';
+                      this.disabled = true;
+                      this.textContent = 'Disconnected';
+                    }
+                  });
+            };
+        });
+    }
   }
 
   // --- Customer Info Modal ---
-  var _customerInfoModal = null;
-  function createCustomerInfoModal() {
-    if (_customerInfoModal) return _customerInfoModal;
-    var overlay = document.createElement('div');
-    overlay.className = 'modal-overlay customer-info-modal-overlay';
-    overlay.setAttribute('aria-label', 'Customer Info');
-    overlay.innerHTML = [
-      '<div class="modal result-modal" style="max-width: 600px; width: 90vw;">',
-      '  <div class="modal-header result-modal-header">',
-      '    <h3 class="result-modal-title">Customer Info</h3>',
-      '    <button class="modal-close customer-info-close" aria-label="Close">✕</button>',
-      '  </div>',
-      '  <div class="modal-body result-modal-body customer-info-body enhanced-body" style="max-height: 70vh; overflow-y: auto; padding: 16px;">',
-      '    <div class="customer-details" style="margin-bottom: 20px;"></div>',
-      '    <h4 style="margin-bottom: 10px; border-bottom: 2px solid #eee; padding-bottom: 5px;">Energy Consumption</h4>',
-      '    <div class="customer-consumption"></div>',
-      '  </div>',
-      '  <div class="modal-footer"><button class="btn result-modal-ok customer-info-ok">Close</button></div>',
-      '</div>'
-    ].join('');
-    document.body.appendChild(overlay);
-    overlay.querySelector('.customer-info-close').addEventListener('click', closeCustomerInfoModal);
-    overlay.querySelector('.customer-info-ok').addEventListener('click', closeCustomerInfoModal);
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) closeCustomerInfoModal(); });
-    overlay.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeCustomerInfoModal(); });
-    _customerInfoModal = overlay;
-    return _customerInfoModal;
-  }
-
-  function closeCustomerInfoModal() {
-    if (_customerInfoModal) _customerInfoModal.style.display = 'none';
-  }
-
-  // --- Connections Modal ---
-  let connectionsModalStub = null;
-  function showConnectionsModal(connections, postId) {
-    if (connectionsModalStub) {
-      if (connectionsModalStub.parentNode) document.body.removeChild(connectionsModalStub);
-      connectionsModalStub = null;
-    }
-
-    // Create modal elements
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay connections-modal-overlay';
-    overlay.innerHTML = `
-        <div class="modal connections-modal" style="max-width: 500px; width: 90%;">
-            <div class="modal-header">
-                <h3>Connected Lines for Post #${postId}</h3>
-                <button class="modal-close" aria-label="Close">✕</button>
-            </div>
-            <div class="modal-body">
-                <div class="connections-list" style="max-height: 400px; overflow-y: auto; padding-right: 4px;">
-                    ${connections.map(conn => `
-                        <div class="connection-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 1px solid #eee; gap: 12px;">
-                            <div class="connection-info">
-                                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 2px;">
-                                    ${conn.name || 'Unknown Segment'}
-                                </div>
-                                <div style="font-size: 0.85rem; color: var(--text-secondary);">
-                                    ${conn.type} • ID: ${conn.id}
-                                </div>
-                                <div style="font-size: 0.8rem; color: #666; margin-top: 2px;">
-                                    ${conn.from_bus} → ${conn.to_bus}
-                                </div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary modal-close-btn">Close</button>
-            </div>
-        </div>
-    `;
-
-    document.body.appendChild(overlay);
-    connectionsModalStub = overlay;
-    overlay.style.display = 'flex'; // Ensure flex display
-
-    // Handlers
-    const close = () => {
-      overlay.style.display = 'none';
-      if (overlay.parentNode) document.body.removeChild(overlay);
-      connectionsModalStub = null;
-    };
-
-    overlay.querySelector('.modal-close').onclick = close;
-    overlay.querySelector('.modal-close-btn').onclick = close;
-    overlay.onclick = (e) => { if (e.target === overlay) close(); };
-
-    // Disconnect handlers
-    overlay.querySelectorAll('.btn-disconnect').forEach(btn => {
-      btn.onclick = function () {
-        const id = this.getAttribute('data-id');
-        showConfirmModal(`Are you sure you want to disconnect ${id}? (This is a simulation)`, { title: 'Disconnect', okText: 'Disconnect', cancelText: 'Cancel' })
-          .then(confirmed => {
-            if (confirmed) {
-              showNoticeModal('Info', `Disconnected ${id} (Mock Action)`);
-              // logical removal from UI could happen here
-              this.closest('.connection-item').style.opacity = '0.5';
-              this.disabled = true;
-              this.textContent = 'Disconnected';
-            }
-          });
-      };
-    });
-  }
-
   window.showCustomerInfoModal = function (customerId) {
     if (!customerId) return;
-    var m = createCustomerInfoModal();
-    var detailsDiv = m.querySelector('.customer-details');
-    var consDiv = m.querySelector('.customer-consumption');
-
-    detailsDiv.innerHTML = '<div class="spinner"></div> Loading details...';
-    consDiv.innerHTML = '';
-    m.style.display = 'flex';
-
-    // Fetch Customer Data
+    renderInInspector('Customer Info', '<div class="spinner"></div> Loading details...');
+    
     fetch('/api/customers/' + encodeURIComponent(customerId))
-      .then(function (r) { return r.json(); })
-      .then(function (cData) {
+      .then(r => r.json())
+      .then(cData => {
         if (cData.error) {
-          detailsDiv.innerHTML = '<p style="color:red">Error: ' + cData.error + '</p>';
+          renderInInspector('Customer Info', '<div class="info-card" style="color:var(--danger);">Error: ' + cData.error + '</div>');
           return;
         }
 
-        var html = '<div class="info-card">';
+        let html = '<div class="info-card">';
         html += '<div class="info-card-header"><h4 class="info-card-title">Account Details</h4></div>';
         html += '<div class="kv-grid">';
         html += '<div class="kv-item"><div class="kv-label">Customer Name</div><div class="kv-value">' + (cData.name || '—') + '</div></div>';
@@ -3280,33 +2940,34 @@ document.addEventListener('DOMContentLoaded', function () {
         html += '<div class="kv-item"><div class="kv-label">Service Voltage</div><div class="kv-value">' + (cData.service_voltage || '—') + '</div></div>';
         html += '<div class="kv-item"><div class="kv-label">Phase</div><div class="kv-value">' + (cData.phase || '—') + '</div></div>';
         html += '</div></div>';
-        detailsDiv.innerHTML = html;
+        
+        html += '<h4 style="margin-top: 16px; margin-bottom: 10px; border-bottom: 2px solid var(--border); padding-bottom: 5px; color: var(--text-primary);">Energy Consumption</h4>';
+        html += '<div id="customer-consumption-container"><div class="spinner"></div> Loading consumption...</div>';
 
-        // Fetch Consumption Data
+        renderInInspector('Customer: ' + (cData.name || customerId), html);
+
         fetch('/api/customers/' + encodeURIComponent(customerId) + '/consumption')
-          .then(function (r) { return r.json(); })
-          .then(function (consData) {
+          .then(r => r.json())
+          .then(consData => {
+            const consContainer = document.getElementById('customer-consumption-container');
+            if (!consContainer) return;
+
             if (consData.error) {
-              consDiv.innerHTML = '<div class="info-card" style="color:#b91c1c;">Error loading consumption.</div>';
+              consContainer.innerHTML = '<div class="info-card" style="color:var(--danger);">Error loading consumption.</div>';
               return;
             }
             if (!consData.items || consData.items.length === 0) {
-              consDiv.innerHTML = '<div class="info-card" style="color:var(--text-secondary); text-align:center;">No consumption records found.</div>';
+              consContainer.innerHTML = '<div class="info-card" style="color:var(--text-secondary); text-align:center;">No consumption records found.</div>';
               return;
             }
 
-            var table = '<div class="table-scroll" style="border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden;"><table class="modern-table">';
-            table += '<thead><tr>';
-            table += '<th>Billing Period</th>';
-            table += '<th>Energy (kWh)</th>';
-            table += '<th>Power Factor</th>';
-            table += '</tr></thead><tbody>';
+            let table = '<div class="table-scroll" style="border:1px solid var(--border); border-radius:var(--radius-md); overflow:hidden;"><table class="modern-table">';
+            table += '<thead><tr><th>Billing Period</th><th>Energy (kWh)</th><th>Power Factor</th></tr></thead><tbody>';
 
-            var maxRows = 200;
-            var totalRows = consData.items.length;
-            var limit = Math.min(totalRows, maxRows);
-            for (var i = 0; i < limit; i++) {
-              var item = consData.items[i];
+            const maxRows = 200;
+            const limit = Math.min(consData.items.length, maxRows);
+            for (let i = 0; i < limit; i++) {
+              let item = consData.items[i];
               table += '<tr>';
               table += '<td>' + (item.billing_period || '—') + '</td>';
               table += '<td>' + (item.kwh_consumed || '—') + '</td>';
@@ -3314,17 +2975,18 @@ document.addEventListener('DOMContentLoaded', function () {
               table += '</tr>';
             }
             table += '</tbody></table></div>';
-            if (totalRows > maxRows) {
-              table += '<div style="margin-top:4px;font-size:0.8rem;color:var(--text-secondary);">Showing first ' + maxRows + ' of ' + totalRows + ' records for performance. Filter or export for full history.</div>';
+            if (consData.items.length > maxRows) {
+              table += '<div style="margin-top:4px;font-size:0.8rem;color:var(--text-secondary);">Showing first ' + maxRows + ' records for performance.</div>';
             }
-            consDiv.innerHTML = table;
+            consContainer.innerHTML = table;
           })
-          .catch(function (e) {
-            consDiv.innerHTML = '<div class="info-card" style="color:#b91c1c;">Failed to load consumption.</div>';
+          .catch(() => {
+            const consContainer = document.getElementById('customer-consumption-container');
+            if (consContainer) consContainer.innerHTML = '<div class="info-card" style="color:var(--danger);">Failed to load consumption.</div>';
           });
       })
-      .catch(function (e) {
-        detailsDiv.innerHTML = '<p style="color:red">Failed to load customer details.</p>';
+      .catch(() => {
+        renderInInspector('Customer Info', '<div class="info-card" style="color:var(--danger);">Failed to load customer details.</div>');
       });
   };
 
@@ -3745,5 +3407,17 @@ document.addEventListener('DOMContentLoaded', function () {
         map.fitBounds(highlightBounds, { padding: [50, 50], maxZoom: 18 });
     }
   }
+
+  // Clear active marker and close inspector when clicking on empty map area
+  map.on('click', function(e) {
+    const layoutEl = document.querySelector('.premium-layout');
+    if (layoutEl && layoutEl.classList.contains('inspector-open')) {
+      layoutEl.classList.remove('inspector-open');
+    }
+    if (window._selectionIndicatorMarker) {
+      map.removeLayer(window._selectionIndicatorMarker);
+      window._selectionIndicatorMarker = null;
+    }
+  });
 
 });
