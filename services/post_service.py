@@ -1,6 +1,7 @@
 from extensions import db
 from models import Post
 from flask import current_app
+from .ml_predictor import load_snapshot
 
 # Sample in-memory posts fallback
 POSTS = [
@@ -88,6 +89,20 @@ def get_paginated_posts(in_ph, page, per_page):
         }
     }
 
+def _normalize_asset_id(s):
+    """Normalize asset IDs for comparison (e.g., P0000000088 -> 88)."""
+    if not s: return ""
+    s = str(s).upper().strip()
+    # Remove common prefixes
+    if s.startswith('DT'): s = s[2:]
+    elif s.startswith('P'): s = s[1:]
+    # Remove common suffixes and leading zeros
+    if s.endswith('U'): s = s[:-1]
+    s = s.lstrip('0')
+    # Use split to handle complex IDs like 100-85U
+    if '-' in s: s = s.split('-')[0]
+    return s
+
 def get_post_detail(post_id):
     """Fetches detailed information about a single post."""
     p = Post.query.get(post_id)
@@ -113,6 +128,42 @@ def get_post_detail(post_id):
     ]
     for f in extra_fields:
         post_dict[f] = getattr(p, f, None)
+    
+    # Enrich with Stress Analysis Data
+    try:
+        snapshot = load_snapshot()
+        if snapshot and 'details' in snapshot:
+            # 1. Collect potential matches from DB record
+            db_ids = {p.transformer_bus_id, p.primary_bus_id, p.pole_number}
+            db_norms = {_normalize_asset_id(i) for i in db_ids if i}
+            
+            stress_match = None
+            # 2. Search snapshot for first normalized match
+            for detail in snapshot['details']:
+                t_id = detail.get('transformer_id')
+                pb_id = detail.get('from_primary_bus_id')
+                
+                # Check exact matches first
+                if (t_id and t_id in db_ids) or (pb_id and pb_id in db_ids):
+                    stress_match = detail
+                    break
+                
+                # Check normalized (fuzzy) matches
+                t_norm = _normalize_asset_id(t_id)
+                pb_norm = _normalize_asset_id(pb_id)
+                if (t_norm and t_norm in db_norms) or (pb_norm and pb_norm in db_norms):
+                    stress_match = detail
+                    break
+            
+            if stress_match:
+                post_dict['utilization_percent'] = stress_match.get('utilization_percent', 0)
+                post_dict['load_status'] = stress_match.get('load_status', 'Unknown')
+                post_dict['risk_level'] = stress_match.get('risk_level', 'Low')
+                post_dict['ml_risk_level'] = stress_match.get('ml_risk_level', 'Low')
+                post_dict['impact_level'] = stress_match.get('impact_level', 'Low')
+                post_dict['criticality_score'] = stress_match.get('criticality_score', 0)
+    except Exception as e:
+        current_app.logger.warning(f"Failed to enrich post {post_id} with stress data: {e}")
         
     return post_dict
 

@@ -1591,6 +1591,38 @@ document.addEventListener('DOMContentLoaded', function () {
               infoHtml += `kVA Rating: ${kvaDisplay}<br>`;
               infoHtml += `Meter: ${data.meter_brand ? (data.meter_brand + (data.meter_id ? ' / ' + data.meter_id : '')) : (data.meter_id || '—')}<br>`;
               infoHtml += `Coordinates: ${latText}, ${lngText}<br>`;
+
+              // Add Load Stress Section if data is available
+              if (data.utilization_percent !== undefined) {
+                const util = data.utilization_percent;
+                const status = data.load_status || 'Unknown';
+                const statusClass = status.toLowerCase().replace(' ', '-');
+                
+                let barColorClass = 'normal';
+                if (util >= 100) barColorClass = 'danger';
+                else if (util >= 80) barColorClass = 'warning';
+
+                infoHtml += `
+                  <div class="stress-section">
+                    <div class="stress-header">
+                      <span>LOAD STRESS</span>
+                      <span class="status-badge ${statusClass}">${status}</span>
+                    </div>
+                    <div class="utilization-track">
+                      <div class="utilization-fill ${barColorClass}" style="width: ${Math.min(util, 100)}%"></div>
+                    </div>
+                    <div class="stress-metrics">
+                      <span>Condition Risk: ${data.ml_risk_level || 'Low'}</span>
+                      <span>Grid Impact: ${data.impact_level || 'Low'}</span>
+                    </div>
+                    <div class="stress-metrics" style="margin-top: 4px; border-top: 1px dashed var(--border); padding-top: 4px;">
+                      <span>Rel. Utilization: ${util.toFixed(1)}%</span>
+                      <span>Priority: ${data.risk_level || 'Low'}</span>
+                    </div>
+                  </div>
+                `;
+              }
+
               if (detailsEl) detailsEl.innerHTML = infoHtml;
             });
           }).catch(() => { });

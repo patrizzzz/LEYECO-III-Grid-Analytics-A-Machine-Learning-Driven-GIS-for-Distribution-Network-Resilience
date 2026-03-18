@@ -37,4 +37,7 @@ modified_files.txt
 git_status.txt
 git_files.json
 list_files.py
-cleanup_git.py
+
+# Presentation Artifacts
+presentation_logic_diagrams.md
+presentation_summary.md
