@@ -193,7 +193,7 @@ def calculate_transformer_load_stress():
             
             s_c = curve_map.get(ctype, 24.0)
             if s_c == 0: s_c = 24.0
-            peak_w = kwh / (30.0 * s_c)
+            peak_w = kwh / (max(kva, 1.0) * s_c)
             
             multipliers = curve_multi_map.get(ctype, {f"Hour {i}": 1.0 for i in range(1, 25)})
             for h in range(24):
@@ -346,16 +346,24 @@ def get_grid_health_analytics(force_refresh=False):
         merged['criticality_score'] = round(float(criticality), 2)
         merged['impact_score'] = round(float(impact_score), 2)
         
-        # 4. Categorize Risk Levels based on Impact Score
+        # 4. Categorize Risk Levels
+        # ML Risk level (Probability of failure)
+        merged['ml_risk_level'] = ml_pred.get('risk_level', 'Low')
+        
+        # Impact level (Consequence of failure)
         if impact_score >= 25:
-            merged['risk_level'] = 'Critical'
+            merged['impact_level'] = 'Critical'
         elif impact_score >= 10:
-            merged['risk_level'] = 'High'
+            merged['impact_level'] = 'High'
         elif impact_score >= 5:
-            merged['risk_level'] = 'Medium'
+            merged['impact_level'] = 'Medium'
         else:
-            merged['risk_level'] = 'Low'
+            merged['impact_level'] = 'Low'
             
+        # Keep risk_level as impact-based for the dashboard statistics but 
+        # consider renaming it later if we want the dashboard to show ML probability.
+        merged['risk_level'] = merged['impact_level']
+        
         merged['health_index'] = round(( (100 - ml_pred['risk_score']) + (100 - max(0, util_pct-100)) ) / 2, 1)
         combined_details.append(merged)
     

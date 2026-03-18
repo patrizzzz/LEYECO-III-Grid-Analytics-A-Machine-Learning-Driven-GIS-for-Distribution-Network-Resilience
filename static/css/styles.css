@@ -3723,3 +3723,16 @@ body.dark-theme .modal-footer {
   color: var(--text-secondary);
   margin-top: -1rem;
 }
+/* Stress Level UI Components */
+.stress-section { margin: 12px 0; padding: 12px; background: #f1f5f9; border-radius: 8px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 8px; }
+.stress-header { display: flex; justify-content: space-between; align-items: center; font-size: 14px; font-weight: 600; color: #64748b; }
+.status-badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+.status-badge.normal { background: #22c55e; color: #fff; }
+.status-badge.high-load { background: #eab308; color: #000; }
+.status-badge.overloaded { background: #ef4444; color: #fff; }
+.utilization-track { height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; }
+.utilization-fill { height: 100%; transition: width 0.6s ease; }
+.utilization-fill.normal { background: #22c55e; }
+.utilization-fill.warning { background: #f59e0b; }
+.utilization-fill.danger { background: #ef4444; }
+.stress-metrics { display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; }

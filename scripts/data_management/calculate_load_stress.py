@@ -75,7 +75,7 @@ def calculate_transformer_load_stress(data_dir=None):
         for kwh, ctype in ratings:
             s_c = curve_map.get(ctype, 24.0)
             if s_c == 0: s_c = 24.0
-            peak_w = kwh / (30.0 * s_c) 
+            peak_w = kwh / (max(kva, 1.0) * s_c) 
             
             # Use improved default multipliers mapping
             multipliers = curve_multi_map.get(ctype, {f"Hour {i}": 1.0 for i in range(1, 25)})
