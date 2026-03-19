@@ -6,7 +6,7 @@ from models import (
     UploadHistory, Post, DistributionTransformer, SecondaryLineSegment, 
     DistributionLineSegment, SecondaryServiceDrop, 
     VoltageRegulator, ShuntCapacitor, ShuntInductor, SeriesInductor,
-    Customer, EnergyConsumption, Meter, LatLongData, BusPostMapping, LineConnection, BusNode
+    Customer, EnergyConsumption, Meter, LatLongData, BusPostMapping, LineConnection, BusNode, LoadCurve
 )
 from utils.network_utils import infer_connections_from_posts
 from services.importers import (

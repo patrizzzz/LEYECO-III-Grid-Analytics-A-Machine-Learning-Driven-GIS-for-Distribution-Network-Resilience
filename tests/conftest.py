@@ -26,8 +26,11 @@ def app():
         _db.session.remove()
         _db.engine.dispose()
 
+    if "test" not in test_db_url.lower():
+        pytest.exit(f"SAFETY ERROR: Test database URL '{test_db_url}' is MISSING 'test' in its name. Refusing to run tests on a potentially production database.")
+
     if "mapping" in test_db_url.lower() or (env_db and env_db.lower() in test_db_url.lower()):
-        pytest.exit(f"SAFETY ERROR: Test database URL '{test_db_url}' looks like the production database. Set TEST_DATABASE_URL to a safe test database.")
+        pytest.exit(f"SAFETY ERROR: Test database URL '{test_db_url}' looks like the production database '{env_db}'. Set TEST_DATABASE_URL to a safe test database.")
 
     flask_app.config.update({
         "TESTING": True,
@@ -51,9 +54,13 @@ def app():
         yield flask_app
         try:
             _db.session.remove()
-            _db.drop_all()
-        except Exception:
-            pass # Dependencies might remain in session scope
+            # ONLY drop if we are 100% sure we are on the test database
+            if "test" in str(_db.engine.url).lower() and "mapping" not in str(_db.engine.url).lower():
+                _db.drop_all()
+            else:
+                print(f"SAFETY: Skipping drop_all() as engine URL '{_db.engine.url}' does not look like a test database.")
+        except Exception as e:
+            print(f"Cleanup error (ignoring): {e}")
 
 @pytest.fixture
 def db(app):
