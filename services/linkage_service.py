@@ -63,8 +63,8 @@ class LinkageService:
         posts = Post.query.all()
         bus_nodes = BusNode.query.all()
         
-        # Build map: bus_id (lower) -> pole_number (post_id)
-        bus_node_map = {str(bn.bus_id).strip().lower(): bn.pole_number for bn in bus_nodes if bn.bus_id and bn.pole_number}
+        # Build map: bus_id (lower) -> pole_id (integer)
+        bus_node_map = {str(bn.bus_id).strip().lower(): bn.pole_id for bn in bus_nodes if bn.bus_id and bn.pole_id}
         
         count = 0
         for t in transformers:

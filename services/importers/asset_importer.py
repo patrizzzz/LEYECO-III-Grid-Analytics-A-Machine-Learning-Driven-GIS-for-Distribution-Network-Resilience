@@ -7,7 +7,7 @@ class PostImporter(BaseImporter):
     file_type = 'posts'
     model_class = Post
     header_mappings = {
-        'pole_number': ['pole_number', 'Pole Number', 'Pole ID', 'pole_id', 'post_id', 'Post ID'],
+        'pole_number': ['Post ID', 'post_id', 'Pole ID', 'pole_id', 'pole_number', 'Pole Number', 'post_id', 'Post ID'],
         'name': ['name', 'Name', 'Post Name'],
         'feeder': ['feeder', 'Feeder'],
         'phasing': ['phasing', 'Phasing'],
@@ -19,30 +19,47 @@ class PostImporter(BaseImporter):
         existing_posts = {str(p.pole_number).strip().lower(): p for p in Post.query.all() if p.pole_number}
         for row in reader:
             pole_num = self.get_val(row, 'pole_number')
-            if not pole_num: continue
-            
-            key = str(pole_num).strip().lower()
-            post = existing_posts.get(key)
-            if not post:
-                post = Post(pole_number=pole_num)
-                db.session.add(post)
-                existing_posts[key] = post
-                self.stats['created'] += 1
-            else:
-                self.stats['updated'] += 1
-            
-            # Map common fields using header_mappings
-            # Ensure required fields are not None to satisfy DB constraints
-            post.name = self.get_val(row, 'name') or f"Pole {pole_num}"
-            post.feeder = self.get_val(row, 'feeder')
-            post.phasing = self.get_val(row, 'phasing')
             
             lat_val = sanitize_float(self.get_val(row, 'lat'))
             lng_val = sanitize_float(self.get_val(row, 'lng'))
             
-            # PostGIS/SQLAlchemy requires lat/lng if the model says nullable=False
-            post.lat = lat_val if lat_val is not None else 0.0
-            post.lng = lng_val if lng_val is not None else 0.0
+            # Skip invalid rows that have no pole number and no coordinates
+            if not pole_num and lat_val is None and lng_val is None:
+                continue
+            
+            post = None
+            if pole_num:
+                key = str(pole_num).strip().lower()
+                post = existing_posts.get(key)
+            
+            if not post:
+                # Create new post if no pole_number provided or not found
+                post = Post(pole_number=pole_num)
+                db.session.add(post)
+                if pole_num:
+                    existing_posts[str(pole_num).strip().lower()] = post
+                
+                self.stats['created'] += 1
+                
+                # Full update for NEW posts
+                post.name = self.get_val(row, 'name')
+                post.feeder = self.get_val(row, 'feeder')
+                post.phasing = self.get_val(row, 'phasing')
+                
+                # Set coordinates BEFORE flush to satisfy NOT NULL constraints
+                post.lat = lat_val if lat_val is not None else 0.0
+                post.lng = lng_val if lng_val is not None else 0.0
+                
+                # Flush to get the ID if we need to generate a default name
+                db.session.flush()
+                if not post.name:
+                    post.name = f"Pole {post.id}"
+            else:
+                self.stats['updated'] += 1
+                # Existing post: update coordinates if provided
+                if lat_val is not None: post.lat = lat_val
+                if lng_val is not None: post.lng = lng_val
+            
             post.upload_id = self.current_upload_id
             # ... and so on
 
@@ -51,7 +68,8 @@ class BusNodeImporter(BaseImporter):
     model_class = BusNode
     header_mappings = {
         'bus_id': ['Bus ID', 'bus_id', 'BusID'],
-        'pole_number': ['Pole ID', 'pole_id', 'Pole Number', 'pole_number', 'post_id', 'Post ID'],
+        'pole_number': ['Pole Number', 'pole_number'],
+        'pole_id': ['Pole ID', 'pole_id', 'post_id', 'Post ID'],
         'nominal_voltage': ['Nominal Voltage (kV)', 'Nominal Voltage', 'volt', 'voltage'],
         'feeder': ['Feeder', 'feeder']
     }
@@ -75,15 +93,35 @@ class BusNodeImporter(BaseImporter):
                 self.stats['updated'] += 1
                 
             node.pole_number = self.get_val(row, 'pole_number')
+            node.pole_id = self.get_val(row, 'pole_id')
             node.nominal_voltage = sanitize_float(self.get_val(row, 'nominal_voltage'))
             node.feeder = self.get_val(row, 'feeder')
             node.upload_id = self.current_upload_id
             
             # Inherit coordinates from Post
-            if node.pole_number:
+            p = None
+            # 1. Try numeric ID first if provided
+            if node.pole_id:
+                try:
+                    p_id = int(float(node.pole_id))
+                    p = Post.query.get(p_id)
+                    if p:
+                        # Ensure node has the integer FK
+                        node.pole_id = p.id
+                        # Optionallly sync pole_number for reference
+                        node.pole_number = p.pole_number
+                except (ValueError, TypeError):
+                    pass
+            
+            # 2. Try string pole_number if ID link failed
+            if not p and node.pole_number:
                 p = existing_posts.get(str(node.pole_number).strip().lower())
                 if p:
-                    node.lat, node.lng = p.lat, p.lng
+                    node.pole_id = p.id
+
+            if p:
+                node.lat, node.lng = p.lat, p.lng
+                if node.feeder:
                     p.feeder = node.feeder
 
 class TransformerImporter(BaseImporter):
@@ -113,8 +151,9 @@ class TransformerImporter(BaseImporter):
         existing_tx = {str(t.transformer_id).strip().lower(): t for t in DistributionTransformer.query.all()}
         all_posts = Post.query.all()
         # Build map: bus_id (lower) -> pole_number (which represents the post_id from bus_data.csv)
+        # Build map: bus_id (lower) -> pole_id (integer)
         bus_nodes = BusNode.query.all()
-        bus_node_map = {str(bn.bus_id).strip().lower(): bn.pole_number for bn in bus_nodes if bn.bus_id and bn.pole_number}
+        bus_node_map = {str(bn.bus_id).strip().lower(): bn.pole_id for bn in bus_nodes if bn.bus_id and bn.pole_id}
         
         for row in reader:
             tx_id = self.get_val(row, 'transformer_id')

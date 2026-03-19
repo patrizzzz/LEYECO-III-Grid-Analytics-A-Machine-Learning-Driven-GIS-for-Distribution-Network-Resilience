@@ -72,7 +72,13 @@ def api_post_connections(post_id):
         if p.primary_bus_id: buses.add(p.primary_bus_id)
         if p.sec_bus_id: buses.add(p.sec_bus_id)
         if p.transformer_bus_id: buses.add(p.transformer_bus_id)
-        bns = BusNode.query.filter_by(pole_number=p.pole_number).all()
+        
+        # Use pole_id (FK) for more accurate matching, fallback to pole_number only if not Null
+        if p.pole_number:
+            bns = BusNode.query.filter((BusNode.pole_id == p.id) | (BusNode.pole_number == p.pole_number)).all()
+        else:
+            bns = BusNode.query.filter_by(pole_id=p.id).all()
+        
         for bn in bns: buses.add(bn.bus_id)
         if not buses: return jsonify([]), 200
         bus_list = list(buses)

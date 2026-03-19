@@ -1160,7 +1160,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (r) { return r.json(); })
             .then(function (postData) {
               if (postData && postData.error) return;
-              var busId = postData.primary_bus_id || postData.pole_number;
+              var busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!busId) {
                 showNoticeModal('Info', 'No primary bus ID found for this post');
                 return;
@@ -1200,7 +1200,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (postData) {
               if (postData && postData.error) return;
 
-              var primaryBusId = postData.primary_bus_id || postData.pole_number;
+              var primaryBusId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!primaryBusId) {
                 showNoticeModal('Info', 'No primary bus ID found for this post.');
                 return;
@@ -1268,7 +1268,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(function (postData) {
               if (postData && postData.error) return;
 
-              var primaryBusId = postData.primary_bus_id || postData.pole_number;
+              var primaryBusId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!primaryBusId) {
                 showNoticeModal('Info', 'No primary bus ID found for this post.');
                 return;
@@ -1622,7 +1622,7 @@ document.addEventListener('DOMContentLoaded', function () {
               }
 
               let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong><br>`;
-              infoHtml += `Pole Number: ${data.pole_number || '—'}<br>`;
+              infoHtml += `Post ID: ${data.post_id || data.pole_number || '—'}<br>`;
               infoHtml += `Status: ${data.status || 'N/A'}<br>`;
               infoHtml += `Feeder: ${data.feeder || '—'}<br>`;
               infoHtml += `kVA Rating: ${kvaDisplay}<br>`;
@@ -2030,7 +2030,7 @@ document.addEventListener('DOMContentLoaded', function () {
         } else if (lines.length === 0) {
           console.log('Network geometry: no lines yet. Import posts with coordinates from the Resources page.');
           if (hintEl) {
-            hintEl.innerHTML = 'No network lines yet. Upload posts with <strong>Pole Number, Latitude, Longitude</strong> from the <a href="/resources">Resources</a> page to see lines on the map.';
+            hintEl.innerHTML = 'No network lines yet. Upload posts with <strong>Post ID, Latitude, Longitude</strong> from the <a href="/resources">Resources</a> page to see lines on the map.';
             hintEl.style.display = 'block';
           }
         } else {

@@ -817,6 +817,10 @@
         let sortCol = 'impact_rank';
         let sortDir = 'asc';
 
+        // Chart instances for cleanup
+        let riskDistChart = null;
+        let scatterChart = null;
+
         // --- Fetch Data ---
         async function loadPredictions(forceRefresh = false) {
             try {
@@ -925,7 +929,10 @@
         function renderCharts(summary, data) {
             // Doughnut: risk distribution
             const ctx1 = document.getElementById('chart-risk-dist').getContext('2d');
-            new Chart(ctx1, {
+            
+            if (riskDistChart) riskDistChart.destroy();
+            
+            riskDistChart = new Chart(ctx1, {
                 type: 'doughnut',
                 data: {
                     labels: ['Critical', 'High', 'Medium', 'Low'],
@@ -948,13 +955,16 @@
 
             // Scatter: risk score vs kva
             const ctx2 = document.getElementById('chart-scatter').getContext('2d');
+            
+            if (scatterChart) scatterChart.destroy();
+            
             const colorMap = { Critical: '#ef4444', High: '#f97316', Medium: '#eab308', Low: '#22c55e' };
             const scatterData = data.map(d => ({
                 x: d.kva_rating,
                 y: d.risk_score,
                 backgroundColor: colorMap[d.risk_level] || '#888'
             }));
-            new Chart(ctx2, {
+            scatterChart = new Chart(ctx2, {
                 type: 'scatter',
                 data: {
                     datasets: [{

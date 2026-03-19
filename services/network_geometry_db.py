@@ -53,9 +53,13 @@ def resolve_all_bus_ids(identifier):
         if post.transformer_bus_id: candidate_bus_ids.add(post.transformer_bus_id)
         if getattr(post, 'sec_bus_id', None): candidate_bus_ids.add(post.sec_bus_id)
         
-        # Also check BusNode for this pole
-        pole_num = post.pole_number or s_id
-        for bn in BusNode.query.filter_by(pole_number=pole_num).all():
+        # Also check BusNode for this pole using the more accurate pole_id (FK)
+        if post.pole_number:
+            b_nodes = BusNode.query.filter((BusNode.pole_id == post.id) | (BusNode.pole_number == post.pole_number)).all()
+        else:
+            b_nodes = BusNode.query.filter_by(pole_id=post.id).all()
+            
+        for bn in b_nodes:
             if bn.bus_id: candidate_bus_ids.add(bn.bus_id)
 
     if not candidate_bus_ids:
