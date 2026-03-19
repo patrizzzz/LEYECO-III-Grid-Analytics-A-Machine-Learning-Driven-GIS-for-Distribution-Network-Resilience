@@ -23,6 +23,10 @@ class PostImporter(BaseImporter):
             lat_val = sanitize_float(self.get_val(row, 'lat'))
             lng_val = sanitize_float(self.get_val(row, 'lng'))
             
+            # Skip invalid rows that have no pole number and no coordinates
+            if not pole_num and lat_val is None and lng_val is None:
+                continue
+            
             post = None
             if pole_num:
                 key = str(pole_num).strip().lower()
