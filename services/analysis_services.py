@@ -418,8 +418,13 @@ def get_service_drops_for_post(post_id):
     if getattr(p, 'transformer_bus_id', None): root_buses.add(p.transformer_bus_id)
     
     # Also find any BusNodes that point to this pole
-    bns = BusNode.query.filter_by(pole_number=p.pole_number).all()
-    for bn in bns:
+    # Use pole_id (FK) for more accurate matching, fallback to pole_number only if not Null
+    if p.pole_number:
+        b_nodes = BusNode.query.filter((BusNode.pole_id == p.id) | (BusNode.pole_number == p.pole_number)).all()
+    else:
+        b_nodes = BusNode.query.filter_by(pole_id=p.id).all()
+
+    for bn in b_nodes:
         root_buses.add(bn.bus_id)
 
     # 2. Find any transformers connected to these root buses

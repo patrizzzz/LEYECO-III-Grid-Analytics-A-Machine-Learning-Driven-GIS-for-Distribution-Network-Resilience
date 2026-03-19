@@ -5,8 +5,18 @@ from geoalchemy2 import Geometry
 class Post(db.Model):
     """Electrical distribution pole/post with complete infrastructure data"""
     id = db.Column(db.Integer, primary_key=True)
-    pole_number = db.Column(db.String(32), unique=True, nullable=False, index=True)
-    name = db.Column(db.String(128), nullable=False)
+    pole_number = db.Column(db.String(32), unique=True, nullable=True, index=True)
+    
+    # Alias pole_number to post_id for naming consistency
+    @property
+    def post_id(self):
+        return self.pole_number
+    
+    @post_id.setter
+    def post_id(self, value):
+        self.pole_number = value
+
+    name = db.Column(db.String(128), nullable=True)
     lat = db.Column(db.Float, nullable=False)
     lng = db.Column(db.Float, nullable=False)
     area = db.Column(db.String(128))
@@ -82,7 +92,8 @@ class Post(db.Model):
     def to_dict(self):
         d = {
             'id': self.id,
-            'pole_number': self.pole_number,
+            'post_id': self.pole_number or str(self.id),
+            'pole_number': self.pole_number, # Keep for backward compatibility
             'name': self.name,
             'lat': self.lat,
             'lng': self.lng,
@@ -93,6 +104,7 @@ class Post(db.Model):
             'meter_id': self.meter_id,
             'meter_brand': self.meter_brand,
             'primary_bus_id': self.primary_bus_id,
+            'transformer_bus_id': self.transformer_bus_id,
             'status': self.status,
             'has_transformer': self.has_transformer,
         }
@@ -147,6 +159,7 @@ class BusNode(db.Model):
     __tablename__ = 'bus_node'
     id              = db.Column(db.Integer, primary_key=True)
     bus_id          = db.Column(db.String(128), unique=True, nullable=False, index=True)
+    pole_id         = db.Column(db.Integer, db.ForeignKey('post.id'), index=True)
     pole_number     = db.Column(db.String(128), index=True)
     bus_description = db.Column(db.String(128))
     bus_type        = db.Column(db.String(64))
@@ -165,6 +178,7 @@ class BusNode(db.Model):
         return {
             'id': self.id,
             'bus_id': self.bus_id,
+            'pole_id': self.pole_id,
             'pole_number': self.pole_number,
             'bus_description': self.bus_description,
             'bus_type': self.bus_type,

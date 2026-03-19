@@ -218,23 +218,46 @@ def api_delete_upload(upload_id):
         if not h:
             return jsonify({'error': 'Upload not found'}), 404
             
-        # Define tables to clean up
-        models_to_clean = [
-            EnergyConsumption, Customer, SecondaryServiceDrop, SecondaryLineSegment, 
-            DistributionLineSegment, DistributionTransformer, 
-            VoltageRegulator, ShuntCapacitor, ShuntInductor, SeriesInductor,
-            BusNode, Post, LoadCurve
-        ]
+        # 1. First, delete small dependent records that reference Post.id or BusNode.id 
+        # but don't have an upload_id themselves
+        
+        # Get IDs of Posts and BusNodes from this upload
+        post_ids = [p.id for p in Post.query.filter_by(upload_id=upload_id).with_entities(Post.id).all()]
+        bn_ids = [bn.id for bn in BusNode.query.filter_by(upload_id=upload_id).with_entities(BusNode.id).all()]
         
         counts = {}
-        for model in models_to_clean:
-            # Delete records associated with this upload
-            deleted = model.query.filter_by(upload_id=upload_id).delete()
-            counts[model.__tablename__] = deleted
-            
-        # For Post, we might need to reset has_transformer flags on other posts if tx were deleted
-        # But for now, let's keep it simple: if the post is deleted, the tx is gone anyway.
         
+        if post_ids:
+            # Delete Meters linked to these posts
+            counts['meter'] = Meter.query.filter(Meter.post_id.in_(post_ids)).delete(synchronize_session=False)
+            # Delete LatLongData linked to these posts
+            counts['latlongdata'] = LatLongData.query.filter(LatLongData.post_id.in_(post_ids)).delete(synchronize_session=False)
+            # Delete BusPostMapping linked to these posts
+            counts['bus_post_mapping'] = BusPostMapping.query.filter(BusPostMapping.post_id.in_(post_ids)).delete(synchronize_session=False)
+
+        # 2. Delete models that have their own upload_id in specific dependency order
+        # (Cascading order: descendants first)
+        models_to_clean = [
+            (EnergyConsumption, 'energy_consumption'),
+            (SecondaryServiceDrop, 'secondary_service_drop'),
+            (LineConnection, 'line_connection'),
+            (SecondaryLineSegment, 'secondary_line_segment'), 
+            (DistributionLineSegment, 'distribution_line_segment'),
+            (DistributionTransformer, 'distribution_transformer'),
+            (VoltageRegulator, 'voltage_regulators'),
+            (ShuntCapacitor, 'shunt_capacitors'),
+            (ShuntInductor, 'shunt_inductors'),
+            (SeriesInductor, 'series_inductors'),
+            (BusNode, 'bus_node'),
+            (Post, 'post'),
+            (LoadCurve, 'load_curve'),
+            (Customer, 'customer')
+        ]
+        
+        for model, label in models_to_clean:
+            deleted = model.query.filter_by(upload_id=upload_id).delete(synchronize_session=False)
+            counts[label] = (counts.get(label, 0) + deleted)
+            
         db.session.delete(h)
         db.session.commit()
         

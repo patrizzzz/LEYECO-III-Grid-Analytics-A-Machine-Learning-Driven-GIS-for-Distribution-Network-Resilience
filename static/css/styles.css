@@ -554,7 +554,7 @@ input[type="checkbox"].checkbox-input {
 }
 
 .content {
-  padding: var(--space-24);
+  padding: var(--space-12);
   overflow-y: auto;
   height: 100%;
   scroll-behavior: smooth;
@@ -573,7 +573,7 @@ h1 {
   font-size: var(--fs-4xl);
   font-weight: var(--fw-bold);
   color: var(--text-primary);
-  margin: 0 0 var(--space-16) 0;
+  margin: 0 0 var(--space-8) 0;
   letter-spacing: -0.02em;
 }
 
@@ -581,7 +581,7 @@ h2 {
   font-size: var(--fs-xl);
   font-weight: var(--fw-semibold);
   color: var(--text-primary);
-  margin: 0 0 var(--space-12) 0;
+  margin: 0 0 var(--space-8) 0;
   letter-spacing: -0.01em;
 }
 
@@ -589,7 +589,7 @@ h3 {
   font-size: var(--fs-lg);
   font-weight: var(--fw-semibold);
   color: var(--text-primary);
-  margin: 0 0 var(--space-8) 0;
+  margin: 0 0 var(--space-4) 0;
 }
 
 /* Map - must have explicit height for Leaflet to render tiles */

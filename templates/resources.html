@@ -1117,8 +1117,8 @@
                     ${h.file_type.replace(/_/g, ' ')} • ${new Date(h.upload_date).toLocaleString()}
                   </div>
                 </div>
-                <button class="btn-sample" style="color:#ef4444;border-color:#fecaca;padding:4px 8px;font-size:0.7rem;margin-left:8px;" 
-                  onclick="confirmDeleteUpload(${h.id}, '${h.filename.replace(/'/g, "\\'")}')">
+                <button class="btn-sample btn-delete-upload" style="color:#ef4444;border-color:#fecaca;padding:4px 8px;font-size:0.7rem;margin-left:8px;" 
+                  data-id="${h.id}" data-filename="${h.filename.replace(/"/g, '&quot;')}">
                   🗑️ Delete
                 </button>
               </div>
@@ -1143,11 +1143,21 @@
       });
     }
 
-    window.confirmDeleteUpload = function(id, name) {
-      uploadToDelete = id;
-      document.getElementById('delete-upload-text').innerText = `Are you sure you want to delete "${name}" and all its records?`;
-      delUploadModal.style.display = 'flex';
-    };
+    // Use event delegation for delete buttons
+    if (manageFilesList) {
+      manageFilesList.addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-delete-upload');
+        if (!btn) return;
+        
+        const id = btn.dataset.id;
+        const name = btn.dataset.filename;
+        uploadToDelete = id;
+        document.getElementById('delete-upload-text').innerText = `Are you sure you want to delete "${name}" and all its records?`;
+        delUploadModal.style.display = 'flex';
+      });
+    }
+
+    // Removed window.confirmDeleteUpload as we use event delegation now
 
     const closeDelModal = () => { delUploadModal.style.display = 'none'; uploadToDelete = null; };
     if (delUploadCancel) delUploadCancel.addEventListener('click', closeDelModal);
