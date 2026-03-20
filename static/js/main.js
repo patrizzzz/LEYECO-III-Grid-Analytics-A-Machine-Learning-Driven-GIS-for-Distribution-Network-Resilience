@@ -960,8 +960,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connected Lines</button>
             </div>
             <div class="popup-connect-actions" style="margin-top:4px;">
-                <button class="btn btn-outline btn-trace-downstream" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}">⚡ Trace Downstream</button>
-                <button class="btn btn-outline btn-outage-sim" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}">🔴 Outage Simulation</button>
+                <button class="btn btn-outline btn-trace-downstream" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">⚡ Trace Downstream</button>
+                <button class="btn btn-outline btn-outage-sim" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">🔴 Outage Simulation</button>
             </div>
         </div>
 
@@ -1493,7 +1493,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const traceBtn = popupEl.querySelector('.btn-trace-downstream');
       if (traceBtn) {
         traceBtn.onclick = function () {
-          const busId = traceBtn.getAttribute('data-pole') || traceBtn.getAttribute('data-bus');
+          const busId = traceBtn.getAttribute('data-pole') || traceBtn.getAttribute('data-bus') || traceBtn.getAttribute('data-transformer-bus');
           if (!busId) { showNoticeModal('Info', 'No bus ID available for this post.'); return; }
           traceBtn.textContent = '⏳ Tracing...';
           fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream')
@@ -1533,7 +1533,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const outageBtn = popupEl.querySelector('.btn-outage-sim');
       if (outageBtn) {
         outageBtn.onclick = function () {
-          const busId = outageBtn.getAttribute('data-pole') || outageBtn.getAttribute('data-bus');
+          const busId = outageBtn.getAttribute('data-pole') || outageBtn.getAttribute('data-bus') || outageBtn.getAttribute('data-transformer-bus');
           if (!busId) { showNoticeModal('Info', 'No pole or bus ID available for this post.'); return; }
           outageBtn.textContent = '⏳ Simulating...';
           fetch('/api/network/simulate-outage?start_bus=' + encodeURIComponent(busId))
@@ -1594,6 +1594,15 @@ document.addEventListener('DOMContentLoaded', function () {
           .then(r => r.json())
           .then(data => {
             if (!data || data.error) return;
+
+            // Patch trace/outage button attributes with authoritative data
+            const freshPole = data.pole_number || '';
+            const freshBus = data.primary_bus_id || '';
+            const freshTransBus = data.transformer_bus_id || '';
+            const trBtnPatch = popupEl.querySelector('.btn-trace-downstream');
+            const outBtnPatch = popupEl.querySelector('.btn-outage-sim');
+            if (trBtnPatch) { trBtnPatch.setAttribute('data-pole', freshPole); trBtnPatch.setAttribute('data-bus', freshBus); trBtnPatch.setAttribute('data-transformer-bus', freshTransBus); }
+            if (outBtnPatch) { outBtnPatch.setAttribute('data-pole', freshPole); outBtnPatch.setAttribute('data-bus', freshBus); outBtnPatch.setAttribute('data-transformer-bus', freshTransBus); }
 
             // Fetch Voltage Regulator to get kVA Rating if available
             const busId = data.primary_bus_id || data.pole_number;
@@ -1926,14 +1935,20 @@ document.addEventListener('DOMContentLoaded', function () {
           polyline._connType = connType;
 
           // Add popup
-          const popupText = `
-            <strong>${connType.replace(/_/g, ' → ')}</strong><br>
-            From Bus: ${fromBus}<br>
-            To Bus: ${toBus}<br>
-            Feeder: ${conn.feeder || 'N/A'}<br>
-            Circuit: ${conn.circuit || 'N/A'}<br>
-            Phasing: ${conn.phasing || 'N/A'}
-          `;
+          const popupText = `<div class="popup-card">
+            <div class="popup-card-header">
+              <h4 class="popup-card-title">⚡ ${connType.replace(/_/g, ' → ')}</h4>
+            </div>
+            <div class="popup-card-body">
+              <div class="popup-kv-grid">
+                <div class="popup-kv-label">From Bus:</div><div class="popup-kv-value">${fromBus}</div>
+                <div class="popup-kv-label">To Bus:</div><div class="popup-kv-value">${toBus}</div>
+                <div class="popup-kv-label">Feeder:</div><div class="popup-kv-value">${conn.feeder || 'N/A'}</div>
+                <div class="popup-kv-label">Circuit:</div><div class="popup-kv-value">${conn.circuit || 'N/A'}</div>
+                <div class="popup-kv-label">Phasing:</div><div class="popup-kv-value">${conn.phasing || 'N/A'}</div>
+              </div>
+            </div>
+          </div>`;
           polyline.bindPopup(popupText);
 
           polyline.addTo(connectionsLayer);
@@ -2062,11 +2077,22 @@ document.addEventListener('DOMContentLoaded', function () {
           poly._allBuses = Array.from(meta.all_buses);
           if (meta.feeder) knownFeeders.add(meta.feeder);
 
-          var lenStr = (meta.length_meters != null && !Number.isNaN(meta.length_meters))
-            ? '<br>Length: ' + Number(meta.length_meters).toFixed(2) + ' m'
-            : '';
           var segStr = meta.segments > 1 ? ' (' + meta.segments + ' segments)' : '';
-          var popup = '<strong>' + (connType.replace(/_/g, ' \u2192 ') || 'Network') + segStr + '</strong><br>From: ' + (meta.from_bus || '') + ' \u2192 To: ' + (meta.to_bus || '') + '<br>Feeder: ' + (meta.feeder || '') + ' | Circuit: ' + (meta.circuit || '') + ' | Phasing: ' + (meta.phasing || 'N/A') + lenStr;
+          var popup = `<div class="popup-card">
+            <div class="popup-card-header">
+              <h4 class="popup-card-title">⚡ ${(connType.replace(/_/g, ' → ') || 'Network')}${segStr}</h4>
+            </div>
+            <div class="popup-card-body">
+              <div class="popup-kv-grid">
+                <div class="popup-kv-label">From:</div><div class="popup-kv-value">${meta.from_bus || '—'}</div>
+                <div class="popup-kv-label">To:</div><div class="popup-kv-value">${meta.to_bus || '—'}</div>
+                <div class="popup-kv-label">Feeder:</div><div class="popup-kv-value">${meta.feeder || '—'}</div>
+                <div class="popup-kv-label">Circuit:</div><div class="popup-kv-value">${meta.circuit || '—'}</div>
+                <div class="popup-kv-label">Phasing:</div><div class="popup-kv-value">${meta.phasing || 'N/A'}</div>
+                ${meta.length_meters != null && !Number.isNaN(meta.length_meters) ? `<div class="popup-kv-label">Length:</div><div class="popup-kv-value">${Number(meta.length_meters).toFixed(2)} m</div>` : ''}
+              </div>
+            </div>
+          </div>`;
           poly.bindPopup(popup);
           poly.addTo(networkLinesLayer);
         });
@@ -2618,17 +2644,21 @@ document.addEventListener('DOMContentLoaded', function () {
         arr.forEach(c => {
           const latlngs = c.points.map(p => [p.lat, p.lng]);
           const postList = c.points.map(p => p.post_id ? `#${p.post_id}` : `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join(', ');
-          const popupHtml = `
-            <div>
-              <strong>${c.name}</strong><br/>
-              Length: ${formatMeters(c.total_length || 0)}<br/>
-              Points: ${c.points.length}<br/>
-              Connected IDs: ${postList}
+          const popupHtml = `<div class="popup-card">
+            <div class="popup-card-header">
+              <h4 class="popup-card-title">📍 ${c.name}</h4>
             </div>
-            <div style="margin-top:8px;">
-              <button class="btn disconnect-conn" data-conn-id="${c.id}">Disconnect</button>
+            <div class="popup-card-body">
+              <div class="popup-kv-grid">
+                <div class="popup-kv-label">Length:</div><div class="popup-kv-value">${formatMeters(c.total_length || 0)}</div>
+                <div class="popup-kv-label">Points:</div><div class="popup-kv-value">${c.points.length}</div>
+                <div class="popup-kv-label">Connected IDs:</div><div class="popup-kv-value">${postList}</div>
+              </div>
             </div>
-          `;
+            <div class="popup-footer">
+              <button class="btn btn-danger disconnect-conn" data-conn-id="${c.id}">Disconnect</button>
+            </div>
+          </div>`;
           const poly = L.polyline(latlngs, { color: '#0066ff', weight: 3, lineCap: 'round' }).addTo(connectionsLayer);
           poly.bindPopup(popupHtml);
 
