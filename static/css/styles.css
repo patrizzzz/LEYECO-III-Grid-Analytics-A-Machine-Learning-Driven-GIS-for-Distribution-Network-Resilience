@@ -5,13 +5,15 @@
   --primary-light: #eff6ff;
   --primary-glow: rgba(59, 130, 246, 0.1);
 
-  --secondary: #10b981;
-  --secondary-dark: #047857;
-  --secondary-light: #ecfdf5;
-
   --accent: #f59e0b;
   --accent-dark: #d97706;
   --accent-light: #fffbeb;
+  --accent-glow: rgba(245, 158, 11, 0.1);
+
+  --secondary: #10b981;
+  --secondary-dark: #047857;
+  --secondary-light: #ecfdf5;
+  --secondary-glow: rgba(16, 185, 129, 0.1);
 
   --danger: #ef4444;
   --danger-dark: #991b1b;
@@ -116,6 +118,35 @@
   --sidebar-w: 80px;
   --sidebar-w-expanded: 260px;
   --inspector-w: 380px;
+}
+
+/* Centralized Dark Mode Variable Overrides */
+body.dark-theme {
+  --background: #0f172a; /* Slate 950 */
+  --surface: #1e293b;    /* Slate 800 */
+  --surface-secondary: #0f172a; /* Slate 950 for contrast */
+  --surface-hover: #334155;
+  
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-light: #475569;
+
+  --border: #334155;
+  --border-light: #1e293b;
+  --divider: #1e293b;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+
+  --glass-bg: rgba(15, 23, 42, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+
+  --primary-glow: rgba(59, 130, 246, 0.2);
+  --accent-glow: rgba(245, 158, 11, 0.2);
+  --secondary-glow: rgba(16, 185, 129, 0.2);
 }
 
 html,
@@ -3864,8 +3895,25 @@ body.dark-theme .glass-panel {
 }
 
 body.dark-theme .premium-card {
-  background: var(--surface-secondary);
-  border-color: var(--border-light);
+  background: var(--glass-bg-dark);
+  border-color: var(--glass-border-dark);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-shadow);
+}
+
+body.dark-theme .premium-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.1), transparent 40%, transparent 60%, rgba(255,255,255,0.05));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
 }
 
 /* Three-Panel Layout Specifics */
