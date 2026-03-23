@@ -9,7 +9,8 @@ instance/
 /*.sqlite
 
 
-# Auto-added patterns for test/debug/data files
+# Temporary and Debugging files
+tmp/
 debug_*.py
 verify_*.py
 check_*.py
@@ -17,6 +18,14 @@ inspect_*.py
 tmp_*.py
 *_debug.py
 analyze_*.py
+query_*.py
+search_*.py
+investigate_*.py
+diagnose_*.py
+reproduce_*.py
+find_*.py
+final_check_*.py
+read_db_*.py
 *.csv
 *.xlsx
 *.log
