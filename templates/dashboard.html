@@ -279,109 +279,7 @@
       if (text) text.textContent = status;
     }
 
-    function attachRowHandlers(row) {
-      const id = row.dataset.postId;
-      const badge = row.querySelector('.conn-badge');
 
-      // Fetch connections count
-      fetch(`/api/posts/${id}/connections`).then(r => r.json()).then(conns => {
-        const list = Array.isArray(conns) ? conns : (conns && conns.connections) ? conns.connections : [];
-        if (list.length > 0) {
-          badge.textContent = list.length;
-          badge.classList.add('has-count');
-          badge.style.display = 'inline-flex';
-          badge.title = `${list.length} connection${list.length > 1 ? 's' : ''}`;
-          badge.addEventListener('click', function (e) {
-            e.stopPropagation();
-            const lines = list.map(c => `<li><strong>#${c.id}</strong> ${c.name ? '— ' + c.name : ''}</li>`).join('');
-            showInfoModal(`Connections for Post #${id}`, `<ul style="padding-left: 20px; list-style-type: disc;">${lines || '<li>No connection details</li>'}</ul>`);
-          });
-        }
-      }).catch(() => { });
-
-      const btn = row.querySelector('.status-toggle');
-
-      // Locator button - available to all users
-      const locateBtn = row.querySelector('.locate-post');
-      if (locateBtn) {
-        locateBtn.addEventListener('click', function (e) {
-          e.preventDefault();
-          const lat = this.dataset.lat;
-          const lng = this.dataset.lng;
-          const postId = this.dataset.postId;
-          window.location.href = `/map?id=${postId}&lat=${lat}&lng=${lng}`;
-        });
-      }
-
-      if (!isAdmin) {
-        if (btn) btn.style.display = 'none';
-        row.querySelectorAll('.edit-post, .export-post, .delete-post').forEach(b => b.style.display = 'none');
-        return;
-      }
-
-      // Show action buttons for admins
-      row.querySelectorAll('.edit-post, .export-post, .delete-post').forEach(b => b.style.display = 'inline-block');
-
-      // Edit button
-      const editBtn = row.querySelector('.edit-post');
-      if (editBtn) {
-        editBtn.addEventListener('click', function (e) {
-          e.preventDefault(); e.stopPropagation();
-          const post = {
-            id: id,
-            name: row.cells[1].textContent,
-            status: 'Active'
-          };
-          openEditPostModal(post);
-        });
-      }
-
-      // Export button
-      const expBtn = row.querySelector('.export-post');
-      if (expBtn) {
-        expBtn.addEventListener('click', function (e) {
-          e.preventDefault();
-          window.location = '/api/export/post/' + id;
-        });
-      }
-
-      // Delete button
-      const delBtn = row.querySelector('.delete-post');
-      if (delBtn) {
-        delBtn.addEventListener('click', function (e) {
-          e.preventDefault(); e.stopPropagation();
-          if (!confirm(`Delete post #${id}? This cannot be undone.`)) return;
-          fetch(`/api/posts/${id}`, { method: 'DELETE' })
-            .then(r => r.json()).then(json => {
-              if (json && json.success) {
-                row.style.opacity = '0.5';
-                row.style.pointerEvents = 'none';
-                setTimeout(() => row.remove(), 300);
-                loadPosts(currentPage);
-              } else {
-                alert('Failed to delete post: ' + (json.error || 'Unknown error'));
-              }
-            }).catch(err => alert('Delete failed: ' + err));
-        });
-      }
-
-      // Status toggle
-      if (btn) {
-        btn.addEventListener('click', function (e) {
-          e.preventDefault(); e.stopPropagation();
-          btn.disabled = true;
-          fetch(`/api/posts/${id}/status`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'toggle' })
-          })
-            .then(r => r.json()).then(json => {
-              if (json && json.status) updateRowStatus(row, json.status);
-            }).catch(err => console.error(err))
-            .finally(() => btn.disabled = false);
-        });
-      }
-    }
 
     function renderPosts(posts) {
       const tbody = document.getElementById('posts-tbody');
@@ -458,8 +356,50 @@
           badge.title = 'Click to view details';
           badge.onclick = (e) => {
             e.stopPropagation();
-            const lines = list.map(c => `<li><strong>${c.to_bus || c.from_bus}</strong> (${c.phase || 'Unknown Phase'})</li>`).join('');
-            showInfoModal(`Connections for Post #${id}`, `<ul style="padding-left: 20px; list-style-type: disc;">${lines}</ul>`);
+            const cards = list.map(c => {
+              const p = (c.phase || '').trim().toUpperCase();
+              let color = '#64748b', bg = '#f1f5f9';
+              if (p.includes('A')) { color = '#ef4444'; bg = '#fee2e2'; }
+              else if (p.includes('B')) { color = '#f59e0b'; bg = '#fef3c7'; }
+              else if (p.includes('C')) { color = '#3b82f6'; bg = '#dbeafe'; }
+              const busId = c.to_bus || c.from_bus || 'Unknown';
+              return `
+                <div class="conn-card" data-bus="${busId}">
+                  <div class="conn-card-info">
+                    <span class="conn-card-bus">Bus: <strong>${busId}</strong></span>
+                    <span class="phase-badge" style="color:${color}; background:${bg}; border: 1px solid ${color}30;">${p || 'N/A'}</span>
+                  </div>
+                </div>
+              `;
+            }).join('');
+            
+            const searchHtml = list.length > 5 ? `
+              <div style="margin-bottom: 12px;">
+                <input type="text" id="conn-search" placeholder="Search Bus ID..." 
+                  style="width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; width:100%; box-sizing:border-box;">
+              </div>
+            ` : '';
+
+            showInfoModal(`Connections for Post #${id}`, `
+              ${searchHtml}
+              <div class="conn-card-list" style="display:flex; flex-direction:column; gap:8px; max-height:400px; overflow-y:auto; padding-right:4px;">
+                ${cards}
+              </div>
+            `);
+            
+            if (list.length > 5) {
+              setTimeout(() => {
+                const searchInput = document.getElementById('conn-search');
+                if (searchInput) {
+                  searchInput.onkeyup = function() {
+                    const q = this.value.toLowerCase();
+                    document.querySelectorAll('.conn-card').forEach(card => {
+                      card.style.display = card.dataset.bus.toLowerCase().includes(q) ? 'flex' : 'none';
+                    });
+                  };
+                }
+              }, 100);
+            }
           };
           connWrapper.appendChild(badge);
         } else {
