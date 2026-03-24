@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const secondaryLinesLayer = L.layerGroup();
   const municipalityLayer = L.geoJSON(null, {
     style: function(feature) {
-      const name = feature.properties.name || 'Unknown';
+      const name = feature.properties.NAME_2 || feature.properties.name || 'Unknown';
       return {
         fillColor: getMunicipalityColor(name),
         fillOpacity: 0.4,
@@ -82,8 +82,16 @@ document.addEventListener('DOMContentLoaded', function () {
       };
     },
     onEachFeature: function(feature, layer) {
-      if (feature.properties && feature.properties.name) {
-        layer.bindPopup('<strong>' + feature.properties.name + '</strong>');
+      const name = feature.properties.NAME_2 || feature.properties.name || 'Unknown';
+      if (name) {
+        layer.bindPopup('<strong>' + name + '</strong>');
+        // Add permanent label
+        layer.bindTooltip(name, {
+            permanent: true,
+            direction: 'center',
+            className: 'municipality-label',
+            opacity: 0.8
+        });
       }
     }
   });
@@ -945,14 +953,26 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function getMunicipalityColor(name) {
     if (!name) return '#999';
-    const keys = Object.keys(municipalityColors);
-    // Simple stable hash to pick a color from the predefined set
+    const n = name.trim().toLowerCase();
+    
+    // Mapping based on Leyeco III System Map reference image
+    if (n.includes('capoocan')) return '#ff7675';   // Pink/Reddish
+    if (n.includes('carigara')) return '#74b9ff';   // Light Blue
+    if (n.includes('barugo'))   return '#0984e3';   // Blue
+    if (n.includes('tunga'))    return '#00cec9';   // Cyan
+    if (n.includes('jaro'))     return '#a29bfe';   // Purple
+    if (n.includes('san miguel')) return '#55efc4'; // Green / Lime
+    if (n.includes('santa fe'))  return '#fdcb6e';  // Orange
+    if (n.includes('alangalang')) return '#6c5ce7'; // Purple/Magenta
+    if (n.includes('pastrana'))  return '#00b894';  // Dark Green
+    if (n.includes('abuyog'))    return '#fab1a0';  // Salmon (Not on image)
+    if (n.includes('babatngon')) return '#fd79a8';  // Pink/Peach (Not on image)
+    
+    // Default palette fallback
+    const palette = ['#ff3399', '#9933ff', '#33cc33', '#ff9933', '#33cccc', '#6600ff'];
     let hash = 0;
-    for (let i = 0; i < name.length; i++) {
-        hash = name.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const index = Math.abs(hash) % keys.size || Math.abs(hash) % keys.length;
-    return municipalityColors[keys[index]];
+    for (let i = 0; i < name.length; i++) { hash = name.charCodeAt(i) + ((hash << 5) - hash); }
+    return palette[Math.abs(hash) % palette.length];
   }
 
   function loadMunicipalities() {

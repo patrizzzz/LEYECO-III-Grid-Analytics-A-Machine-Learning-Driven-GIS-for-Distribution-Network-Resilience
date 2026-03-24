@@ -11,7 +11,6 @@ def diagnose_pole_connections(poles_to_check):
         
         bus_ids = {}
         for p_num in poles_to_check:
-            # Gather all bus IDs for this pole
             p = Post.query.filter_by(pole_number=p_num).first()
             ids = set()
             if p:
