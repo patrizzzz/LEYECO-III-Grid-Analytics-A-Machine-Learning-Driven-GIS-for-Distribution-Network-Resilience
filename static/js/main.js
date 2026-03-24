@@ -952,10 +952,10 @@ document.addEventListener('DOMContentLoaded', function () {
   };
 
   function getMunicipalityColor(name) {
-    if (!name) return '#999';
+    if (!name) return '#d1d5db';
     const n = name.trim().toLowerCase();
     
-    // Mapping based on Leyeco III System Map reference image
+    // Highlight specific municipalities in color, everything else gray
     if (n.includes('capoocan')) return '#ff7675';   // Pink/Reddish
     if (n.includes('carigara')) return '#74b9ff';   // Light Blue
     if (n.includes('barugo'))   return '#0984e3';   // Blue
@@ -965,14 +965,9 @@ document.addEventListener('DOMContentLoaded', function () {
     if (n.includes('santa fe'))  return '#fdcb6e';  // Orange
     if (n.includes('alangalang')) return '#6c5ce7'; // Purple/Magenta
     if (n.includes('pastrana'))  return '#00b894';  // Dark Green
-    if (n.includes('abuyog'))    return '#fab1a0';  // Salmon (Not on image)
-    if (n.includes('babatngon')) return '#fd79a8';  // Pink/Peach (Not on image)
     
-    // Default palette fallback
-    const palette = ['#ff3399', '#9933ff', '#33cc33', '#ff9933', '#33cccc', '#6600ff'];
-    let hash = 0;
-    for (let i = 0; i < name.length; i++) { hash = name.charCodeAt(i) + ((hash << 5) - hash); }
-    return palette[Math.abs(hash) % palette.length];
+    // Default color for non-highlighted municipalities
+    return '#d1d5db'; // Light Gray
   }
 
   function loadMunicipalities() {
