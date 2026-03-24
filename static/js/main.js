@@ -59,10 +59,42 @@ document.addEventListener('DOMContentLoaded', function () {
     return;
   }
 
-  const postsLayer = L.layerGroup();
+  const mainCanvas = L.canvas();
+  const postsLayer = L.markerClusterGroup({
+    disableClusteringAtZoom: 16,
+    spiderfyOnMaxZoom: true,
+    maxClusterRadius: 40,
+    showCoverageOnHover: false
+  });
   const latlongLayer = L.layerGroup();
   const connectionsLayer = L.layerGroup();
-  const networkLinesLayer = L.layerGroup();
+  const primaryLinesLayer = L.layerGroup().addTo(map);
+  const secondaryLinesLayer = L.layerGroup();
+  const municipalityLayer = L.geoJSON(null, {
+    style: function(feature) {
+      const name = feature.properties.name || 'Unknown';
+      return {
+        fillColor: getMunicipalityColor(name),
+        fillOpacity: 0.4,
+        color: '#fff',
+        weight: 1,
+        interactive: true
+      };
+    },
+    onEachFeature: function(feature, layer) {
+      if (feature.properties && feature.properties.name) {
+        layer.bindPopup('<strong>' + feature.properties.name + '</strong>');
+      }
+    }
+  });
+
+  // Ensure municipalityLayer is physically at the bottom of the map's panes if needed,
+  // or just add it first.
+  municipalityLayer.addTo(map);
+  // Re-add other layers in order to keep Z-index correct
+  primaryLinesLayer.addTo(map);
+  secondaryLinesLayer.addTo(map);
+  postsLayer.addTo(map);
 
   // Maps and Bounds - Must be defined here
   const postMarkers = {}; // map post_id -> marker
@@ -102,9 +134,11 @@ document.addEventListener('DOMContentLoaded', function () {
   };
 
   const overlays = {
+    'Municipalities': municipalityLayer,
     'Posts (canonical)': postsLayer,
     'LatLongData (raw)': latlongLayer,
-    'Network lines (DB)': networkLinesLayer
+    'Primary Lines': primaryLinesLayer,
+    'Secondary Lines': secondaryLinesLayer
   };
 
   // --- Global Line Color State ---
@@ -897,6 +931,70 @@ document.addEventListener('DOMContentLoaded', function () {
     if (normalizedCircuit === 'v phase') return '#0984e3'; // Blue
     return '#999';
   }
+
+  // --- Municipality Boundary Logic ---
+  const municipalityColors = {
+    // Default palette - consistent per name
+    'Pink': '#ff3399',
+    'Purple': '#9933ff',
+    'Green': '#33cc33',
+    'Orange': '#ff9933',
+    'Teal': '#33cccc',
+    'Violet': '#6600ff'
+  };
+
+  function getMunicipalityColor(name) {
+    if (!name) return '#999';
+    const keys = Object.keys(municipalityColors);
+    // Simple stable hash to pick a color from the predefined set
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+        hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const index = Math.abs(hash) % keys.size || Math.abs(hash) % keys.length;
+    return municipalityColors[keys[index]];
+  }
+
+  function loadMunicipalities() {
+    fetch('/static/data/municipality-boundaries.json')
+      .then(r => {
+        if (!r.ok) {
+            if (r.status === 404) {
+                console.warn('Municipality GeoJSON not found at /static/data/municipality-boundaries.json. Skipping boundaries.');
+            } else {
+                throw new Error('Fetch failed: ' + r.status);
+            }
+            return null;
+        }
+        return r.json();
+      })
+      .then(data => {
+        if (!data) return;
+        municipalityLayer.addData(data);
+        console.log('Municipality boundaries loaded.');
+      })
+      .catch(err => {
+        console.warn('Graceful skip: Municipality boundary loading failed:', err.message);
+      });
+  }
+
+  // --- Zoom Event Logic with Debounce ---
+  let zoomTimeout;
+  map.on('zoomend', function() {
+    clearTimeout(zoomTimeout);
+    zoomTimeout = setTimeout(function() {
+        const zoom = map.getZoom();
+        console.log('Map Zoom Level:', zoom);
+        
+        if (zoom < 13) {
+            if (map.hasLayer(postsLayer)) map.removeLayer(postsLayer);
+            if (map.hasLayer(secondaryLinesLayer)) map.removeLayer(secondaryLinesLayer);
+        } else {
+            if (!map.hasLayer(postsLayer)) map.addLayer(postsLayer);
+            if (!map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
+        }
+    }, 300);
+  });
 
   function updateNetworkLineColors() {
     function updateLayer(layer) {
@@ -1926,7 +2024,8 @@ document.addEventListener('DOMContentLoaded', function () {
             color: lineColor,
             weight: lineWeight,
             opacity: 0.7,
-            dashArray: dashArray
+            dashArray: dashArray,
+            renderer: mainCanvas // Enable Canvas Rendering
           });
 
           // Store circuit type for dynamic styling
@@ -1951,12 +2050,24 @@ document.addEventListener('DOMContentLoaded', function () {
           </div>`;
           polyline.bindPopup(popupText);
 
-          polyline.addTo(connectionsLayer);
+          // Separate into primary or secondary layer
+          const isSecondary = connType.toLowerCase().includes('secondary');
+          if (isSecondary) {
+            polyline.addTo(secondaryLinesLayer);
+          } else {
+            polyline.addTo(primaryLinesLayer);
+          }
           drawnCount++;
         });
 
         // Add layer to map
-        connectionsLayer.addTo(map);
+        // Refresh primary/secondary visibility based on current zoom
+        const zoom = map.getZoom();
+        if (zoom < 13) {
+            if (map.hasLayer(secondaryLinesLayer)) map.removeLayer(secondaryLinesLayer);
+        } else {
+            if (!map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
+        }
 
         console.log(`Line connections: ${drawnCount} drawn, ${skippedCount} skipped`);
       })
@@ -2032,7 +2143,8 @@ document.addEventListener('DOMContentLoaded', function () {
     fetch('/api/network-geometry')
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.statusText)); })
       .then(function (data) {
-        networkLinesLayer.clearLayers();
+        primaryLinesLayer.clearLayers();
+        secondaryLinesLayer.clearLayers();
         var lines = data.lines || [];
         var stats = data.stats || {};
         var hintEl = document.getElementById('network-geometry-hint');
@@ -2067,7 +2179,16 @@ document.addEventListener('DOMContentLoaded', function () {
           else if (connType.indexOf('Transformer_to_Secondary') !== -1) { weight = 2; }
           else if (connType === 'Primary_to_Secondary') { weight = 2.5; }
           else if (connType === 'Secondary_Line') { weight = 2; }
-          var poly = L.polyline(points, { color: color, weight: weight, opacity: 0.8, dashArray: dash, lineJoin: 'round', lineCap: 'round' });
+          
+          var poly = L.polyline(points, { 
+            color: color, 
+            weight: weight, 
+            opacity: 0.8, 
+            dashArray: dash, 
+            lineJoin: 'round', 
+            lineCap: 'round',
+            renderer: mainCanvas // Enable Canvas Rendering
+          });
 
           // Store circuit type and phasing for dynamic styling on layer change
           poly.circuitType = meta.circuit;
@@ -2094,9 +2215,24 @@ document.addEventListener('DOMContentLoaded', function () {
             </div>
           </div>`;
           poly.bindPopup(popup);
-          poly.addTo(networkLinesLayer);
+          
+          // Separate into primary or secondary layer
+          const isSecondary = connType.toLowerCase().includes('secondary');
+          if (isSecondary) {
+            poly.addTo(secondaryLinesLayer);
+          } else {
+            poly.addTo(primaryLinesLayer);
+          }
         });
-        networkLinesLayer.addTo(map);
+
+        // Trigger zoom visibility check immediately after loading
+        const zoom = map.getZoom();
+        if (zoom < 13) {
+            if (map.hasLayer(secondaryLinesLayer)) map.removeLayer(secondaryLinesLayer);
+        } else {
+            if (!map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
+        }
+
         // Refresh the feeder filter UI after network lines are loaded
         if (typeof window._refreshFeederList === 'function') window._refreshFeederList();
         var totalM = stats.total_length_meters != null ? stats.total_length_meters : 0;
@@ -2111,7 +2247,8 @@ document.addEventListener('DOMContentLoaded', function () {
     console.log('Calling loadLineConnections after posts...');
     loadLineConnections();
     loadNetworkGeometry();
-  }, 1000);
+    loadMunicipalities(); // Call municipality load
+  }, 500);
 
   // ---------- Bulk CSV/Excel import is now the primary method (removed single-post input) ----------
   // Users should use the resources page to upload CSV/Excel files for bulk post import
@@ -3332,7 +3469,8 @@ document.addEventListener('DOMContentLoaded', function () {
       weight: 4,
       opacity: 0.9,
       dashArray: '10 8',
-      lineJoin: 'round'
+      lineJoin: 'round',
+      renderer: mainCanvas // Enable Canvas Rendering
     }).addTo(routeLayer);
     _routePolyline = polyline;
 
@@ -3425,7 +3563,8 @@ document.addEventListener('DOMContentLoaded', function () {
             if (isAffected) {
                 const highlightPoly = L.polyline(layer.getLatLngs(), {
                     className: type === 'outage' ? 'analysis-highlight-outage' : 'analysis-highlight-trace',
-                    interactive: false
+                    interactive: false,
+                    renderer: mainCanvas // Enable Canvas Rendering
                 }).addTo(analysisHighlightLayers);
             }
         }
