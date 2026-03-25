@@ -1,1 +1,0 @@
-['Count', 'Shunt Capacitor ID', 'Bus Connected \n(Bus ID)', 'Phase Type', 'Phasing', 'Voltage Rating (kV)', 'KVAR Rating Phase A', 'KVAR Rating Phase B', 'KVAR Rating Phase C', 'Power Loss (Watts)']
