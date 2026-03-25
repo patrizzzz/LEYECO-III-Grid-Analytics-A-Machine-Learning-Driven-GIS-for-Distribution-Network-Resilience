@@ -8,7 +8,6 @@ __pycache__/
 instance/
 /*.sqlite
 
-
 # Temporary and Debugging files
 tmp/
 debug_*.py
