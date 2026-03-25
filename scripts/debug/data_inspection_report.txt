@@ -1,0 +1,46 @@
+=== DATA INSPECTION REPORT ===
+Total Posts: 240
+Total BusNodes: 2271
+Total DistributionLineSegments: 236
+Total SecondaryLineSegments: 1851
+Total LineConnections: 15185
+
+--- Sample Posts (Pole 1 - 5) ---
+ID: 1 | PoleNum: 1 | Name: Pole 1 | Feeder: F1 | BusID: P00000000
+ID: 2 | PoleNum: 2 | Name: Pole 2 | Feeder: F1 | BusID: P00000001
+ID: 3 | PoleNum: 3 | Name: Pole 3 | Feeder: F1 | BusID: P00000001-7
+ID: 4 | PoleNum: 4 | Name: Pole 4 | Feeder: F1 | BusID: P00000001-7A
+ID: 5 | PoleNum: 5 | Name: Pole 5 | Feeder: F1 | BusID: P00000001-9
+ID: 6 | PoleNum: 6 | Name: Pole 6 | Feeder: F1 | BusID: P00000001-17
+ID: 7 | PoleNum: 7 | Name: Pole 7 | Feeder: F1 | BusID: P00000001-19
+ID: 8 | PoleNum: 8 | Name: Pole 8 | Feeder: F1 | BusID: P00000001-19-10
+ID: 9 | PoleNum: 9 | Name: Pole 9 | Feeder: F1 | BusID: P00000001-19-38
+ID: 10 | PoleNum: 10 | Name: Pole 10 | Feeder: F1 | BusID: P00000001-24
+
+--- Sample BusNodes (First 10) ---
+ID: 1 | BusID: P00000000 | PoleNum: 1 | Feeder: F1
+ID: 2 | BusID: P00000001 | PoleNum: 2 | Feeder: F1
+ID: 3 | BusID: P00000001-7 | PoleNum: 3 | Feeder: F1
+ID: 4 | BusID: P00000001-7A | PoleNum: 4 | Feeder: F1
+ID: 5 | BusID: P00000001-9 | PoleNum: 5 | Feeder: F1
+ID: 6 | BusID: P00000001-17 | PoleNum: 6 | Feeder: F1
+ID: 7 | BusID: P00000001-19 | PoleNum: 7 | Feeder: F1
+ID: 8 | BusID: P00000001-19-10 | PoleNum: 8 | Feeder: F1
+ID: 9 | BusID: P00000001-19-38 | PoleNum: 9 | Feeder: F1
+ID: 10 | BusID: P00000001-24 | PoleNum: 10 | Feeder: F1
+
+--- Sample Distribution Line Segments (First 10) ---
+ID: 1 | SegmentID: DXTUNGF2AC001 | From: P00000000 | To: P00000001 | Phasing: ABCN
+ID: 2 | SegmentID: DXTUNGF2AC007 | From: P00000001 | To: P00000001-7 | Phasing: ABCN
+ID: 3 | SegmentID: DXTUNGF2AC07A | From: P00000001-7 | To: P00000001-7A | Phasing: ABCN
+ID: 4 | SegmentID: DXTUNGF2AC009 | From: P00000001-7 | To: P00000001-9 | Phasing: ABCN
+ID: 5 | SegmentID: DXTUNGF2AC017 | From: P00000001-9 | To: P00000001-17 | Phasing: ABCN
+ID: 6 | SegmentID: DXTUNGF2AC019 | From: P00000001-17 | To: P00000001-19 | Phasing: ABCN
+ID: 7 | SegmentID: DXTUNGF2AA000019-10 | From: P00000001-19 | To: P00000001-19-10 | Phasing: CN
+ID: 8 | SegmentID: DXTUNGF2AA000019-38 | From: P00000001-19-10 | To: P00000001-19-38 | Phasing: CN
+ID: 9 | SegmentID: DXTUNGF2AC024 | From: P00000001-19 | To: P00000001-24 | Phasing: ABCN
+ID: 10 | SegmentID: DXTUNGAF1C009 | From: P00000001 | To: P0000000009 | Phasing: ABCN
+
+--- Searching for Segments related to Post 1 (Bus: P00000000, PoleNum: 1) ---
+Matches by exact BusID 'P00000000': 1
+Matches by PoleNum '1' or 'P1': 0

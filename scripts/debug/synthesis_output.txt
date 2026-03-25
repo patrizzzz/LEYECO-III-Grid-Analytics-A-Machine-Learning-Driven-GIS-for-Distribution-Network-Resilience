@@ -1,0 +1,42 @@
+﻿--- Pattern Verification ---
+Found 40 poles with both IDs.
+Pole 74: T=74, S=4 -> Synthetic: 74-4
+Pole 73: T=73, S=5 -> Synthetic: 73-5
+Pole 64: T=63, S=4 -> Synthetic: 63-4
+Pole 64-b: T=63-B, S=4-B -> Synthetic: 63-B-4-B
+Pole 64-j: T=64-J, S=8 -> Synthetic: 64-J-8
+Pole 63: T=63, S=5 -> Synthetic: 63-5
+Pole 57: T=57, S=2 -> Synthetic: 57-2
+Pole 55: T=54, S=4 -> Synthetic: 54-4
+Pole 48-a: T=48, S=48-A -> Synthetic: 48-48-A
+Pole 47-a-e-L: T=47-A-E-K, S=47-A-E-K -> Synthetic: 47-A-E-K-47-A-E-K
+Pole 47-a-e-S-C: T=47-A-E-S-B, S=47-A-E-S-B -> Synthetic: 47-A-E-S-B-47-A-E-S-B
+Pole 47-a-e-S-D: T=47-A-E-S-B, S=47-A-E-S-C -> Synthetic: 47-A-E-S-B-47-A-E-S-C
+Pole 47-a-e-S-E: T=47-A-E-S-B, S=47-A-E-S-D -> Synthetic: 47-A-E-S-B-47-A-E-S-D
+Pole 133-4-a: T=133-4, S=133-4 -> Synthetic: 133-4-133-4
+Pole 133-4-b: T=133-4-A, S=133-4-A -> Synthetic: 133-4-A-133-4-A
+Pole 133-5: T=133-4-B, S=133-4-B -> Synthetic: 133-4-B-133-4-B
+Pole 133-9: T=133-8, S=133-8 -> Synthetic: 133-8-133-8
+Pole 133-4-b-2: T=133-4-A, S=133-4-A -> Synthetic: 133-4-A-133-4-A
+Pole 133-4-b-1: T=133-4-B-2, S=133-4-B-2 -> Synthetic: 133-4-B-2-133-4-B-2
+Pole 133-4-b-3: T=133-4-B-3, S=133-4-B-1 -> Synthetic: 133-4-B-3-133-4-B-1
+Pole 133-4-b-3-A: T=133-4-B-3, S=133-4-B-3-C -> Synthetic: 133-4-B-3-133-4-B-3-C
+Pole 133-12-b-1: T=1133-12-B, S=133-12-B -> Synthetic: 1133-12-B-133-12-B
+Pole 133-12-I: T=133-12-H, S=133-12-H -> Synthetic: 133-12-H-133-12-H
+Pole 133-12-J: T=133-12-H, S=133-12-I -> Synthetic: 133-12-H-133-12-I
+Pole 99-4: T=99-3, S=99-3 -> Synthetic: 99-3-99-3
+Pole 99-10B-a: T=99-10B, S=99-10B -> Synthetic: 99-10B-99-10B
+Pole 99-8-b: T=99-8-A, S=99-8 -> Synthetic: 99-8-A-99-8
+Pole 99-8-c: T=99-8-B, S=99-8-B -> Synthetic: 99-8-B-99-8-B
+Pole 99-13: T=99-12, S=99-12 -> Synthetic: 99-12-99-12
+Pole 99-13a: T=99-12, S=99-12 -> Synthetic: 99-12-99-12
+Pole 99-18: T=99-17, S=99-17 -> Synthetic: 99-17-99-17
+Pole 101: T=100, S=100 -> Synthetic: 100-100
+Pole 87: T=86, S=86 -> Synthetic: 86-86
+Pole 124: T=123-3, S=123-3 -> Synthetic: 123-3-123-3
+Pole 127: T=126, S=126 -> Synthetic: 126-126
+Pole 129: T=128-1, S=128-1 -> Synthetic: 128-1-128-1
+Pole 135-4: T=MMK YES IIOBV GOOD GONNA BB BB NA, S=135-4 -> Synthetic: MMK YES IIOBV GOOD GONNA BB BB NA-135-4
+Pole 135-10-a: T=135-10, S=135-10 -> Synthetic: 135-10-135-10
+Pole 135-10-b-1: T=135_10-B, S=135-10-B -> Synthetic: 135_10-B-135-10-B
+Pole 135-17: T=135-16, S=135-16 -> Synthetic: 135-16-135-16

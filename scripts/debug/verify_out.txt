@@ -1,0 +1,6 @@
+﻿Verifying trace for customer: 2020140010
+SUCCESS: Found location!
+  ID: 184
+  Name: Pole 184
+  Coords: 11.2926, 124.647
+WARNING: Customer found but not at Pole 90.

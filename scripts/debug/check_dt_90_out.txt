@@ -1,0 +1,9 @@
+﻿DT: DT0000000090U
+  From Primary Bus: P0000000090
+  To Secondary Bus: DT0000000090
+BusNode for P0000000090:
+  Pole: 43, Lat: 11.2786, Lng: 124.729
+NO Post found for P0000000090
+Post 90:
+  Bus ID: 90
+  Coords: 11.2958, 124.699
