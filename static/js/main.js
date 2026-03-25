@@ -149,9 +149,28 @@ document.addEventListener('DOMContentLoaded', function () {
     'Secondary Lines': secondaryLinesLayer
   };
 
+  // Track whether each line layer overlay is enabled by the user (Layers section checkboxes)
+  let primaryLayerOverlayOn = true;
+  let secondaryLayerOverlayOn = true;
+
   // --- Global Line Color State ---
   let globalLineColor = localStorage.getItem('globalLineColor') || null;
   let usePhasingColor = localStorage.getItem('usePhasingColor') === 'true' || false;
+
+  // --- Global Line Weight State (separate per line type) ---
+  let primaryLineWeight = parseInt(localStorage.getItem('primaryLineWeight')) || 3;
+  let secondaryLineWeight = parseInt(localStorage.getItem('secondaryLineWeight')) || 2;
+
+  // Helper function to get weight per connection type
+  function getLineWeight(connType) {
+    if (!connType) return primaryLineWeight;
+    const type = String(connType).toLowerCase();
+    if (type.includes('secondary')) {
+      return secondaryLineWeight;
+    }
+    // primary, transformer, distribution_line, default => use primaryLineWeight
+    return primaryLineWeight;
+  }
 
   // --- Feeder filter state ---
   let knownFeeders = new Set();
@@ -393,8 +412,15 @@ document.addEventListener('DOMContentLoaded', function () {
       cb.checked = isOn;
       if (isOn) overlays[name].addTo(map);
       cb.addEventListener('change', function () {
-        if (this.checked) { overlays[name].addTo(map); }
-        else { map.removeLayer(overlays[name]); }
+        if (this.checked) {
+          overlays[name].addTo(map);
+          if (name === 'Primary Lines') primaryLayerOverlayOn = true;
+          if (name === 'Secondary Lines') secondaryLayerOverlayOn = true;
+        } else {
+          map.removeLayer(overlays[name]);
+          if (name === 'Primary Lines') primaryLayerOverlayOn = false;
+          if (name === 'Secondary Lines') secondaryLayerOverlayOn = false;
+        }
       });
       const span = document.createElement('span');
       span.textContent = name;
@@ -623,9 +649,82 @@ document.addEventListener('DOMContentLoaded', function () {
     colorRow.appendChild(colorInput);
     colorRow.appendChild(resetBtn);
 
+    // Stroke weight slider — Primary Lines
+    const priWeightRow = document.createElement('div');
+    priWeightRow.className = 'msp-color-row';
+    priWeightRow.style.marginTop = '8px';
+
+    const priWeightLabel = document.createElement('span');
+    priWeightLabel.textContent = 'Primary Thickness';
+    priWeightLabel.className = 'msp-color-label';
+
+    const priWeightContainer = document.createElement('div');
+    priWeightContainer.style.display = 'flex';
+    priWeightContainer.style.alignItems = 'center';
+    priWeightContainer.style.flex = '1';
+    priWeightContainer.style.gap = '8px';
+
+    const priWeightInput = document.createElement('input');
+    priWeightInput.type = 'range';
+    priWeightInput.min = '1';
+    priWeightInput.max = '10';
+    priWeightInput.step = '1';
+    priWeightInput.value = primaryLineWeight;
+    priWeightInput.style.flex = '1';
+    priWeightInput.style.cursor = 'pointer';
+
+    const priWeightDisplay = document.createElement('span');
+    priWeightDisplay.textContent = primaryLineWeight;
+    priWeightDisplay.style.minWidth = '20px';
+    priWeightDisplay.style.textAlign = 'right';
+    priWeightDisplay.style.fontSize = '12px';
+    priWeightDisplay.style.fontWeight = '500';
+
+    priWeightContainer.appendChild(priWeightInput);
+    priWeightContainer.appendChild(priWeightDisplay);
+    priWeightRow.appendChild(priWeightLabel);
+    priWeightRow.appendChild(priWeightContainer);
+
+    // Stroke weight slider — Secondary Lines
+    const secWeightRow = document.createElement('div');
+    secWeightRow.className = 'msp-color-row';
+    secWeightRow.style.marginTop = '6px';
+
+    const secWeightLabel = document.createElement('span');
+    secWeightLabel.textContent = 'Secondary Thickness';
+    secWeightLabel.className = 'msp-color-label';
+
+    const secWeightContainer = document.createElement('div');
+    secWeightContainer.style.display = 'flex';
+    secWeightContainer.style.alignItems = 'center';
+    secWeightContainer.style.flex = '1';
+    secWeightContainer.style.gap = '8px';
+
+    const secWeightInput = document.createElement('input');
+    secWeightInput.type = 'range';
+    secWeightInput.min = '1';
+    secWeightInput.max = '10';
+    secWeightInput.step = '1';
+    secWeightInput.value = secondaryLineWeight;
+    secWeightInput.style.flex = '1';
+    secWeightInput.style.cursor = 'pointer';
+
+    const secWeightDisplay = document.createElement('span');
+    secWeightDisplay.textContent = secondaryLineWeight;
+    secWeightDisplay.style.minWidth = '20px';
+    secWeightDisplay.style.textAlign = 'right';
+    secWeightDisplay.style.fontSize = '12px';
+    secWeightDisplay.style.fontWeight = '500';
+
+    secWeightContainer.appendChild(secWeightInput);
+    secWeightContainer.appendChild(secWeightDisplay);
+    secWeightRow.appendChild(secWeightLabel);
+    secWeightRow.appendChild(secWeightContainer);
+
     // Phasing toggle row
     const phasingRow = document.createElement('label');
     phasingRow.className = 'msp-option';
+    phasingRow.style.marginTop = '8px';
 
     const phasingCb = document.createElement('input');
     phasingCb.type = 'checkbox';
@@ -646,6 +745,8 @@ document.addEventListener('DOMContentLoaded', function () {
     phasingRow.appendChild(helpIcon);
 
     vizSection.appendChild(colorRow);
+    vizSection.appendChild(priWeightRow);
+    vizSection.appendChild(secWeightRow);
     vizSection.appendChild(phasingRow);
 
     // Event handlers for visualization controls
@@ -663,6 +764,20 @@ document.addEventListener('DOMContentLoaded', function () {
       colorInput.value = '#000000';
       resetBtn.style.display = 'none';
       updateNetworkLineColors();
+    });
+
+    priWeightInput.addEventListener('input', function (e) {
+      primaryLineWeight = parseInt(e.target.value);
+      priWeightDisplay.textContent = primaryLineWeight;
+      localStorage.setItem('primaryLineWeight', primaryLineWeight);
+      updateNetworkLineWeights();
+    });
+
+    secWeightInput.addEventListener('input', function (e) {
+      secondaryLineWeight = parseInt(e.target.value);
+      secWeightDisplay.textContent = secondaryLineWeight;
+      localStorage.setItem('secondaryLineWeight', secondaryLineWeight);
+      updateNetworkLineWeights();
     });
 
     phasingCb.addEventListener('change', function () {
@@ -1006,7 +1121,8 @@ document.addEventListener('DOMContentLoaded', function () {
             if (map.hasLayer(secondaryLinesLayer)) map.removeLayer(secondaryLinesLayer);
         } else {
             if (!map.hasLayer(postsLayer)) map.addLayer(postsLayer);
-            if (!map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
+            // Only re-add layers if the user's overlay checkbox is ON
+            if (secondaryLayerOverlayOn && !map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
         }
     }, 300);
   });
@@ -1018,8 +1134,21 @@ document.addEventListener('DOMContentLoaded', function () {
         layer.setStyle({ color: color });
       }
     }
-    networkLinesLayer.eachLayer(updateLayer);
     connectionsLayer.eachLayer(updateLayer);
+    primaryLinesLayer.eachLayer(updateLayer);
+    secondaryLinesLayer.eachLayer(updateLayer);
+  }
+
+  function updateNetworkLineWeights() {
+    function updateWeight(layer) {
+      if (layer instanceof L.Polyline && layer._connType) {
+        const weight = getLineWeight(layer._connType);
+        layer.setStyle({ weight: weight });
+      }
+    }
+    connectionsLayer.eachLayer(updateWeight);
+    primaryLinesLayer.eachLayer(updateWeight);
+    secondaryLinesLayer.eachLayer(updateWeight);
   }
 
   function haversine(lat1, lon1, lat2, lon2) {
@@ -2021,16 +2150,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
           // Determine line color
           const lineColor = getLineColor(conn.circuit, conn.phasing);
-          let lineWeight = 2;
+          let lineWeight = getLineWeight(connType);
           let dashArray = null;
 
-          // Adjust weight and dash based on connection type
-          if (connType.includes('Primary')) {
-            lineWeight = 3;
-          } else if (connType.includes('Transformer')) {
-            lineWeight = 2.5;
-          } else if (connType.includes('Secondary')) {
-            lineWeight = 2;
+          // Adjust dash based on connection type
+          if (connType.includes('Secondary')) {
             dashArray = null; // Changed from '5, 5' to null to ensure solid lines
           }
 
@@ -2075,13 +2199,12 @@ document.addEventListener('DOMContentLoaded', function () {
           drawnCount++;
         });
 
-        // Add layer to map
-        // Refresh primary/secondary visibility based on current zoom
+        // Refresh visibility based on current zoom and user overlay state
         const zoom = map.getZoom();
         if (zoom < 13) {
             if (map.hasLayer(secondaryLinesLayer)) map.removeLayer(secondaryLinesLayer);
         } else {
-            if (!map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
+            if (secondaryLayerOverlayOn && !map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
         }
 
         console.log(`Line connections: ${drawnCount} drawn, ${skippedCount} skipped`);
@@ -2186,14 +2309,8 @@ document.addEventListener('DOMContentLoaded', function () {
           if (points.length < 2) return;
           var connType = meta.connection_type || '';
           var color = getLineColor(meta.circuit, meta.phasing);
-          var weight = 2;
+          var weight = getLineWeight(connType);
           var dash = null;
-          if (connType.indexOf('Primary_to_Primary') !== -1) { weight = 3; }
-          else if (connType === 'Distribution_Line') { weight = 3; }
-          else if (connType.indexOf('Primary_to_Transformer') !== -1) { weight = 2.5; }
-          else if (connType.indexOf('Transformer_to_Secondary') !== -1) { weight = 2; }
-          else if (connType === 'Primary_to_Secondary') { weight = 2.5; }
-          else if (connType === 'Secondary_Line') { weight = 2; }
           
           var poly = L.polyline(points, { 
             color: color, 
@@ -2240,12 +2357,12 @@ document.addEventListener('DOMContentLoaded', function () {
           }
         });
 
-        // Trigger zoom visibility check immediately after loading
+        // Trigger zoom visibility check immediately after loading, respecting overlay state
         const zoom = map.getZoom();
         if (zoom < 13) {
             if (map.hasLayer(secondaryLinesLayer)) map.removeLayer(secondaryLinesLayer);
         } else {
-            if (!map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
+            if (secondaryLayerOverlayOn && !map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
         }
 
         // Refresh the feeder filter UI after network lines are loaded
