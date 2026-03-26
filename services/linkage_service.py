@@ -2,18 +2,36 @@ import re
 from extensions import db
 from models import Post, DistributionTransformer
 
+class LinkageContext:
+    """Helper to cache lookup maps for fuzzy matching to avoid repeated O(P) work."""
+    def __init__(self, posts=None, bus_nodes=None):
+        posts = posts or []
+        bus_nodes = bus_nodes or []
+        self.post_by_id = {str(p.id): p for p in posts}
+        self.post_by_pole = {str(p.pole_number).strip().lower(): p for p in posts if p.pole_number}
+        self.post_by_bus = {str(p.primary_bus_id).strip().lower(): p for p in posts if p.primary_bus_id}
+        self.bus_node_map = {str(bn.bus_id).strip().lower(): bn.pole_id for bn in bus_nodes if bn.bus_id and bn.pole_id}
+
 class LinkageService:
     """Consolidated topology reconciliation logic from legacy heal scripts."""
     
     @staticmethod
-    def fuzzy_match_transformer_to_post(transformer, posts, bus_node_map=None):
+    def fuzzy_match_transformer_to_post(transformer, posts=None, bus_node_map=None, context=None):
         """
         Attempts to find a physical Post for a given Transformer based on bus IDs.
         Prioritizes explicit post_id mapping from BusNodes.
         """
-        post_by_id = {str(p.id): p for p in posts}
-        post_by_pole = {str(p.pole_number).strip().lower(): p for p in posts if p.pole_number}
-        post_by_bus = {str(p.primary_bus_id).strip().lower(): p for p in posts if p.primary_bus_id}
+        if context:
+            post_by_id = context.post_by_id
+            post_by_pole = context.post_by_pole
+            post_by_bus = context.post_by_bus
+            bus_node_map = context.bus_node_map
+        else:
+            # Fallback for single-row usage (legacy behavior)
+            post_by_id = {str(p.id): p for p in posts or []}
+            post_by_pole = {str(p.pole_number).strip().lower(): p for p in posts or [] if p.pole_number}
+            post_by_bus = {str(p.primary_bus_id).strip().lower(): p for p in posts or [] if p.primary_bus_id}
+            bus_node_map = bus_node_map or {}
         
         buses_to_check = [
             str(transformer.from_primary_bus_id or "").strip(), 
@@ -63,12 +81,11 @@ class LinkageService:
         posts = Post.query.all()
         bus_nodes = BusNode.query.all()
         
-        # Build map: bus_id (lower) -> pole_id (integer)
-        bus_node_map = {str(bn.bus_id).strip().lower(): bn.pole_id for bn in bus_nodes if bn.bus_id and bn.pole_id}
+        context = LinkageContext(posts=posts, bus_nodes=bus_nodes)
         
         count = 0
         for t in transformers:
-            p = cls.fuzzy_match_transformer_to_post(t, posts, bus_node_map=bus_node_map)
+            p = cls.fuzzy_match_transformer_to_post(t, context=context)
             if p:
                 p.has_transformer = True
                 p.kva_rating = t.kva_rating

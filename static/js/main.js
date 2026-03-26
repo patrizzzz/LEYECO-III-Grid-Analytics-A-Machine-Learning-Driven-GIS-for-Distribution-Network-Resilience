@@ -73,9 +73,9 @@ document.addEventListener('DOMContentLoaded', function () {
   const networkLinesLayer = L.layerGroup().addTo(map);
   const municipalityLayer = L.geoJSON(null, {
     style: function(feature) {
-      const name = feature.properties.NAME_2 || feature.properties.name || 'Unknown';
+      const muniName = feature.properties.NAME_2 || feature.properties.name || 'Unknown';
       return {
-        fillColor: getMunicipalityColor(name),
+        fillColor: getMunicipalityColor(muniName),
         fillOpacity: 0.4,
         color: '#fff',
         weight: 1,
@@ -83,18 +83,96 @@ document.addEventListener('DOMContentLoaded', function () {
       };
     },
     onEachFeature: function(feature, layer) {
-      const name = feature.properties.NAME_2 || feature.properties.name || 'Unknown';
-      if (name) {
-        layer.bindPopup('<strong>' + name + '</strong>');
-        // Add permanent label
-        layer.bindTooltip(name, {
-            permanent: true,
-            direction: 'center',
-            className: 'municipality-label',
-            opacity: 0.8
-        });
+      const muniName = feature.properties.NAME_2 || feature.properties.name || 'Unknown';
+      const brgyName = feature.properties.NAME_3 || '';
+      
+      // Store names on the layer for easy access in zoom-dependent labeling
+      layer._muniName = muniName;
+      layer._brgyName = brgyName;
+      
+      const displayName = brgyName ? brgyName + ', ' + muniName : muniName;
+      
+      if (displayName) {
+        layer.bindPopup('<strong>' + displayName + '</strong>');
       }
     }
+  });
+
+  // Layer group for centered municipality labels (zoomed out)
+  const muniLabelsLayer = L.layerGroup().addTo(map);
+
+  function calculateMunicipalityCenters() {
+    muniLabelsLayer.clearLayers();
+    const muniBounds = {};
+
+    municipalityLayer.eachLayer(function(layer) {
+      const name = layer._muniName;
+      if (!name) return;
+      
+      if (!muniBounds[name]) {
+        muniBounds[name] = layer.getBounds();
+      } else {
+        muniBounds[name].extend(layer.getBounds());
+      }
+    });
+
+    for (const name in muniBounds) {
+      const center = muniBounds[name].getCenter();
+      
+      // Create a small invisible marker at the center to hold the tooltip
+      const labelMarker = L.circleMarker(center, {
+        radius: 0,
+        opacity: 0,
+        fillOpacity: 0,
+        interactive: false
+      });
+      
+      labelMarker.bindTooltip(name, {
+        permanent: true,
+        direction: 'center',
+        className: 'municipality-label center-label',
+        opacity: 1.0
+      });
+      
+      muniLabelsLayer.addLayer(labelMarker);
+    }
+  }
+
+  function updateMunicipalityLabels() {
+    const zoom = map.getZoom();
+    const threshold = 13;
+
+    if (zoom < threshold) {
+      // Zoomed Out: Show centered municipality labels
+      if (!map.hasLayer(muniLabelsLayer)) map.addLayer(muniLabelsLayer);
+      
+      // Hide all individual barangay tooltips
+      municipalityLayer.eachLayer(function(layer) {
+        layer.unbindTooltip();
+      });
+    } else {
+      // Zoomed In: Show ALL Barangay names, hide centered muni labels
+      if (map.hasLayer(muniLabelsLayer)) map.removeLayer(muniLabelsLayer);
+
+      municipalityLayer.eachLayer(function(layer) {
+        const brgyName = layer._brgyName;
+        layer.unbindTooltip();
+        if (brgyName) {
+          layer.bindTooltip(brgyName, {
+            permanent: true,
+            direction: 'center',
+            className: 'municipality-label brgy-label',
+            opacity: 0.8
+          });
+        }
+      });
+    }
+  }
+
+  // Ensure labels update whenever data is added or map is zoomed
+  municipalityLayer.on('add', () => {
+    calculateMunicipalityCenters();
+    updateMunicipalityLabels();
   });
 
   // Ensure municipalityLayer is physically at the bottom of the map's panes if needed,
@@ -1093,11 +1171,12 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function loadMunicipalities() {
-    fetch('/static/data/municipality-boundaries.json')
+    // Fetching the pre-filtered Barangay boundaries (Level 3) for the 9 target municipalities
+    fetch('/static/data/barangay-boundaries.json')
       .then(r => {
         if (!r.ok) {
             if (r.status === 404) {
-                console.warn('Municipality GeoJSON not found at /static/data/municipality-boundaries.json. Skipping boundaries.');
+                console.warn('Barangay GeoJSON not found at /static/data/barangay-boundaries.json. Skipping boundaries.');
             } else {
                 throw new Error('Fetch failed: ' + r.status);
             }
@@ -1108,10 +1187,12 @@ document.addEventListener('DOMContentLoaded', function () {
       .then(data => {
         if (!data) return;
         municipalityLayer.addData(data);
-        console.log('Municipality boundaries loaded.');
+        calculateMunicipalityCenters(); // Recalculate centers after data load
+        updateMunicipalityLabels(); // Refresh labels after data load
+        console.log('Barangay boundaries loaded.');
       })
       .catch(err => {
-        console.warn('Graceful skip: Municipality boundary loading failed:', err.message);
+        console.warn('Graceful skip: Barangay boundary loading failed:', err.message);
       });
   }
 
@@ -1122,6 +1203,9 @@ document.addEventListener('DOMContentLoaded', function () {
     zoomTimeout = setTimeout(function() {
         const zoom = map.getZoom();
         console.log('Map Zoom Level:', zoom);
+        
+        // Update Municipality/Barangay labels based on zoom
+        updateMunicipalityLabels();
         
         if (zoom < 13) {
             if (map.hasLayer(postsLayer)) map.removeLayer(postsLayer);

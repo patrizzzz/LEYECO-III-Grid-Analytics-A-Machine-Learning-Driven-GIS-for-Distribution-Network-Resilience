@@ -27,19 +27,24 @@ class BaseImporter:
 
     def get_reader(self):
         try:
+            # Use io.TextIOWrapper to stream from the file-like object without loading all into memory
             if hasattr(self.csv_file, 'stream'):
                 self.csv_file.stream.seek(0)
-                content = self.csv_file.stream.read()
+                # Wrap the binary stream in a TextIOWrapper for line-by-line reading
+                stream = io.TextIOWrapper(self.csv_file.stream, encoding='utf-8-sig', errors='replace')
             else:
                 self.csv_file.seek(0)
-                content = self.csv_file.read()
+                # Handle cases where it's already a text stream or bytes
+                if hasattr(self.csv_file, 'read'):
+                    first_bits = self.csv_file.read(1024)
+                    self.csv_file.seek(0)
+                    if isinstance(first_bits, bytes):
+                        stream = io.TextIOWrapper(self.csv_file, encoding='utf-8-sig', errors='replace')
+                    else:
+                        stream = self.csv_file
+                else:
+                    return None
 
-            try:
-                text = content.decode('utf-8-sig')
-            except UnicodeDecodeError:
-                text = content.decode('cp1252', errors='replace')
-
-            stream = io.StringIO(text, newline=None)
             return csv.DictReader(stream)
         except Exception as e:
             current_app.logger.error(f"Failed to read CSV {self.filename}: {e}")
@@ -51,7 +56,7 @@ class BaseImporter:
             return {'error': f"Failed to read CSV: {self.filename}"}
 
         try:
-            # Create a placeholder history record to get an ID that we can use for all rows
+            # Create a history record at the start
             h = UploadHistory(
                 file_type=self.file_type,
                 filename=self.filename,
@@ -73,6 +78,12 @@ class BaseImporter:
         except Exception as e:
             db.session.rollback()
             current_app.logger.error(f"Import failed for {self.filename}: {e}")
+            # Update history record to show failure if it was created
+            try:
+                # We need a new session or to avoid rolling back the whole thing if we want to log the error in DB
+                # but standard practice is to let the 500 hander or the log show it if rollback happens.
+                pass
+            except: pass
             return {'error': str(e)}
 
     def process_rows(self, reader):
@@ -80,15 +91,11 @@ class BaseImporter:
         raise NotImplementedError
 
     def commit_changes(self):
+        """
+        Deprecated. Use the context-managed run() flow instead.
+        Internal commits should be handled via db.session.commit() or batching.
+        """
         db.session.commit()
-        if self.stats['created'] > 0 or self.stats['updated'] > 0:
-            h = UploadHistory(
-                file_type=self.file_type,
-                filename=self.filename,
-                record_count=self.stats['created'] + self.stats['updated']
-            )
-            db.session.add(h)
-            db.session.commit()
 
     def get_val(self, row, field_name):
         """Helper to get a value using pre-defined mappings."""
