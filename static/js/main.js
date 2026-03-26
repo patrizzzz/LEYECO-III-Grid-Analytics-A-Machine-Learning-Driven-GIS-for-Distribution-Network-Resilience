@@ -70,6 +70,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const connectionsLayer = L.layerGroup();
   const primaryLinesLayer = L.layerGroup().addTo(map);
   const secondaryLinesLayer = L.layerGroup();
+  const networkLinesLayer = L.layerGroup().addTo(map);
   const municipalityLayer = L.geoJSON(null, {
     style: function(feature) {
       const name = feature.properties.NAME_2 || feature.properties.name || 'Unknown';
@@ -146,7 +147,8 @@ document.addEventListener('DOMContentLoaded', function () {
     'Posts (canonical)': postsLayer,
     'LatLongData (raw)': latlongLayer,
     'Primary Lines': primaryLinesLayer,
-    'Secondary Lines': secondaryLinesLayer
+    'Secondary Lines': secondaryLinesLayer,
+    'Network Lines (DB)': networkLinesLayer
   };
 
   // Track whether each line layer overlay is enabled by the user (Layers section checkboxes)
@@ -914,7 +916,9 @@ document.addEventListener('DOMContentLoaded', function () {
   function clearAllMapLayers() {
     postsLayer.clearLayers();
     connectionsLayer.clearLayers();
-    networkLinesLayer.clearLayers();
+    if (typeof networkLinesLayer !== 'undefined') networkLinesLayer.clearLayers();
+    primaryLinesLayer.clearLayers();
+    secondaryLinesLayer.clearLayers();
     latlongLayer.clearLayers();
     Object.keys(postMarkers).forEach(key => delete postMarkers[key]);
     Object.keys(busToPostMap).forEach(key => delete busToPostMap[key]);
@@ -2284,6 +2288,7 @@ document.addEventListener('DOMContentLoaded', function () {
     fetch('/api/network-geometry')
       .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error(r.statusText)); })
       .then(function (data) {
+        if (typeof networkLinesLayer !== 'undefined') networkLinesLayer.clearLayers();
         primaryLinesLayer.clearLayers();
         secondaryLinesLayer.clearLayers();
         var lines = data.lines || [];
@@ -2351,7 +2356,10 @@ document.addEventListener('DOMContentLoaded', function () {
           </div>`;
           poly.bindPopup(popup);
           
-          // Separate into primary or secondary layer
+          // Add to master network layer
+          if (typeof networkLinesLayer !== 'undefined') poly.addTo(networkLinesLayer);
+
+          // Separate into primary or secondary layer for legacy toggles (but don't add to map if networkLinesLayer is added)
           const isSecondary = connType.toLowerCase().includes('secondary');
           if (isSecondary) {
             poly.addTo(secondaryLinesLayer);
