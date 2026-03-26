@@ -4275,3 +4275,14 @@ main.content.premium-layout {
   text-shadow: 1px 1px 2px #000, -1px -1px 2px #000, 1px -1px 2px #000, -1px 1px 2px #000 !important;
   pointer-events: none !important;
 }
+
+.brgy-label {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  opacity: 0.9;
+}
+
+.center-label {
+  font-size: 16px !important;
+  font-weight: 800 !important;
+}
