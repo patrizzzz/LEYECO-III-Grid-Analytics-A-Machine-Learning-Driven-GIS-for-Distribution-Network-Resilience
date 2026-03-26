@@ -17,6 +17,9 @@ class PostImporter(BaseImporter):
 
     def process_rows(self, reader):
         existing_posts = {str(p.pole_number).strip().lower(): p for p in Post.query.all() if p.pole_number}
+        batch_size = 500
+        count = 0
+        
         for row in reader:
             pole_num = self.get_val(row, 'pole_number')
             
@@ -33,7 +36,7 @@ class PostImporter(BaseImporter):
                 post = existing_posts.get(key)
             
             if not post:
-                # Create new post if no pole_number provided or not found
+                # Create new post
                 post = Post(pole_number=pole_num)
                 db.session.add(post)
                 if pole_num:
@@ -46,14 +49,9 @@ class PostImporter(BaseImporter):
                 post.feeder = self.get_val(row, 'feeder')
                 post.phasing = self.get_val(row, 'phasing')
                 
-                # Set coordinates BEFORE flush to satisfy NOT NULL constraints
+                # Set coordinates
                 post.lat = lat_val if lat_val is not None else 0.0
                 post.lng = lng_val if lng_val is not None else 0.0
-                
-                # Flush to get the ID if we need to generate a default name
-                db.session.flush()
-                if not post.name:
-                    post.name = f"Pole {post.id}"
             else:
                 self.stats['updated'] += 1
                 # Existing post: update coordinates if provided
@@ -61,6 +59,19 @@ class PostImporter(BaseImporter):
                 if lng_val is not None: post.lng = lng_val
             
             post.upload_id = self.current_upload_id
+            
+            count += 1
+            if count % batch_size == 0:
+                db.session.flush()
+
+        db.session.flush()
+        
+        # Apply default naming in one bulk SQL statement for efficiency
+        try:
+            db.session.execute(db.text("UPDATE post SET name = 'Pole ' || id WHERE name IS NULL AND upload_id = :uid"), 
+                               {"uid": self.current_upload_id})
+        except Exception as e:
+            current_app.logger.warning(f"Bulk naming failed: {e}")
             # ... and so on
 
 class BusNodeImporter(BaseImporter):
@@ -76,7 +87,13 @@ class BusNodeImporter(BaseImporter):
     
     def process_rows(self, reader):
         existing_nodes = {n.bus_id.strip().lower(): n for n in BusNode.query.all()}
-        existing_posts = {str(p.pole_number).strip().lower(): p for p in Post.query.all() if p.pole_number}
+        # Use centralized lookup for posts: pole_number -> id AND id -> id
+        all_posts = Post.query.all()
+        post_by_pole = {str(p.pole_number).strip().lower(): p for p in all_posts if p.pole_number}
+        post_by_id = {p.id: p for p in all_posts}
+        
+        batch_size = 500
+        count = 0
         
         for row in reader:
             bus_id = self.get_val(row, 'bus_id')
@@ -104,18 +121,16 @@ class BusNodeImporter(BaseImporter):
             if node.pole_id:
                 try:
                     p_id = int(float(node.pole_id))
-                    p = Post.query.get(p_id)
+                    p = post_by_id.get(p_id)
                     if p:
-                        # Ensure node has the integer FK
                         node.pole_id = p.id
-                        # Optionallly sync pole_number for reference
                         node.pole_number = p.pole_number
                 except (ValueError, TypeError):
                     pass
             
             # 2. Try string pole_number if ID link failed
             if not p and node.pole_number:
-                p = existing_posts.get(str(node.pole_number).strip().lower())
+                p = post_by_pole.get(str(node.pole_number).strip().lower())
                 if p:
                     node.pole_id = p.id
 
@@ -123,6 +138,10 @@ class BusNodeImporter(BaseImporter):
                 node.lat, node.lng = p.lat, p.lng
                 if node.feeder:
                     p.feeder = node.feeder
+
+            count += 1
+            if count % batch_size == 0:
+                db.session.flush()
 
 class TransformerImporter(BaseImporter):
     file_type = 'transformers'
@@ -147,13 +166,17 @@ class TransformerImporter(BaseImporter):
     }
     
     def process_rows(self, reader):
-        from models import BusNode
+        from services.linkage_service import LinkageContext
         existing_tx = {str(t.transformer_id).strip().lower(): t for t in DistributionTransformer.query.all()}
-        all_posts = Post.query.all()
-        # Build map: bus_id (lower) -> pole_number (which represents the post_id from bus_data.csv)
-        # Build map: bus_id (lower) -> pole_id (integer)
+        
+        # Pre-build lookup context for efficient reconciliation
+        from models import BusNode
+        posts = Post.query.all()
         bus_nodes = BusNode.query.all()
-        bus_node_map = {str(bn.bus_id).strip().lower(): bn.pole_id for bn in bus_nodes if bn.bus_id and bn.pole_id}
+        context = LinkageContext(posts=posts, bus_nodes=bus_nodes)
+        
+        batch_size = 500
+        count = 0
         
         for row in reader:
             tx_id = self.get_val(row, 'transformer_id')
@@ -186,12 +209,16 @@ class TransformerImporter(BaseImporter):
             tx.exciting_current_pct = sanitize_float(self.get_val(row, 'exciting_current_pct'))
             tx.upload_id = self.current_upload_id
             
-            # Integrated Healing Logic
-            linked_post = LinkageService.fuzzy_match_transformer_to_post(tx, all_posts, bus_node_map=bus_node_map)
+            # Integrated Healing Logic with context
+            linked_post = LinkageService.fuzzy_match_transformer_to_post(tx, context=context)
             if linked_post:
                 linked_post.has_transformer = True
                 linked_post.kva_rating = tx.kva_rating
                 linked_post.transformer_bus_id = tx.from_primary_bus_id or tx.to_secondary_bus_id
+
+            count += 1
+            if count % batch_size == 0:
+                db.session.flush()
 
 
 class VoltageRegulatorImporter(BaseImporter):
