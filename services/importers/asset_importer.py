@@ -13,6 +13,32 @@ class PostImporter(BaseImporter):
         'phasing': ['phasing', 'Phasing'],
         'lat': ['latitude', 'Latitude', 'lat'],
         'lng': ['longitude', 'Longitude', 'lon', 'long'],
+        
+        # Primary Line Technical Fields
+        'configuration': ['Configuration', 'config'],
+        'system_grounding_type': ['System Grounding Type', 'grounding_type'],
+        'length_meters': ['Length (meters)', 'Length (m)', 'length', 'Length         (meters)'],
+        'conductor_type': ['Conductor Type', 'wire_type'],
+        'pri_conductor_size': ['Conductor Size', 'pri_conductor_size'],
+        'conductor_unit': ['Unit (C) ', 'Unit (C)', 'unit_c'],
+        'conductor_strands': ['Strands (C) ', 'Strands (C)', 'strands_c'],
+        'neutral_wire': ['Neutral Wire'],
+        'neutral_wire_type': ['Neutral Wire Type'],
+        'neutral_wire_size': ['Neutral Wire Size'],
+        'neutral_wire_unit': ['Unit (NW)'],
+        'neutral_wire_strands': ['Strands (NW)'],
+        'spacing_d12': ['Spacing D12 (meters)', 'spacing_d12'],
+        'spacing_d23': ['Spacing D23 (meters)', 'spacing_d23'],
+        'spacing_d13': ['Spacing D13 (meters)', 'spacing_d13'],
+        'spacing_d1n': ['Spacing D1n (meters)', 'spacing_d1n'],
+        'spacing_d2n': ['Spacing D2n (meters)', 'spacing_d2n'],
+        'spacing_d3n': ['Spacing D3n (meters)', 'spacing_d3n'],
+        'spacing_dc1_c2': ['Spacing DC1-C2 (meters)', 'spacing_dc1_c2'],
+        'height_h1': ['Height H1 (meters)', 'height_h1'],
+        'height_h2': ['Height H2 (meters)', 'height_h2'],
+        'height_h3': ['Height H3 (meters)', 'height_h3'],
+        'height_hn': ['Height Hn (meters)', 'height_hn'],
+        'earth_resistivity': ['Earth Resistivity (Ohm-meter)', 'earth_resistivity']
     }
 
     def process_rows(self, reader):
@@ -52,6 +78,23 @@ class PostImporter(BaseImporter):
                 # Set coordinates
                 post.lat = lat_val if lat_val is not None else 0.0
                 post.lng = lng_val if lng_val is not None else 0.0
+
+                # Technical fields for primary line
+                for f in [
+                    'configuration', 'system_grounding_type', 'conductor_type',
+                    'conductor_unit', 'conductor_strands', 'neutral_wire',
+                    'neutral_wire_type', 'neutral_wire_size', 'neutral_wire_unit', 'neutral_wire_strands'
+                ]:
+                    setattr(post, f, self.get_val(row, f))
+                
+                post.pri_conductor_size = self.get_val(row, 'pri_conductor_size')
+                
+                for f in [
+                    'length_meters', 'spacing_d12', 'spacing_d23', 'spacing_d13', 'spacing_d1n',
+                    'spacing_d2n', 'spacing_d3n', 'spacing_dc1_c2', 'height_h1', 'height_h2',
+                    'height_h3', 'height_hn', 'earth_resistivity'
+                ]:
+                    setattr(post, f, sanitize_float(self.get_val(row, f)))
             else:
                 self.stats['updated'] += 1
                 # Existing post: update coordinates if provided
@@ -110,7 +153,7 @@ class BusNodeImporter(BaseImporter):
                 self.stats['updated'] += 1
                 
             node.pole_number = self.get_val(row, 'pole_number')
-            node.pole_id = self.get_val(row, 'pole_id')
+            # node.pole_id is explicitly verified below to avoid FK violations
             node.nominal_voltage = sanitize_float(self.get_val(row, 'nominal_voltage'))
             node.feeder = self.get_val(row, 'feeder')
             node.upload_id = self.current_upload_id
@@ -118,9 +161,10 @@ class BusNodeImporter(BaseImporter):
             # Inherit coordinates from Post
             p = None
             # 1. Try numeric ID first if provided
-            if node.pole_id:
+            raw_pole_id = self.get_val(row, 'pole_id')
+            if raw_pole_id:
                 try:
-                    p_id = int(float(node.pole_id))
+                    p_id = int(float(raw_pole_id))
                     p = post_by_id.get(p_id)
                     if p:
                         node.pole_id = p.id

@@ -1,5 +1,5 @@
 from services.importers.base_importer import BaseImporter, sanitize_float
-from models import DistributionLineSegment, SecondaryLineSegment, SecondaryServiceDrop, LineConnection
+from models import DistributionLineSegment, SecondaryLineSegment, SecondaryServiceDrop, LineConnection, BusNode
 from extensions import db
 
 class PrimaryLineImporter(BaseImporter):
@@ -32,25 +32,18 @@ class PrimaryLineImporter(BaseImporter):
         'height_h2': ['Height H2 (meters)', 'Height H2   (meters)'],
         'height_h3': ['Height H3 (meters)', 'Height H3   (meters)'],
         'height_hn': ['Height Hn (meters)', 'Height Hn   (meters)'],
-        'earth_resistivity': ['Earth Resistivity (Ohm-meter)', 'earth_resistivity']
+        'earth_resistivity': ['Earth Resistivity (Ohm-meter)', 'earth_resistivity'],
+        'latitude': ['latitude', 'Lat', 'lat'],
+        'longitude': ['longitude', 'Long', 'lon', 'lng'],
+        'feeder': ['Feeder', 'feeder']
     }
     
     
     def process_rows(self, reader):
-        import re
         existing_segments = {str(s.segment_id).strip().upper(): s for s in DistributionLineSegment.query.all() if s.segment_id}
         
-        # Normalize reader fieldnames to handle inconsistent spacing
-        header_map = {re.sub(r'\s+', ' ', fn.strip()): fn for fn in reader.fieldnames}
-        
         for row in reader:
-            # Use raw header names for lookup via mapped normalized keys
-            def get_v(norm_key):
-                raw_key = header_map.get(norm_key)
-                if not raw_key: return None
-                return row.get(raw_key)
-
-            seg_id = get_v('Primary Distribution Line Segment ID') or get_v('Segment ID') or get_v('segment_id')
+            seg_id = self.get_val(row, 'segment_id')
             if not seg_id: continue
             
             clean_id = str(seg_id).strip().upper()
@@ -63,41 +56,61 @@ class PrimaryLineImporter(BaseImporter):
             else:
                 self.stats['updated'] += 1
                 
-            seg.from_bus_id = get_v('From_Bus_ID') or get_v('From Bus ID') or get_v('from_bus')
-            seg.to_bus_id = get_v('To_Bus_ID') or get_v('To Bus ID') or get_v('to_bus')
-            seg.phasing = row.get('Phasing') or row.get('phasing')
-            seg.length_meters = sanitize_float(get_v('Length (meters)') or get_v('Length (m)') or get_v('length') or get_v('Length (meters)'))
+            seg.from_bus_id = self.get_val(row, 'from_bus_id')
+            seg.to_bus_id = self.get_val(row, 'to_bus_id')
+            seg.phasing = self.get_val(row, 'phasing')
+            seg.length_meters = sanitize_float(self.get_val(row, 'length_meters'))
             
-            # Additional Technical Fields (Using normalized lookups)
-            seg.configuration = row.get('Configuration') or row.get('config')
-            seg.system_grounding_type = get_v('System Grounding Type') or row.get('grounding_type')
-            seg.conductor_type = get_v('Conductor Type') or row.get('wire_type')
-            seg.conductor_size = row.get('Conductor Size')
-            seg.conductor_unit = get_v('Unit (C)') or row.get('unit_c')
-            seg.conductor_strands = get_v('Strands (C)') or row.get('strands_c')
-            seg.neutral_wire_type = get_v('Neutral Wire Type')
-            seg.neutral_wire_size = get_v('Neutral Wire Size')
-            seg.neutral_wire_unit = get_v('Unit (NW)')
-            seg.neutral_wire_strands = get_v('Strands (NW)')
-            seg.spacing_d12 = sanitize_float(get_v('Spacing D12 (meters)'))
-            seg.spacing_d23 = sanitize_float(get_v('Spacing D23 (meters)'))
-            seg.spacing_d13 = sanitize_float(get_v('Spacing D13 (meters)'))
-            seg.spacing_d1n = sanitize_float(get_v('Spacing D1n (meters)'))
-            seg.spacing_d2n = sanitize_float(get_v('Spacing D2n (meters)'))
-            seg.spacing_d3n = sanitize_float(get_v('Spacing D3n (meters)'))
-            seg.spacing_dc1_c2 = sanitize_float(get_v('Spacing DC1-C2 (meters)'))
-            seg.height_h1 = sanitize_float(get_v('Height H1 (meters)'))
-            seg.height_h2 = sanitize_float(get_v('Height H2 (meters)'))
-            seg.height_h3 = sanitize_float(get_v('Height H3 (meters)'))
-            seg.height_hn = sanitize_float(get_v('Height Hn (meters)'))
-            seg.earth_resistivity = sanitize_float(get_v('Earth Resistivity (Ohm-meter)') or row.get('earth_resistivity'))
+            # Technical fields
+            for f in [
+                'configuration', 'system_grounding_type', 'conductor_type', 'conductor_size', 
+                'conductor_unit', 'conductor_strands', 'neutral_wire_type', 'neutral_wire_size', 
+                'neutral_wire_unit', 'neutral_wire_strands'
+            ]:
+                setattr(seg, f, self.get_val(row, f))
+                
+            for f in [
+                'spacing_d12', 'spacing_d23', 'spacing_d13', 'spacing_d1n', 'spacing_d2n', 
+                'spacing_d3n', 'spacing_dc1_c2', 'height_h1', 'height_h2', 'height_h3', 
+                'height_hn', 'earth_resistivity'
+            ]:
+                setattr(seg, f, sanitize_float(self.get_val(row, f)))
             
             seg.upload_id = self.current_upload_id
+            
+            # Save coordinates if available
+            seg.latitude = sanitize_float(self.get_val(row, 'latitude'))
+            seg.longitude = sanitize_float(self.get_val(row, 'longitude'))
+            
+            # Synchronize with BusNode to ensure map geometry can be generated.
+            # In distribution line files, the coordinates typically belong to the 'to_bus'.
+            if seg.to_bus_id and seg.latitude and seg.longitude:
+                bus_id = str(seg.to_bus_id).strip()
+                bus_node = BusNode.query.filter_by(bus_id=bus_id).first()
+                if not bus_node:
+                    bus_node = BusNode(bus_id=bus_id)
+                    db.session.add(bus_node)
+                
+                # Update coordinates
+                bus_node.lat = seg.latitude
+                bus_node.lng = seg.longitude
+                
+                # Also set feeder if available from segment or column
+                feeder = self.get_val(row, 'feeder')
+                if feeder:
+                    bus_node.feeder = feeder
             
             if seg.from_bus_id and seg.to_bus_id:
                 conn = LineConnection.query.filter_by(from_bus=seg.from_bus_id, to_bus=seg.to_bus_id, connection_type='Primary_to_Primary').first()
                 if not conn:
-                    db.session.add(LineConnection(from_bus=seg.from_bus_id, to_bus=seg.to_bus_id, connection_type='Primary_to_Primary', phasing=seg.phasing))
+                    new_conn = LineConnection(
+                        from_bus=seg.from_bus_id, 
+                        to_bus=seg.to_bus_id, 
+                        connection_type='Primary_to_Primary', 
+                        phasing=seg.phasing,
+                        feeder=self.get_val(row, 'feeder')
+                    )
+                    db.session.add(new_conn)
 
 class SecondaryLineImporter(BaseImporter):
     file_type = 'secondary_lines'
