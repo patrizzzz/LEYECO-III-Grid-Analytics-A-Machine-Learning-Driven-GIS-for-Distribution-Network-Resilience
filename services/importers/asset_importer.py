@@ -153,7 +153,7 @@ class BusNodeImporter(BaseImporter):
                 self.stats['updated'] += 1
                 
             node.pole_number = self.get_val(row, 'pole_number')
-            node.pole_id = self.get_val(row, 'pole_id')
+            # node.pole_id is explicitly verified below to avoid FK violations
             node.nominal_voltage = sanitize_float(self.get_val(row, 'nominal_voltage'))
             node.feeder = self.get_val(row, 'feeder')
             node.upload_id = self.current_upload_id
@@ -161,9 +161,10 @@ class BusNodeImporter(BaseImporter):
             # Inherit coordinates from Post
             p = None
             # 1. Try numeric ID first if provided
-            if node.pole_id:
+            raw_pole_id = self.get_val(row, 'pole_id')
+            if raw_pole_id:
                 try:
-                    p_id = int(float(node.pole_id))
+                    p_id = int(float(raw_pole_id))
                     p = post_by_id.get(p_id)
                     if p:
                         node.pole_id = p.id

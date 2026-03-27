@@ -106,9 +106,8 @@ def api_post_service_drops(post_id):
 @asset_api_bp.route('/primary-lines/by-bus/<bus_id>', methods=['GET'])
 def api_primary_lines_by_bus(bus_id):
     try:
-        node = BusNode.query.filter_by(pole_number=bus_id).first()
-        lookup_ids = [bus_id]
-        if node: lookup_ids.append(node.bus_id)
+        from services.network_geometry_db import resolve_all_bus_ids
+        lookup_ids = resolve_all_bus_ids(bus_id)
         candidates = DistributionLineSegment.query.filter(DistributionLineSegment.from_bus_id.in_(lookup_ids) | DistributionLineSegment.to_bus_id.in_(lookup_ids) | DistributionLineSegment.from_bus_id.endswith(bus_id) | DistributionLineSegment.to_bus_id.endswith(bus_id)).all()
         items = []
         for c in candidates:
@@ -147,9 +146,8 @@ def api_bus_nodes_list():
 @asset_api_bp.route('/transformers/by-bus/<bus_id>', methods=['GET'])
 def api_transformers_by_bus(bus_id):
     try:
-        node = BusNode.query.filter_by(pole_number=bus_id).first()
-        lookup_ids = [bus_id]
-        if node: lookup_ids.append(node.bus_id)
+        from services.network_geometry_db import resolve_all_bus_ids
+        lookup_ids = resolve_all_bus_ids(bus_id)
         candidates = DistributionTransformer.query.filter(DistributionTransformer.from_primary_bus_id.in_(lookup_ids) | DistributionTransformer.from_primary_bus_id.endswith(bus_id)).all()
         def match_bus_id(query_id, db_id, allowed_list):
             if not db_id: return False
@@ -186,7 +184,9 @@ def api_secondary_lines():
 @asset_api_bp.route('/secondary-lines/by-bus/<bus_id>', methods=['GET'])
 def api_secondary_lines_by_bus(bus_id):
     try:
-        lines = SecondaryLineSegment.query.filter((SecondaryLineSegment.from_bus_id == bus_id) | (SecondaryLineSegment.to_bus_id == bus_id)).all()
+        from services.network_geometry_db import resolve_all_bus_ids
+        lookup_ids = resolve_all_bus_ids(bus_id)
+        lines = SecondaryLineSegment.query.filter((SecondaryLineSegment.from_bus_id.in_(lookup_ids)) | (SecondaryLineSegment.to_bus_id.in_(lookup_ids))).all()
         return jsonify({'bus_id': bus_id, 'count': len(lines), 'secondary_lines': [l.to_dict() for l in lines]}), 200
     except Exception as e:
         return jsonify({'error': str(e), 'bus_id': bus_id}), 500

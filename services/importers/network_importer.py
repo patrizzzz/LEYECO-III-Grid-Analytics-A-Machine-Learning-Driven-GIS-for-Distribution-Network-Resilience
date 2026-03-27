@@ -1,5 +1,5 @@
 from services.importers.base_importer import BaseImporter, sanitize_float
-from models import DistributionLineSegment, SecondaryLineSegment, SecondaryServiceDrop, LineConnection
+from models import DistributionLineSegment, SecondaryLineSegment, SecondaryServiceDrop, LineConnection, BusNode
 from extensions import db
 
 class PrimaryLineImporter(BaseImporter):
@@ -32,7 +32,10 @@ class PrimaryLineImporter(BaseImporter):
         'height_h2': ['Height H2 (meters)', 'Height H2   (meters)'],
         'height_h3': ['Height H3 (meters)', 'Height H3   (meters)'],
         'height_hn': ['Height Hn (meters)', 'Height Hn   (meters)'],
-        'earth_resistivity': ['Earth Resistivity (Ohm-meter)', 'earth_resistivity']
+        'earth_resistivity': ['Earth Resistivity (Ohm-meter)', 'earth_resistivity'],
+        'latitude': ['latitude', 'Lat', 'lat'],
+        'longitude': ['longitude', 'Long', 'lon', 'lng'],
+        'feeder': ['Feeder', 'feeder']
     }
     
     
@@ -75,10 +78,39 @@ class PrimaryLineImporter(BaseImporter):
             
             seg.upload_id = self.current_upload_id
             
+            # Save coordinates if available
+            seg.latitude = sanitize_float(self.get_val(row, 'latitude'))
+            seg.longitude = sanitize_float(self.get_val(row, 'longitude'))
+            
+            # Synchronize with BusNode to ensure map geometry can be generated.
+            # In distribution line files, the coordinates typically belong to the 'to_bus'.
+            if seg.to_bus_id and seg.latitude and seg.longitude:
+                bus_id = str(seg.to_bus_id).strip()
+                bus_node = BusNode.query.filter_by(bus_id=bus_id).first()
+                if not bus_node:
+                    bus_node = BusNode(bus_id=bus_id)
+                    db.session.add(bus_node)
+                
+                # Update coordinates
+                bus_node.lat = seg.latitude
+                bus_node.lng = seg.longitude
+                
+                # Also set feeder if available from segment or column
+                feeder = self.get_val(row, 'feeder')
+                if feeder:
+                    bus_node.feeder = feeder
+            
             if seg.from_bus_id and seg.to_bus_id:
                 conn = LineConnection.query.filter_by(from_bus=seg.from_bus_id, to_bus=seg.to_bus_id, connection_type='Primary_to_Primary').first()
                 if not conn:
-                    db.session.add(LineConnection(from_bus=seg.from_bus_id, to_bus=seg.to_bus_id, connection_type='Primary_to_Primary', phasing=seg.phasing))
+                    new_conn = LineConnection(
+                        from_bus=seg.from_bus_id, 
+                        to_bus=seg.to_bus_id, 
+                        connection_type='Primary_to_Primary', 
+                        phasing=seg.phasing,
+                        feeder=self.get_val(row, 'feeder')
+                    )
+                    db.session.add(new_conn)
 
 class SecondaryLineImporter(BaseImporter):
     file_type = 'secondary_lines'

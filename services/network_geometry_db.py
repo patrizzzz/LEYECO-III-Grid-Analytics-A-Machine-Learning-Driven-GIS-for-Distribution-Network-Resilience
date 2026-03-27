@@ -21,6 +21,7 @@ from collections import defaultdict
 import json
 import math
 import re
+from sqlalchemy import or_
 
 
 
@@ -42,11 +43,15 @@ def resolve_all_bus_ids(identifier):
     if s_id.isdigit():
         padded = f"P0000000{s_id}"[-11:] # Standard P + 10 digits
 
-    posts = Post.query.filter(
-        (Post.primary_bus_id == s_id) | 
-        (Post.pole_number == s_id) |
-        (Post.pole_number == padded)
-    ).all()
+    filters = [
+        Post.primary_bus_id == s_id, 
+        Post.pole_number == s_id,
+        Post.pole_number == padded
+    ]
+    if s_id.isdigit():
+        filters.append(Post.id == int(s_id))
+
+    posts = Post.query.filter(or_(*filters)).all()
 
     for post in posts:
         if post.primary_bus_id: candidate_bus_ids.add(post.primary_bus_id)
