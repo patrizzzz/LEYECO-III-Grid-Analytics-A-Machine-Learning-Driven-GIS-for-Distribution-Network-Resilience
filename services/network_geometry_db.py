@@ -524,6 +524,102 @@ def get_network_geometry(app):
             except Exception as e:
                 app.logger.warning("Augmenting transformer coords failed: %s", e)
 
+            # 0b. Propagate coordinates through the secondary line topology.
+            # Transformer secondary buses have coords from step 0, but the
+            # downstream secondary bus IDs (S0001-0007-0001, etc.) do not.
+            # BFS from every secondary line bus that already has coords,
+            # tracking the incoming bearing so linear chains stay straight
+            # and only branch points fan out.
+            try:
+                from models import SecondaryLineSegment as _SLS
+                from collections import deque
+
+                # Build undirected adjacency with length metadata
+                sec_adj = defaultdict(list)
+                for sl in db.session.query(_SLS).all():
+                    fb = (sl.from_bus_id or "").strip()
+                    tb = (sl.to_bus_id or "").strip()
+                    length = sl.length_meters or 50  # default 50m if missing
+                    if fb and tb:
+                        sec_adj[fb].append((tb, length))
+                        sec_adj[tb].append((fb, length))
+
+                # BFS queue: (bus_id, incoming_bearing_deg or None)
+                sec_queue = deque()
+                for bus_id in sec_adj:
+                    if bus_id in bus_to_coord:
+                        sec_queue.append((bus_id, None))
+
+                visited = set(b for b, _ in sec_queue)
+
+                while sec_queue:
+                    current, incoming_bearing = sec_queue.popleft()
+                    cur_coord = bus_to_coord.get(current)
+                    if not cur_coord:
+                        continue
+
+                    # Collect unvisited neighbours
+                    unvisited = [(nb, ln) for nb, ln in sec_adj[current]
+                                 if nb not in visited and nb not in bus_to_coord]
+                    if not unvisited:
+                        continue
+
+                    # Determine base bearing: continue from incoming direction,
+                    # or use a default for root nodes (transformer buses).
+                    if incoming_bearing is not None:
+                        base_bearing = incoming_bearing
+                    else:
+                        # Root node: use a hash of the bus ID for a stable initial direction
+                        base_bearing = (hash(current) % 360)
+
+                    for idx, (neighbor, length_m) in enumerate(unvisited):
+                        if neighbor in visited:
+                            continue
+                        visited.add(neighbor)
+
+                        # Linear chain: 1 unvisited neighbor → continue straight
+                        # Branch point: spread children evenly around base bearing
+                        if len(unvisited) == 1:
+                            bearing_deg = base_bearing
+                        else:
+                            # Fan out: ±30° spread for branches
+                            spread = 60.0  # total arc degrees
+                            step = spread / max(len(unvisited) - 1, 1)
+                            offset = -spread / 2 + idx * step
+                            bearing_deg = base_bearing + offset
+
+                        bearing_rad = math.radians(bearing_deg % 360)
+
+                        # Convert length to approximate lat/lng offset
+                        dlat = (length_m * math.cos(bearing_rad)) / 111320.0
+                        cos_lat = max(math.cos(math.radians(cur_coord["lat"])), 0.01)
+                        dlng = (length_m * math.sin(bearing_rad)) / (111320.0 * cos_lat)
+
+                        new_coord = {
+                            "lat": cur_coord["lat"] + dlat,
+                            "lng": cur_coord["lng"] + dlng,
+                            "feeder": cur_coord.get("feeder"),
+                            "circuit": cur_coord.get("circuit"),
+                            "pole_number": neighbor,
+                        }
+                        bus_to_coord[neighbor] = new_coord
+                        sec_queue.append((neighbor, bearing_deg))
+
+                        # Also add as a node for map markers
+                        key = (new_coord["lat"], new_coord["lng"], neighbor)
+                        if key not in seen_node:
+                            seen_node.add(key)
+                            nodes.append({
+                                "pole_number": neighbor,
+                                "lat": new_coord["lat"],
+                                "lng": new_coord["lng"],
+                                "feeder": new_coord.get("feeder"),
+                                "feature_type": "secondary_node",
+                            })
+
+            except Exception as e:
+                app.logger.warning("Secondary line coord propagation failed: %s", e)
+
             # 1. Distribution line segments (from_bus_id → to_bus_id)
             try:
                 from models import DistributionLineSegment
