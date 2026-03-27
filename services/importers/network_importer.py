@@ -116,34 +116,58 @@ class SecondaryLineImporter(BaseImporter):
     file_type = 'secondary_lines'
     model_class = SecondaryLineSegment
     header_mappings = {
-        'from_bus_id': ['from_bus_id', 'From Bus ID', 'from_bus'],
-        'to_bus_id': ['to_bus_id', 'To Bus ID', 'to_bus'],
+        'segment_id': ['Secondary Distribution Line ID', 'Segment ID', 'segment_id'],
+        'from_bus_id': ['from_bus_id', 'From Bus ID', 'from_bus', 'From\nBus ID'],
+        'to_bus_id': ['to_bus_id', 'To Bus ID', 'to_bus', 'To\nBus ID', 'To \nBus ID'],
         'phasing': ['phasing', 'Phasing'],
-        'length_meters': ['length_meters', 'Length (m)', 'length'],
-        'conductor_type': ['conductor_type', 'Conductor Type']
+        'installation_type': ['Installation Type', 'installation_type'],
+        'length_meters': ['length_meters', 'Length (m)', 'length', 'Length (meters)', 'Length         (meters)'],
+        'conductor_type': ['conductor_type', 'Conductor Type'],
+        'conductor_size': ['Conductor Size', 'conductor_size'],
+        'conductor_unit': ['Unit (C) ', 'Unit (C)', 'unit_c', 'conductor_unit'],
     }
     
     def process_rows(self, reader):
-        existing_segments = {(s.from_bus_id, s.to_bus_id, s.phasing): s for s in SecondaryLineSegment.query.all()}
+        existing_segments = {}
+        for s in SecondaryLineSegment.query.all():
+            if s.segment_id:
+                existing_segments[s.segment_id.strip().upper()] = s
+            existing_segments[(s.from_bus_id, s.to_bus_id, s.phasing)] = s
+
         for row in reader:
             from_bus = self.get_val(row, 'from_bus_id')
             to_bus = self.get_val(row, 'to_bus_id')
             phasing = self.get_val(row, 'phasing')
             if not from_bus or not to_bus: continue
             
-            key = (from_bus, to_bus, phasing)
-            seg = existing_segments.get(key)
+            seg_id = self.get_val(row, 'segment_id')
+            clean_seg_id = seg_id.strip().upper() if seg_id else None
+
+            # Try to find existing by segment_id first, then composite key
+            seg = None
+            if clean_seg_id:
+                seg = existing_segments.get(clean_seg_id)
+            if not seg:
+                seg = existing_segments.get((from_bus, to_bus, phasing))
+            
             if not seg:
                 seg = SecondaryLineSegment(from_bus_id=from_bus, to_bus_id=to_bus, phasing=phasing)
+                if clean_seg_id:
+                    seg.segment_id = clean_seg_id
                 db.session.add(seg)
-                existing_segments[key] = seg
+                if clean_seg_id:
+                    existing_segments[clean_seg_id] = seg
+                existing_segments[(from_bus, to_bus, phasing)] = seg
                 self.stats['created'] += 1
             else:
                 self.stats['updated'] += 1
             
             seg.length_meters = sanitize_float(self.get_val(row, 'length_meters'))
             seg.conductor_type = self.get_val(row, 'conductor_type')
+            seg.conductor_size = self.get_val(row, 'conductor_size')
+            seg.installation_type = self.get_val(row, 'installation_type')
             seg.upload_id = self.current_upload_id
+
 
 class ServiceDropImporter(BaseImporter):
     file_type = 'service_drops'
