@@ -293,6 +293,11 @@ class VoltageRegulatorImporter(BaseImporter):
     }
 
     def process_rows(self, reader):
+        from models import BusNode
+        posts = Post.query.all()
+        bus_nodes = BusNode.query.all()
+        context = LinkageService.LinkageContext(posts=posts, bus_nodes=bus_nodes) if hasattr(LinkageService, 'LinkageContext') else None
+        
         existing = {str(r.regulator_id).strip().lower(): r for r in VoltageRegulator.query.all() if r.regulator_id}
         for row in reader:
             reg_id = self.get_val(row, 'regulator_id')
@@ -329,6 +334,21 @@ class VoltageRegulatorImporter(BaseImporter):
             record.exciting_current_pct = sanitize_float(self.get_val(row, 'exciting_current_pct'))
             record.upload_id = self.current_upload_id
 
+            # Topology Linkage: If we find a matching post, ensure at least one bus is associated with it
+            linked_post = LinkageService.fuzzy_match_asset_to_post(record, context=context)
+            if linked_post:
+                # Ensure a BusNode entry exists for this bus linked to this post
+                target_bus = record.from_bus_id or record.to_bus_id
+                if target_bus:
+                    bn = next((b for b in bus_nodes if b.bus_id == target_bus), None)
+                    if not bn:
+                        bn = BusNode(bus_id=target_bus, pole_id=linked_post.id, pole_number=linked_post.pole_number, upload_id=self.current_upload_id)
+                        db.session.add(bn)
+                        bus_nodes.append(bn)
+                    else:
+                        bn.pole_id = linked_post.id
+                        bn.pole_number = linked_post.pole_number
+
 
 class ShuntCapacitorImporter(BaseImporter):
     file_type = 'shunt_capacitors'
@@ -346,6 +366,11 @@ class ShuntCapacitorImporter(BaseImporter):
     }
 
     def process_rows(self, reader):
+        from models import BusNode
+        posts = Post.query.all()
+        bus_nodes = BusNode.query.all()
+        context = LinkageService.LinkageContext(posts=posts, bus_nodes=bus_nodes) if hasattr(LinkageService, 'LinkageContext') else None
+        
         existing = {str(r.capacitor_id).strip().lower(): r for r in ShuntCapacitor.query.all() if r.capacitor_id}
         for row in reader:
             cap_id = self.get_val(row, 'capacitor_id')
@@ -370,6 +395,18 @@ class ShuntCapacitorImporter(BaseImporter):
             record.power_loss_watts = sanitize_float(self.get_val(row, 'power_loss_watts'))
             record.upload_id = self.current_upload_id
 
+            # Topology Linkage
+            linked_post = LinkageService.fuzzy_match_asset_to_post(record, context=context)
+            if linked_post and record.bus_connected_id:
+                bn = next((b for b in bus_nodes if b.bus_id == record.bus_connected_id), None)
+                if not bn:
+                    bn = BusNode(bus_id=record.bus_connected_id, pole_id=linked_post.id, pole_number=linked_post.pole_number, upload_id=self.current_upload_id)
+                    db.session.add(bn)
+                    bus_nodes.append(bn)
+                else:
+                    bn.pole_id = linked_post.id
+                    bn.pole_number = linked_post.pole_number
+
 
 class ShuntInductorImporter(BaseImporter):
     file_type = 'shunt_inductors'
@@ -389,6 +426,11 @@ class ShuntInductorImporter(BaseImporter):
     }
 
     def process_rows(self, reader):
+        from models import BusNode
+        posts = Post.query.all()
+        bus_nodes = BusNode.query.all()
+        context = LinkageService.LinkageContext(posts=posts, bus_nodes=bus_nodes) if hasattr(LinkageService, 'LinkageContext') else None
+        
         existing = {str(r.inductor_id).strip().lower(): r for r in ShuntInductor.query.all() if r.inductor_id}
         for row in reader:
             ind_id = self.get_val(row, 'inductor_id')
@@ -415,6 +457,18 @@ class ShuntInductorImporter(BaseImporter):
             record.reactance_c = sanitize_float(self.get_val(row, 'reactance_c'))
             record.upload_id = self.current_upload_id
 
+            # Topology Linkage
+            linked_post = LinkageService.fuzzy_match_asset_to_post(record, context=context)
+            if linked_post and record.bus_connected_id:
+                bn = next((b for b in bus_nodes if b.bus_id == record.bus_connected_id), None)
+                if not bn:
+                    bn = BusNode(bus_id=record.bus_connected_id, pole_id=linked_post.id, pole_number=linked_post.pole_number, upload_id=self.current_upload_id)
+                    db.session.add(bn)
+                    bus_nodes.append(bn)
+                else:
+                    bn.pole_id = linked_post.id
+                    bn.pole_number = linked_post.pole_number
+
 
 class SeriesInductorImporter(BaseImporter):
     file_type = 'series_inductors'
@@ -435,6 +489,11 @@ class SeriesInductorImporter(BaseImporter):
     }
 
     def process_rows(self, reader):
+        from models import BusNode
+        posts = Post.query.all()
+        bus_nodes = BusNode.query.all()
+        context = LinkageService.LinkageContext(posts=posts, bus_nodes=bus_nodes) if hasattr(LinkageService, 'LinkageContext') else None
+        
         existing = {str(r.inductor_id).strip().lower(): r for r in SeriesInductor.query.all() if r.inductor_id}
         for row in reader:
             ind_id = self.get_val(row, 'inductor_id')
@@ -461,3 +520,17 @@ class SeriesInductorImporter(BaseImporter):
             record.reactance_b = sanitize_float(self.get_val(row, 'reactance_b'))
             record.reactance_c = sanitize_float(self.get_val(row, 'reactance_c'))
             record.upload_id = self.current_upload_id
+
+            # Topology Linkage
+            linked_post = LinkageService.fuzzy_match_asset_to_post(record, context=context)
+            if linked_post:
+                target_bus = record.from_bus_id or record.to_bus_id
+                if target_bus:
+                    bn = next((b for b in bus_nodes if b.bus_id == target_bus), None)
+                    if not bn:
+                        bn = BusNode(bus_id=target_bus, pole_id=linked_post.id, pole_number=linked_post.pole_number, upload_id=self.current_upload_id)
+                        db.session.add(bn)
+                        bus_nodes.append(bn)
+                    else:
+                        bn.pole_id = linked_post.id
+                        bn.pole_number = linked_post.pole_number

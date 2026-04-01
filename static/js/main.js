@@ -1595,102 +1595,24 @@ document.addEventListener('DOMContentLoaded', function () {
           const postId = serviceDropBtn.getAttribute('data-post-id');
           if (!postId) return;
 
-          // 1. Get Post Details to find Primary Bus ID
-          fetch('/api/posts/' + postId)
-            .then(function (r) { return r.json(); })
-            .then(function (postData) {
-              if (postData && postData.error) return;
-
-              var primaryBusId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
-              if (!primaryBusId) {
-                showNoticeModal('Info', 'No primary bus ID found for this post.');
+          serviceDropBtn.textContent = '⏳ Loading...';
+          fetch(`/api/posts/${postId}/service-drops`)
+            .then(r => r.json())
+            .then(result => {
+              serviceDropBtn.textContent = '🏠 Service Drops';
+              if (result.error) {
+                showNoticeModal('Error', 'Failed to load service drops: ' + result.error);
                 return;
               }
-
-              // 2. Find Transformer connected to this Primary Bus
-              fetch('/api/transformers/by-bus/' + encodeURIComponent(primaryBusId))
-                .then(function (r) { return r.json(); })
-                .then(function (transResult) {
-                  if (transResult && transResult.error) {
-                    console.warn('Transformer fetch error:', transResult.error);
-                    showNoticeModal('Info', 'No transformer found. Service drops require a transformer connection.');
-                    return;
-                  }
-
-                  if (!transResult.transformers || transResult.transformers.length === 0) {
-                    showNoticeModal('Info', 'No transformer found for bus ID: ' + primaryBusId);
-                    return;
-                  }
-
-                  // 3. Get Secondary Bus ID from the transformer
-                  var transformer = transResult.transformers[0];
-                  var secondaryBusId = transformer.to_secondary_bus_id;
-
-                  if (!secondaryBusId) {
-                    showNoticeModal('Info', 'Transformer has no Secondary Bus ID defined.');
-                    return;
-                  }
-
-                  // 4. Fetch Secondary Lines using the Transformer's Secondary Bus ID
-                  fetch('/api/secondary-lines/by-bus/' + encodeURIComponent(secondaryBusId))
-                    .then(function (r) { return r.json(); })
-                    .then(function (linesResult) {
-                      if (linesResult && linesResult.error) {
-                        showNoticeModal('Error', 'Error fetching secondary lines: ' + linesResult.error);
-                        return;
-                      }
-
-                      if (!linesResult.secondary_lines || linesResult.secondary_lines.length === 0) {
-                        showNoticeModal('Info', 'No secondary lines found for this transformer.');
-                        return;
-                      }
-
-                      // 5. Collect all to_bus_id values from secondary lines
-                      var toBusIds = [];
-                      linesResult.secondary_lines.forEach(function (line) {
-                        if (line.to_bus_id && toBusIds.indexOf(line.to_bus_id) === -1) {
-                          toBusIds.push(line.to_bus_id);
-                        }
-                      });
-
-                      if (toBusIds.length === 0) {
-                        showNoticeModal('Info', 'No valid bus IDs found in secondary lines.');
-                        return;
-                      }
-
-                      // 6. Fetch service drops for each to_bus_id and combine results
-                      var allDrops = [];
-                      var fetchPromises = toBusIds.map(function (busId) {
-                        return fetch('/api/secondary-service-drops/by-bus/' + encodeURIComponent(busId))
-                          .then(function (r) { return r.json(); })
-                          .then(function (result) {
-                            if (result && result.service_drops) {
-                              allDrops = allDrops.concat(result.service_drops);
-                            }
-                          });
-                      });
-
-                      Promise.all(fetchPromises).then(function () {
-                        showServiceDropModal({
-                          count: allDrops.length,
-                          service_drops: allDrops
-                        });
-                      }).catch(function (err) {
-                        showNoticeModal('Error', 'Failed to load service drops: ' + (err.message || String(err)));
-                      });
-
-                    })
-                    .catch(function (err) {
-                      showNoticeModal('Error', 'Failed to load secondary lines: ' + (err.message || String(err)));
-                    });
-
-                })
-                .catch(function (err) {
-                  showNoticeModal('Error', 'Failed to check for transformer: ' + (err.message || String(err)));
-                });
+              showServiceDropModal({
+                count: result.count || 0,
+                service_drops: result.service_drops || []
+              });
             })
-            .catch(function (err) {
-              console.error('Post details fetch failed:', err);
+            .catch(err => {
+              serviceDropBtn.textContent = '🏠 Service Drops';
+              console.error('Service drop fetch failed:', err);
+              showNoticeModal('Error', 'Failed to load service drops: ' + (err.message || String(err)));
             });
         };
       }
@@ -1740,7 +1662,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(r => r.json())
             .then(postData => {
               if (postData.error) return;
-              const busId = postData.primary_bus_id || postData.pole_number;
+              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
               fetch('/api/voltage-regulators/by-bus/' + encodeURIComponent(busId))
                 .then(r => r.json())
@@ -1763,7 +1685,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(r => r.json())
             .then(postData => {
               if (postData.error) return;
-              const busId = postData.primary_bus_id || postData.pole_number;
+              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
               fetch('/api/shunt-capacitors/by-bus/' + encodeURIComponent(busId))
                 .then(r => r.json())
@@ -1786,7 +1708,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(r => r.json())
             .then(postData => {
               if (postData.error) return;
-              const busId = postData.primary_bus_id || postData.pole_number;
+              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
               fetch('/api/shunt-inductors/by-bus/' + encodeURIComponent(busId))
                 .then(r => r.json())
@@ -1809,7 +1731,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(r => r.json())
             .then(postData => {
               if (postData.error) return;
-              const busId = postData.primary_bus_id || postData.pole_number;
+              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
               fetch('/api/series-inductors/by-bus/' + encodeURIComponent(busId))
                 .then(r => r.json())

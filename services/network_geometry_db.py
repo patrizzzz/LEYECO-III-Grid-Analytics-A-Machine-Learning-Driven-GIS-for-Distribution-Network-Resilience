@@ -29,7 +29,7 @@ def resolve_all_bus_ids(identifier):
     """
     Given a starting string (pole number or bus ID), resolves all 
     associated topological identifiers from Post and BusNode tables.
-    Handles padding like "120" -> "P0000000120".
+    Handles padding like "120" -> "P0000000120" and vice versa.
     """
     from models import Post, BusNode
     if identifier is None:
@@ -37,50 +37,98 @@ def resolve_all_bus_ids(identifier):
     
     s_id = str(identifier).strip()
     candidate_bus_ids = set()
+    
+    # 1. Generate normalized versions of the ID for searching
+    search_ids = {s_id, s_id.lower()}
+    
+    # Handle 'P' prefix and padding
+    numeric_part = re.sub(r'\D', '', s_id)
+    if numeric_part:
+        # Strip leading zeros for a core numeric ID
+        core_id = numeric_part.lstrip('0') or '0'
+        search_ids.add(core_id)
+        # Standard P + 10 digits padding
+        search_ids.add(f"P{core_id.zfill(10)}")
+        # Standard P + 8 digits (some systems)
+        search_ids.add(f"P{core_id.zfill(8)}")
+    
+    # If it starts with P, add the version without P
+    if s_id.upper().startswith('P'):
+        search_ids.add(s_id[1:])
+        search_ids.add(s_id[1:].lstrip('0') or '0')
 
-    # Try exact match or padded match in Post table
-    padded = s_id
-    if s_id.isdigit():
-        padded = f"P0000000{s_id}"[-11:] # Standard P + 10 digits
-
-    filters = [
-        Post.primary_bus_id == s_id, 
-        Post.pole_number == s_id,
-        Post.pole_number == padded
-    ]
-    if s_id.isdigit():
-        filters.append(Post.id == int(s_id))
-
-    posts = Post.query.filter(or_(*filters)).all()
+    # 2. Search Post table using all variants
+    posts = Post.query.filter(
+        or_(
+            Post.primary_bus_id.in_(search_ids),
+            Post.pole_number.in_(search_ids),
+            Post.transformer_bus_id.in_(search_ids),
+            Post.sec_bus_id.in_(search_ids)
+        )
+    ).all()
 
     for post in posts:
         if post.primary_bus_id: candidate_bus_ids.add(post.primary_bus_id)
         if post.transformer_bus_id: candidate_bus_ids.add(post.transformer_bus_id)
         if getattr(post, 'sec_bus_id', None): candidate_bus_ids.add(post.sec_bus_id)
+        if post.pole_number: candidate_bus_ids.add(post.pole_number)
         
         # Also check BusNode for this pole using the more accurate pole_id (FK)
-        if post.pole_number:
-            b_nodes = BusNode.query.filter((BusNode.pole_id == post.id) | (BusNode.pole_number == post.pole_number)).all()
-        else:
-            b_nodes = BusNode.query.filter_by(pole_id=post.id).all()
-            
+        b_nodes = BusNode.query.filter((BusNode.pole_id == post.id) | (BusNode.pole_number == post.pole_number)).all()
         for bn in b_nodes:
             if bn.bus_id: candidate_bus_ids.add(bn.bus_id)
 
-    if not candidate_bus_ids:
-        # Try BusNode directly with s_id/padded as pole_number
-        query = BusNode.query.filter(
-            (BusNode.bus_id == s_id) |
-            (BusNode.pole_number == s_id) |
-            (BusNode.pole_number == padded)
-        ).all()
-        for bn in query:
-            if bn.bus_id: candidate_bus_ids.add(bn.bus_id)
+    # 3. Search BusNode directly using all variants
+    bn_query = BusNode.query.filter(
+        or_(
+            BusNode.bus_id.in_(search_ids),
+            BusNode.pole_number.in_(search_ids)
+        )
+    ).all()
+    for bn in bn_query:
+        if bn.bus_id: candidate_bus_ids.add(bn.bus_id)
+        # If this BusNode is linked to a pole, get all other bus IDs for that pole too
+        if bn.pole_id:
+            other_nodes = BusNode.query.filter_by(pole_id=bn.pole_id).all()
+            for obn in other_nodes:
+                if obn.bus_id: candidate_bus_ids.add(obn.bus_id)
 
     if not candidate_bus_ids:
         candidate_bus_ids.add(s_id)
         
     return list(candidate_bus_ids)
+
+
+def resolve_specific_bus_ids(identifier):
+    """
+    Restrictive version of resolve_all_bus_ids.
+    Generates normalized variants of an ID (padding/unpadding)
+    but DOES NOT search the database for other linked IDs (aliases).
+    Use this for specific asset lookups where only the direct 
+    connection to the provided ID is desired.
+    """
+    import re
+    if identifier is None:
+        return []
+    
+    s_id = str(identifier).strip()
+    search_ids = {s_id, s_id.lower(), s_id.upper()}
+    
+    # Handle padding variants
+    numeric_part = re.sub(r'\D', '', s_id)
+    if numeric_part:
+        core_id = numeric_part.lstrip('0') or '0'
+        search_ids.add(core_id)
+        search_ids.add(f"P{core_id.zfill(10)}")
+        search_ids.add(f"P{core_id.zfill(8)}")
+    
+    # If it starts with P, add the version without P
+    if s_id.upper().startswith('P'):
+        search_ids.add(s_id[1:])
+        search_ids.add(s_id[1:].lstrip('0') or '0')
+        
+    return list(search_ids)
+
 
 
 def _haversine_meters(lat1, lng1, lat2, lng2):
