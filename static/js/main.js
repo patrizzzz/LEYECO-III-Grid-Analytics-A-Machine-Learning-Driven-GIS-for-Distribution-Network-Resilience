@@ -609,9 +609,9 @@ document.addEventListener('DOMContentLoaded', function () {
         return;
       }
 
-      // If no saved state and activeFeeders is empty, initialize it with all known feeders
+      // If no saved state, ensure all currently known feeders are active
       const savedFeedersRaw = localStorage.getItem('mapActiveFeeders');
-      if (!savedFeedersRaw && activeFeeders.size === 0) {
+      if (!savedFeedersRaw) {
         knownFeeders.forEach(f => activeFeeders.add(f));
       }
 
@@ -633,7 +633,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const feederCbs = [];
       const sortedFeeders = Array.from(knownFeeders).sort();
       sortedFeeders.forEach(function (fname) {
-        const hasSaved = activeFeeders.size > 0;
+        const hasSaved = savedFeedersRaw !== null;
         const row = document.createElement('label');
         row.className = 'msp-option';
         const cb = document.createElement('input');
