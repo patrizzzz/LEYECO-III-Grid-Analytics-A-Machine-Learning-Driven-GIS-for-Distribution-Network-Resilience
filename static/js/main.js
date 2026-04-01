@@ -1662,7 +1662,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(r => r.json())
             .then(postData => {
               if (postData.error) return;
-              const busId = postData.primary_bus_id || postData.pole_number;
+              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
               fetch('/api/voltage-regulators/by-bus/' + encodeURIComponent(busId))
                 .then(r => r.json())
@@ -1685,7 +1685,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(r => r.json())
             .then(postData => {
               if (postData.error) return;
-              const busId = postData.primary_bus_id || postData.pole_number;
+              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
               fetch('/api/shunt-capacitors/by-bus/' + encodeURIComponent(busId))
                 .then(r => r.json())
@@ -1708,7 +1708,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(r => r.json())
             .then(postData => {
               if (postData.error) return;
-              const busId = postData.primary_bus_id || postData.pole_number;
+              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
               fetch('/api/shunt-inductors/by-bus/' + encodeURIComponent(busId))
                 .then(r => r.json())
@@ -1731,7 +1731,7 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(r => r.json())
             .then(postData => {
               if (postData.error) return;
-              const busId = postData.primary_bus_id || postData.pole_number;
+              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
               if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
               fetch('/api/series-inductors/by-bus/' + encodeURIComponent(busId))
                 .then(r => r.json())

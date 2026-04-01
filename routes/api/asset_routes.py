@@ -199,12 +199,12 @@ def api_service_drops_by_bus(bus_id):
     except Exception as e:
         return jsonify({'error': str(e), 'bus_id': bus_id}), 500
 
-from services.network_geometry_db import resolve_all_bus_ids
+from services.network_geometry_db import resolve_all_bus_ids, resolve_specific_bus_ids
 
 @asset_api_bp.route('/voltage-regulators/by-bus/<bus_id>', methods=['GET'])
 def api_get_voltage_regulators_by_bus(bus_id):
     try:
-        lookup_ids = resolve_all_bus_ids(bus_id)
+        lookup_ids = resolve_specific_bus_ids(bus_id)
         items = VoltageRegulator.query.filter(
             VoltageRegulator.from_bus_id.in_(lookup_ids) |
             VoltageRegulator.to_bus_id.in_(lookup_ids) |
@@ -218,7 +218,7 @@ def api_get_voltage_regulators_by_bus(bus_id):
 @asset_api_bp.route('/shunt-capacitors/by-bus/<bus_id>', methods=['GET'])
 def api_get_shunt_capacitors_by_bus(bus_id):
     try:
-        lookup_ids = resolve_all_bus_ids(bus_id)
+        lookup_ids = resolve_specific_bus_ids(bus_id)
         items = ShuntCapacitor.query.filter(ShuntCapacitor.bus_connected_id.in_(lookup_ids)).all()
         return jsonify({'count': len(items), 'items': [x.to_dict() for x in items]})
     except Exception as e:
@@ -227,7 +227,7 @@ def api_get_shunt_capacitors_by_bus(bus_id):
 @asset_api_bp.route('/shunt-inductors/by-bus/<bus_id>', methods=['GET'])
 def api_get_shunt_inductors_by_bus(bus_id):
     try:
-        lookup_ids = resolve_all_bus_ids(bus_id)
+        lookup_ids = resolve_specific_bus_ids(bus_id)
         items = ShuntInductor.query.filter(ShuntInductor.bus_connected_id.in_(lookup_ids)).all()
         return jsonify({'count': len(items), 'items': [x.to_dict() for x in items]})
     except Exception as e:
@@ -236,7 +236,7 @@ def api_get_shunt_inductors_by_bus(bus_id):
 @asset_api_bp.route('/series-inductors/by-bus/<bus_id>', methods=['GET'])
 def api_get_series_inductors_by_bus(bus_id):
     try:
-        lookup_ids = resolve_all_bus_ids(bus_id)
+        lookup_ids = resolve_specific_bus_ids(bus_id)
         items = SeriesInductor.query.filter(
             SeriesInductor.from_bus_id.in_(lookup_ids) |
             SeriesInductor.to_bus_id.in_(lookup_ids)
