@@ -4038,12 +4038,12 @@ main.content.premium-layout {
 }
 
 .inspector-body {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: var(--space-16);
+  padding: var(--space-20) var(--space-16); /* Added more top/bottom padding */
+  padding-bottom: 60px; /* Stronger clearance for the footer */
   scrollbar-gutter: stable;
-  min-height: 200px; /* Ensure it doesn't vanish entirely if header/footer grow */
-  max-height: 100%;
 }
 
 .inspector-footer {

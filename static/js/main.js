@@ -1281,7 +1281,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 </button>
             </div>
              <div class="popup-connect-actions">
-                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}" data-bus-id="${p.primary_bus_id || p.pole_number || ''}">Primary line-overhead</button>
+                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}" data-bus-id="${p.primary_bus_id || p.transformer_bus_id || p.pole_number || ''}">Primary line-overhead</button>
                 <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Distribution Transformer</button>
             </div>
         </div>
@@ -2530,9 +2530,12 @@ document.addEventListener('DOMContentLoaded', function () {
   var _primaryLineOverheadModal = null;
   var PRIMARY_LINE_OVERHEAD_FIELDS = [
     { key: 'length_meters', label: 'Length (m)' },
+    { key: 'conductor_type', label: 'Conductor type' },
+    { key: 'conductor_size', label: 'Conductor size' },
     { key: 'conductor_unit', label: 'Conductor unit' },
-    { key: 'system_grounding_type', label: 'System grounding type' },
     { key: 'conductor_strands', label: 'Conductor strands' },
+    { key: 'configuration', label: 'Configuration' },
+    { key: 'system_grounding_type', label: 'System grounding type' },
     { key: 'neutral_wire_type', label: 'Neutral wire type' },
     { key: 'neutral_wire_size', label: 'Neutral wire size' },
     { key: 'neutral_wire_unit', label: 'Neutral wire unit' },
@@ -2551,11 +2554,15 @@ document.addEventListener('DOMContentLoaded', function () {
     { key: 'earth_resistivity', label: 'Earth resistivity' }
   ];
   function showPrimaryLineOverheadModal(data) {
-    let title = 'Primary line-overhead' + (data && data.name ? ' — ' + data.name : '');
+    let title = 'Primary line-overhead' + (data && data.name ? ' — ' + data.name : (data && data.segment_id ? ' — ' + data.segment_id : ''));
     let html = '<div class="info-card"><div class="kv-grid">';
     
     PRIMARY_LINE_OVERHEAD_FIELDS.forEach(function (f) {
-      var val = data && data[f.key];
+      // Support both Post model keys (pri_conductor_size, neutral_wire) and DistributionLineSegment keys
+      var val = data && (data[f.key] !== undefined ? data[f.key] : undefined);
+      // Fallback aliases
+      if ((val === undefined || val === null || val === '') && f.key === 'conductor_size') val = data && data['pri_conductor_size'];
+      if ((val === undefined || val === null || val === '') && f.key === 'neutral_wire_type') val = data && (data['neutral_wire'] || data['neutral_wire_type']);
       if (val === undefined || val === null || val === '') val = '—';
       else if (typeof val === 'number') val = Number(val);
       
@@ -2571,23 +2578,19 @@ document.addEventListener('DOMContentLoaded', function () {
   var DISTRIBUTION_TRANSFORMER_FIELDS = [
     { key: 'id', label: 'ID' },
     { key: 'transformer_id', label: 'Transformer ID' },
-    { key: 'from_primary_bus_id', label: 'From Primary Bus ID' },
-    { key: 'to_secondary_bus_id', label: 'To Secondary Bus ID' },
-    { key: 'primary_phasing', label: 'Primary Phasing' },
-    { key: 'secondary_phasing', label: 'Secondary Phasing' },
-    { key: 'installation_type', label: 'Installation Type' },
-    { key: 'no_dts_in_bank', label: 'No. DTs in Bank' },
-    { key: 'connection', label: 'Connection' },
+    { key: 'from_primary_bus_id', label: 'From Bus' },
+    { key: 'to_secondary_bus_id', label: 'To (Sec) Bus' },
     { key: 'kva_rating', label: 'kVA Rating' },
-    { key: 'primary_voltage_kv', label: 'Primary Voltage (kV)' },
-    { key: 'secondary_voltage_kv', label: 'Secondary Voltage (kV)' },
-    { key: 'primary_tap_kv', label: 'Primary Tap (kV)' },
-    { key: 'secondary_tap_kv', label: 'Secondary Tap (kV)' },
+    { key: 'primary_phasing', label: 'Pri. Phasing' },
+    { key: 'secondary_phasing', label: 'Sec. Phasing' },
+    { key: 'installation_type', label: 'Installation' },
+    { key: 'connection', label: 'Connection' },
+    { key: 'primary_voltage_kv', label: 'Pri. Voltage (kV)' },
+    { key: 'secondary_voltage_kv', label: 'Sec. Voltage (kV)' },
     { key: 'pct_z', label: '%Z' },
     { key: 'xr_ratio', label: 'X/R Ratio' },
     { key: 'no_load_loss_kw', label: 'No-Load Loss (kW)' },
-    { key: 'exciting_current_pct', label: 'Exciting Current (%)' },
-    { key: 'created_at', label: 'Created At' }
+    { key: 'exciting_current_pct', label: 'Exciting Current (%)' }
   ];
   function showDistributionTransformerModal(data) {
     let title = 'Distribution Transformer' + (data && data.transformer_id ? ' — ' + data.transformer_id : '');
@@ -2615,19 +2618,16 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // --- Secondary Line modal ---
-  var _secondaryLineModal = null;
   var SECONDARY_LINE_FIELDS = [
-    { key: 'secondary_line_id', label: 'Secondary Line ID' },
-    { key: 'from_bus_id', label: 'From Bus ID' },
-    { key: 'to_bus_id', label: 'To Bus ID' },
+    { key: 'segment_id', label: 'Line ID' },
+    { key: 'from_bus_id', label: 'From Bus' },
+    { key: 'to_bus_id', label: 'To Bus' },
     { key: 'phasing', label: 'Phasing' },
     { key: 'conductor_type', label: 'Conductor Type' },
     { key: 'conductor_size', label: 'Conductor Size' },
     { key: 'conductor_unit', label: 'Unit' },
     { key: 'length_meters', label: 'Length (m)' },
-    { key: 'system_grounding_type', label: 'System Grounding' },
-    { key: 'neutral_wire_type', label: 'Neutral Wire Type' },
-    { key: 'neutral_wire_size', label: 'Neutral Wire Size' }
+    { key: 'installation_type', label: 'Installation' }
   ];
 
   function showSecondaryLineModal(data) {
@@ -2656,17 +2656,16 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // --- Secondary Service Drop modal ---
-  var _serviceDropModal = null;
   var SERVICE_DROP_FIELDS = [
-    { key: 'service_drop_id', label: 'Service Drop ID' },
+    { key: 'service_drop_id', label: 'Drop ID' },
     { key: 'to_customer_id', label: 'Customer ID' },
     { key: 'phasing', label: 'Phasing' },
-    { key: 'installation_type', label: 'Installation Type' },
     { key: 'conductor_type', label: 'Conductor Type' },
     { key: 'conductor_size', label: 'Conductor Size' },
     { key: 'conductor_unit', label: 'Unit' },
     { key: 'length_meters_1', label: 'Length-1 (m)' },
-    { key: 'length_meters_2', label: 'Length-2 (m)' }
+    { key: 'length_meters_2', label: 'Length-2 (m)' },
+    { key: 'installation_type', label: 'Installation' }
   ];
 
   function showServiceDropModal(data) {
@@ -2795,7 +2794,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const newView = document.createElement('div');
         newView.className = 'inspector-view-layer';
-        newView.style.display = 'block';
+        newView.style.display = 'flex';
         
         newView.innerHTML = `
           <div class="inspector-header">
