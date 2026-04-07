@@ -13,10 +13,18 @@ from models import Post
 
 
 def normalize_column_name(name):
-    if not name or pd.isna(name):
+    """Normalize column name for flexible matching"""
+    if not name:
         return ''
-    import re
-    return re.sub(r"\s+", "_", str(name).strip().lower()).strip('_')
+    normalized = str(name).strip().lower()
+    # Remove extra spaces and standardize
+    normalized = ' '.join(normalized.split())  # Collapse multiple spaces to single
+    # Replace spaces and special chars
+    normalized = normalized.replace(' ', '_').replace('(', '').replace(')', '').replace('-', '_')
+    # Remove consecutive underscores
+    while '__' in normalized:
+        normalized = normalized.replace('__', '_')
+    return normalized
 
 
 def sanitize_float(v):
@@ -45,15 +53,51 @@ def import_buses(csv_file):
 
             print(f"Loaded {len(df)} rows from {csv_file}")
 
+            def get_val(r, base):
+                """Helper to get value with multiple name variations"""
+                base = base.replace(' ', '_').lower()
+                # Direct match
+                if base in r: return r[base]
+                # Try common suffixes from normalization
+                for suffix in ['_meters', '_c', '_id', '_unit', '_strands', '_meters_1', '_meters_2', '_normalized']:
+                    if base + suffix in r: return r[base + suffix]
+                # Try prefix-based matching
+                for col in r.index:
+                    if col.startswith(base): return r[col]
+                return None
+
             stats = {'created': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
             seen_buses = set()
 
             for idx, row in df.iterrows():
-                from_bus = str(row.get('from_bus_id') or '').strip()
-                to_bus = str(row.get('to_bus_id') or '').strip()
+                from_bus = str(get_val(row, 'from_bus') or '').strip()
+                to_bus = str(get_val(row, 'to_bus') or '').strip()
                 
-                lat = sanitize_float(row.get('latitude') or row.get('lat'))
-                lng = sanitize_float(row.get('longitude') or row.get('lng') or row.get('lon'))
+                lat = sanitize_float(get_val(row, 'latitude') or get_val(row, 'lat'))
+                lng = sanitize_float(get_val(row, 'longitude') or get_val(row, 'lng'))
+
+                # Technical data for the pole
+                tech_data = {
+                    'configuration': str(get_val(row, 'configuration') or '').strip() or None,
+                    'system_grounding_type': str(get_val(row, 'system_grounding_type') or '').strip() or None,
+                    'conductor_type': str(get_val(row, 'conductor_type') or '').strip() or None,
+                    'pri_conductor_size': str(get_val(row, 'conductor_size') or '').strip() or None,
+                    'conductor_unit': str(get_val(row, 'conductor_unit') or get_val(row, 'unit_c') or '').strip() or None,
+                    'conductor_strands': str(get_val(row, 'conductor_strands') or get_val(row, 'strands_c') or '').strip() or None,
+                    'neutral_wire': str(get_val(row, 'neutral_wire_type') or '').strip() or None,
+                    'spacing_d12': sanitize_float(get_val(row, 'spacing_d12')),
+                    'spacing_d23': sanitize_float(get_val(row, 'spacing_d23')),
+                    'spacing_d13': sanitize_float(get_val(row, 'spacing_d13')),
+                    'spacing_d1n': sanitize_float(get_val(row, 'spacing_d1n')),
+                    'spacing_d2n': sanitize_float(get_val(row, 'spacing_d2n')),
+                    'spacing_d3n': sanitize_float(get_val(row, 'spacing_d3n')),
+                    'spacing_dc1_c2': sanitize_float(get_val(row, 'spacing_dc1_c2')),
+                    'height_h1': sanitize_float(get_val(row, 'height_h1')),
+                    'height_h2': sanitize_float(get_val(row, 'height_h2')),
+                    'height_h3': sanitize_float(get_val(row, 'height_h3')),
+                    'height_hn': sanitize_float(get_val(row, 'height_hn')),
+                    'earth_resistivity': sanitize_float(get_val(row, 'earth_resistivity')),
+                }
 
                 for bus in (from_bus, to_bus):
                     if not bus or bus == 'nan' or bus in seen_buses:
@@ -71,9 +115,12 @@ def import_buses(csv_file):
                         post_data['lat'] = lat
                         post_data['lng'] = lng
                     else:
-                        # Fallback for missing coords
                         post_data['lat'] = 0.0
                         post_data['lng'] = 0.0
+
+                    # Only from_bus gets the technical data from this row
+                    if bus == from_bus:
+                        post_data.update(tech_data)
 
                     existing = Post.query.filter_by(pole_number=bus).first()
                     if existing:
