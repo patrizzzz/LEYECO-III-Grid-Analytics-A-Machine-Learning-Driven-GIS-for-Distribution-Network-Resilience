@@ -92,16 +92,47 @@ def export_master_csv():
 def api_transformer_location(transformer_id):
     try:
         from models import DistributionTransformer, Post, BusNode
-        trans = DistributionTransformer.query.filter_by(transformer_id=transformer_id).first()
-        if not trans or not trans.from_primary_bus_id: return jsonify({'error': 'Not found'}), 404
+        # 1. Robust Transformer Lookup (case-insensitive & trimmed)
+        tid = transformer_id.strip()
+        trans = DistributionTransformer.query.filter(DistributionTransformer.transformer_id.ilike(tid)).first()
+        if not trans or not trans.from_primary_bus_id:
+            return jsonify({'error': 'Transformer not found in registry'}), 404
+        
         primary_bus = trans.from_primary_bus_id
+        post = None
+        
+        # 2. Try Direct Post Match
         post = Post.query.filter((Post.primary_bus_id == primary_bus) | (Post.pole_number == primary_bus)).first()
+        
+        # 3. Try BusNode Bridge
         if not post:
             bn = BusNode.query.filter_by(bus_id=primary_bus).first()
-            if bn and bn.pole_number: post = Post.query.filter_by(pole_number=bn.pole_number).first()
-        if post and post.lat and post.lng: return jsonify({'post_id': post.id, 'lat': post.lat, 'lng': post.lng, 'pole_number': post.pole_number, 'name': post.name}), 200
-        return jsonify({'error': 'No coordinates found'}), 404
-    except Exception as e: return jsonify({'error': str(e)}), 500
+            if bn:
+                if bn.pole_id:
+                    post = Post.query.get(bn.pole_id)
+                elif bn.pole_number:
+                    post = Post.query.filter_by(pole_number=bn.pole_number).first()
+                
+                # If we found a BusNode but it has no Post link, use its coordinates directly
+                if not post and bn.lat and bn.lng:
+                    return jsonify({'post_id': None, 'lat': bn.lat, 'lng': bn.lng, 'name': f"Bus {bn.bus_id}"}), 200
+
+        # 4. Final Fallback: Numeric ID match for the bus
+        if not post and primary_bus.isdigit():
+            post = Post.query.get(int(primary_bus))
+
+        if post and post.lat and post.lng:
+            return jsonify({
+                'post_id': post.id,
+                'lat': post.lat,
+                'lng': post.lng,
+                'pole_number': post.pole_number,
+                'name': post.name or post.pole_number or f"Pole {post.id}"
+            }), 200
+            
+        return jsonify({'error': f'Coordinates could not be resolved for primary bus: {primary_bus}'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @analysis_api_bp.route('/ml/transformer-risk', methods=['GET'])
 def api_ml_transformer_risk():

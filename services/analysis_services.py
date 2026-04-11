@@ -298,10 +298,20 @@ def get_grid_health_analytics(force_refresh=False):
         if unmatched:
             bn_posts = BusNode.query.filter(BusNode.bus_id.in_(unmatched)).all()
             for bn in bn_posts:
-                if bn.pole_number:
+                if bn.pole_id:
+                    posts_by_bus[bn.bus_id] = bn.pole_id
+                elif bn.pole_number:
                     p2 = Post.query.filter_by(pole_number=bn.pole_number).first()
                     if p2:
                         posts_by_bus[bn.bus_id] = p2.id
+            
+            # Final fallback: if the ID is purely numeric, check if it's a Post.id
+            still_unmatched = [bid for bid in unmatched if bid not in posts_by_bus and bid.isdigit()]
+            if still_unmatched:
+                numeric_ids = [int(bid) for bid in still_unmatched]
+                matched_numeric = Post.query.filter(Post.id.in_(numeric_ids)).all()
+                for p in matched_numeric:
+                    posts_by_bus[str(p.id)] = p.id
     
     # 3. Merge results — keep ALL original ML fields and add load stress data
     combined_details = []

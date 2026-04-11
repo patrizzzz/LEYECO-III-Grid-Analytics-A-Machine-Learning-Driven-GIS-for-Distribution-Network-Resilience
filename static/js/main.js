@@ -2055,22 +2055,22 @@ document.addEventListener('DOMContentLoaded', function () {
           console.log('Bounds not valid - using default map view');
         }
 
-        // If a target post id was provided via URL params, center/fly to it and open popup
+        // If a target post id was provided via URL params, center/fly to it and open inspector
         try {
           const targetId = window._targetPostId;
           if (targetId) {
             const tid = parseInt(targetId, 10);
             console.log('Targeting post ID:', tid);
-            // small timeout to ensure markers have been added to the layer
             setTimeout(function () {
               const marker = postMarkers[tid];
               if (marker && marker.getLatLng) {
                 try { map.flyTo(marker.getLatLng(), 17); } catch (e) { map.setView(marker.getLatLng(), 17); }
-                try { marker.openPopup(); } catch (e) { }
+                // Trigger click to open both popup AND the sidebar inspector
+                marker.fire('click');
               } else {
                 console.warn('Target marker not found:', tid);
               }
-            }, 250);
+            }, 500); // Slightly longer delay to ensure layer is fully ready
           }
         } catch (e) { console.error('Error in target post handling:', e); }
       })
