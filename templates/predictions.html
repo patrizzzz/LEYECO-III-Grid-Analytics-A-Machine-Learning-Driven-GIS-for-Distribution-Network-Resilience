@@ -1119,17 +1119,54 @@
                         if (loc.post_id && loc.lat && loc.lng) {
                             window.location.href = '/map?id=' + loc.post_id + '&lat=' + loc.lat + '&lng=' + loc.lng;
                         } else {
-                            alert('Could not find pole location for transformer: ' + targetTid + '. ' + (loc.error || ''));
+                            showLocalNotice('Location Not Resolved', (loc.error || 'Could not find coordinates for this transformer.'), 'Error');
                             confirmBtn.disabled = false;
                             confirmBtn.textContent = 'Yes, Locate Transformer';
                         }
                     } catch (e) {
-                        alert('Error locating transformer: ' + e.message);
+                        showLocalNotice('Navigation Error', e.message, 'Error');
                         confirmBtn.disabled = false;
                         confirmBtn.textContent = 'Yes, Locate Transformer';
                     }
                 }
             });
+
+            function showLocalNotice(title, msg, type = 'Info') {
+                const overlay = document.createElement('div');
+                Object.assign(overlay.style, {
+                    position: 'fixed', top: '0', left: '0', width: '100vw', height: '100vh',
+                    backgroundColor: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(8px)',
+                    zIndex: '10000', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    opacity: '0', transition: 'opacity 0.2s ease'
+                });
+                const card = document.createElement('div');
+                Object.assign(card.style, {
+                    background: 'var(--surface)', borderRadius: '16px', padding: '32px',
+                    width: '90%', maxWidth: '420px', textAlign: 'center',
+                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                    transform: 'scale(0.9) translateY(20px)', transition: 'all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                });
+                const icon = type === 'Error' ? '❌' : 'ℹ️';
+                card.innerHTML = `
+                    <div style="font-size: 3rem; margin-bottom: 20px;">${icon}</div>
+                    <h3 style="margin-bottom: 12px; font-weight: 700; color: var(--text-primary);">${title}</h3>
+                    <p style="color: var(--text-secondary); margin-bottom: 24px; line-height: 1.5;">${msg}</p>
+                    <button class="btn btn-primary" style="width: 100%; padding: 12px; font-weight: 700;">Close</button>
+                `;
+                overlay.appendChild(card);
+                document.body.appendChild(overlay);
+                const close = () => {
+                    overlay.style.opacity = '0';
+                    card.style.transform = 'scale(0.9) translateY(20px)';
+                    setTimeout(() => overlay.remove(), 250);
+                };
+                card.querySelector('button').onclick = close;
+                overlay.onclick = (e) => { if (e.target === overlay) close(); };
+                requestAnimationFrame(() => {
+                    overlay.style.opacity = '1';
+                    card.style.transform = 'scale(1) translateY(0)';
+                });
+            }
         });
     })();
 </script>
