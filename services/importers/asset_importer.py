@@ -1,3 +1,4 @@
+from flask import current_app
 from services.importers.base_importer import BaseImporter, sanitize_float
 from models import Post, BusNode, DistributionTransformer, UploadHistory, VoltageRegulator, ShuntCapacitor, ShuntInductor, SeriesInductor
 from extensions import db

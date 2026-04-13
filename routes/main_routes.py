@@ -62,7 +62,7 @@ def dashboard():
 
 @main_bp.route('/seed', methods=['POST'])
 def seed():
-    from seed_db import seed_posts
+    from services.seed_service import seed_posts
     seed_posts()
     return redirect(url_for('main.dashboard'))
 
