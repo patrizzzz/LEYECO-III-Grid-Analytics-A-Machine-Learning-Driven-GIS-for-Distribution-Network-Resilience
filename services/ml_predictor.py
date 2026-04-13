@@ -11,6 +11,41 @@ import os
 import joblib
 
 
+
+def _generate_anchor_samples():
+    """
+    Generate synthetic 'Ideal' and 'Critical' anchor samples to ground the model.
+    These act as fixed reference points for the 0-100 risk score.
+    """
+    anchors = [
+        # 1. Ideal Anchor (Fixed point for Score 0)
+        {
+            'KVA Rating': 25.0,
+            '%Z': 2.3,
+            'X/R Ratio': 1.0,
+            'No-Load Loss (kW)': 0.1,
+            'Exciting Current (%)': 0.3,
+            'utilization_percent': 50.0,
+            'is_anchor': True,
+            'anchor_type': 'ideal',
+            'transformer_id': 'ANCHOR-IDEAL'
+        },
+        # 2. Critical Anchor (Fixed point for Score 100)
+        {
+            'KVA Rating': 10.0,
+            '%Z': 6.5,          # High impedance (anomaly)
+            'X/R Ratio': 3.5,    # High X/R (anomaly)
+            'No-Load Loss (kW)': 0.3, # High loss relative to KVA
+            'Exciting Current (%)': 3.0, # High exiting current
+            'utilization_percent': 160.0, # Heavily overloaded
+            'is_anchor': True,
+            'anchor_type': 'critical',
+            'transformer_id': 'ANCHOR-CRITICAL'
+        }
+    ]
+    return pd.DataFrame(anchors)
+
+
 def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
     """
     Predict transformer failure risk using Isolation Forest anomaly detection.
@@ -81,10 +116,25 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
                          left_on=id_col, right_on='transformer_id', 
                          how='left').drop(columns=['transformer_id'])
 
+            df = df.merge(df_stress[['transformer_id', 'utilization_percent']], 
+                         left_on=id_col, right_on='transformer_id', 
+                         how='left').drop(columns=['transformer_id'])
+
+    # --- 1c. Inject synthetic anchors for stability ---
+    anchors_df = _generate_anchor_samples()
+    # Add dummy columns to anchors if they exist in df but not in anchors
+    for col in df.columns:
+        if col not in anchors_df.columns:
+            anchors_df[col] = np.nan
+    
+    # Combined dataframe for training and scoring
+    df_with_anchors = pd.concat([df, anchors_df], ignore_index=True)
+    n_real = len(df)
+
     # --- 2. Feature engineering ---
     # Numerical features - strictly limited to electrical characteristics
     allowed_stats = ['KVA Rating', '%Z', 'X/R Ratio', 'No-Load Loss (kW)', 'Exciting Current (%)', 'utilization_percent']
-    numerical_features = [f for f in allowed_stats if f in df.columns]
+    numerical_features = [f for f in allowed_stats if f in df_with_anchors.columns]
 
     categorical_features = [] # Removed non-electrical categorical features
 
@@ -93,17 +143,11 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
 
     # Numerical features - fill NaN with median
     for feat in numerical_features:
-        col = pd.to_numeric(df[feat], errors='coerce')
-        col = col.fillna(col.median())
+        col = pd.to_numeric(df_with_anchors[feat], errors='coerce')
+        median_val = col.median()
+        if pd.isna(median_val): median_val = 0
+        col = col.fillna(median_val)
         feature_df[feat] = col
-
-    # Categorical features - label encode
-    label_encoders = {}
-    for feat in categorical_features:
-        le = LabelEncoder()
-        col = df[feat].fillna('Unknown').astype(str)
-        feature_df[feat] = le.fit_transform(col)
-        label_encoders[feat] = le
 
     # Derived features for better anomaly detection
     if 'KVA Rating' in feature_df.columns and 'No-Load Loss (kW)' in feature_df.columns:
@@ -119,10 +163,6 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
         feature_df['exciting_ratio'] = feature_df['Exciting Current (%)'] / 100.0
 
     # --- 3. Scale and train model ---
-    # We drop 'KVA Rating', 'No-Load Loss (kW)', and 'Exciting Current (%)' from X 
-    # because they are raw values or raw percentages that we have now converted 
-    # to standardized ratios (loss_to_kva_ratio, exciting_ratio).
-    # We KEEP 'utilization_percent' as a primary stress indicator.
     to_drop = ['KVA Rating', 'No-Load Loss (kW)', 'Exciting Current (%)', 'No. DTs in Bank', 'Primary Voltage Rating(kV)', 'Secondary Voltage Rating (kV)']
     training_df = feature_df.drop(columns=[c for c in to_drop if c in feature_df.columns])
 
@@ -143,14 +183,24 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
     raw_scores = model.decision_function(X)  # lower = more anomalous
     predictions = model.predict(X)  # -1 or 1
 
-    # --- 4. Convert to risk scores (0-100) ---
-    # Invert so that higher score = higher risk
-    min_score = raw_scores.min()
-    max_score = raw_scores.max()
-    if max_score - min_score > 0:
-        risk_scores = 100 * (1 - (raw_scores - min_score) / (max_score - min_score))
+    # --- 4. Convert to stable risk scores (0-100) ---
+    # Find anchor scores to use as grounding points
+    ideal_idx = df_with_anchors[df_with_anchors['anchor_type'] == 'ideal'].index[0]
+    critical_idx = df_with_anchors[df_with_anchors['anchor_type'] == 'critical'].index[0]
+    
+    score_ideal = raw_scores[ideal_idx]
+    score_critical = raw_scores[critical_idx]
+    
+    # We want score_ideal to map to 0 and score_critical to map to 100
+    # Higher raw_score is 'better', so we use: (score_ideal - current) / (score_ideal - score_critical) * 100
+    range_val = score_ideal - score_critical
+    if range_val > 0:
+        risk_scores = 100 * (score_ideal - raw_scores) / range_val
     else:
         risk_scores = np.full_like(raw_scores, 50.0)
+
+    # Clamp scores to 0-100
+    risk_scores = np.clip(risk_scores, 0, 100)
 
     # --- 5. Classify risk levels ---
     def classify_risk(score):
@@ -163,10 +213,10 @@ def predict_transformer_risk(source='csv', csv_path=None, db_records=None):
         else:
             return 'Low'
 
-    # --- 6. Build results ---
+    # --- 6. Build results (Excluding Anchors) ---
     results = []
-    for i in range(len(df)):
-        row = df.iloc[i]
+    for i in range(n_real):
+        row = df_with_anchors.iloc[i]
         risk_score = round(float(risk_scores[i]), 1)
         risk_level = classify_risk(risk_score)
 
