@@ -3987,6 +3987,80 @@ main.content.premium-layout {
   word-break: break-word;
 }
 
+/* --- Search Mode Filter & Expanded Search UI --- */
+.search-mode-selector select {
+  padding-right: 20px !important;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>") !important;
+  background-repeat: no-repeat !important;
+  background-position: right center !important;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.search-mode-selector select:hover {
+  color: var(--primary) !important;
+}
+
+.top-search-input:focus {
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.customer-search-suggestions {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  border: 1px solid var(--border);
+  z-index: 1100;
+  display: none;
+  overflow: hidden;
+  animation: slideDown 0.2s ease-out;
+}
+
+.customer-search-suggestions.active {
+  display: block;
+}
+
+.customer-search-item {
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.customer-search-item:last-child {
+  border-bottom: none;
+}
+
+.customer-search-item:hover, .customer-search-item:focus {
+  background: var(--primary-light);
+  padding-left: 20px;
+}
+
+.customer-search-item-id {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--primary);
+  margin-bottom: 1px;
+}
+
+.customer-search-item-name {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.customer-search-loading, .customer-search-empty, .customer-search-error {
+  padding: 16px;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
 .info-card-header {
   display: flex;
   justify-content: space-between;

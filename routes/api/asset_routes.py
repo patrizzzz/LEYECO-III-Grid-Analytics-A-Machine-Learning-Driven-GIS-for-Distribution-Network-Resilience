@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, g, current_app
 from extensions import db
-from sqlalchemy import text
+from sqlalchemy import text, func
 from models import (
     Post, Meter, LatLongData, BusNode, 
     DistributionLineSegment, SecondaryLineSegment, 
@@ -38,6 +38,38 @@ def api_posts():
         return jsonify(result)
     except Exception as e:
         return jsonify({"data": [], "error": str(e)}), 500
+
+@asset_api_bp.route('/posts/nearest', methods=['GET'])
+def api_posts_nearest():
+    """Find the single closest post to the given latitude and longitude."""
+    try:
+        lat = request.args.get('lat', type=float)
+        lng = request.args.get('lng', type=float)
+        if lat is None or lng is None:
+            return jsonify({'error': 'lat and lng required'}), 400
+        
+        # Use PostGIS ST_Distance for accurate spatial lookup
+        # We order by distance and take the first (closest) result
+        nearest_post = Post.query.order_by(
+            func.ST_Distance(
+                Post.geom, 
+                func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326)
+            )
+        ).first()
+        
+        if not nearest_post:
+            # Fallback: simple Euclidean distance if geom is missing for some reason
+            nearest_post = Post.query.order_by(
+                (Post.lat - lat)**2 + (Post.lng - lng)**2
+            ).first()
+            
+        if not nearest_post:
+            return jsonify({'error': 'No posts found'}), 404
+            
+        return jsonify(nearest_post.to_dict())
+    except Exception as e:
+        current_app.logger.error('Failed to find nearest post: %s', e)
+        return jsonify({'error': str(e)}), 500
 
 @asset_api_bp.route('/posts/<int:post_id>', methods=['GET', 'PUT', 'DELETE'])
 def api_post_detail(post_id):

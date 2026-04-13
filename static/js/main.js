@@ -11,6 +11,416 @@ document.addEventListener('DOMContentLoaded', function () {
     console.error('Map init:', msg);
   }
 
+  // Global helper for opening posts from outside (e.g. search)
+  function openPostInInspector(p) {
+    const inspectorContent = document.getElementById('inspector-content');
+    const layoutEl = document.querySelector('.premium-layout');
+    if (!inspectorContent || !layoutEl) return;
+
+    const lat = parseFloat(p.lat);
+    const lng = parseFloat(p.lng);
+
+    const popupHtml = `
+      <div class="post-popup-container">
+        <div class="post-popup-tabs">
+            <button class="tab-link active" data-tab="General-${p.id}">General</button>
+            <button class="tab-link" data-tab="Connections-${p.id}">Connections</button>
+            <button class="tab-link" data-tab="Assets-${p.id}">Assets</button>
+        </div>
+
+        <div id="General-${p.id}" class="tab-content" style="display: block;">
+            <div class="popup-post-details">
+              <strong>${(p.name || 'Post ' + p.id).replace(/</g, '&lt;')}</strong><br>
+              <div style="padding:10px;text-align:center;"><div class="spinner"></div> Loading details...</div>
+            </div>
+            <div class="popup-connect-actions" style="margin-bottom:4px;">
+                <button class="btn btn-outline btn-street-view" data-lat="${lat}" data-lng="${lng}" data-post-id="${p.id}" title="Open Street View at this location">
+                  <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 -960 960 960" fill="currentColor" style="vertical-align:middle;margin-right:4px;"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q27-35 43.5-76t22.5-86H640v40q0 33 23.5 56.5T720-306v42Z"/></svg>
+                  Street View
+                </button>
+            </div>
+             <div class="popup-connect-actions">
+                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}" data-bus-id="${p.primary_bus_id || p.transformer_bus_id || p.pole_number || ''}">Primary line-overhead</button>
+                <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Distribution Transformer</button>
+            </div>
+        </div>
+
+        <div id="Connections-${p.id}" class="tab-content" style="display: none;">
+             <div class="popup-connect-actions">
+                <button class="btn btn-outline secondary-lines-btn" data-post-id="${p.id}">Secondary Lines</button>
+                <button class="btn btn-outline service-drop-btn" data-post-id="${p.id}">Secondary Service Drop</button>
+                <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connected Lines</button>
+            </div>
+            <div class="popup-connect-actions" style="margin-top:4px;">
+                <button class="btn btn-outline btn-trace-downstream" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">⚡ Trace Downstream</button>
+                <button class="btn btn-outline btn-outage-sim" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">🔴 Outage Simulation</button>
+            </div>
+            <div class="popup-connections-inner" style="margin-top:10px; font-size:0.85rem;"></div>
+        </div>
+
+        <div id="Assets-${p.id}" class="tab-content" style="display: none;">
+            <div class="popup-connect-actions grid-actions">
+              <button class="btn btn-outline voltage-regulator-btn" data-post-id="${p.id}">Voltage Regulator</button>
+              <button class="btn btn-outline shunt-capacitor-btn" data-post-id="${p.id}">Shunt Capacitor</button>
+              <button class="btn btn-outline shunt-inductor-btn" data-post-id="${p.id}">Shunt Inductor</button>
+              <button class="btn btn-outline series-inductor-btn" data-post-id="${p.id}">Series Inductor</button>
+            </div>
+            <div style="margin-top: 12px; border-top: 1px solid var(--border); padding-top:12px;">
+                <button class="btn btn-outline full-width-btn export-post-btn" data-post-id="${p.id}">📥 Export Post Data</button>
+            </div>
+        </div>
+      </div>
+    `;
+
+    layoutEl.classList.add('inspector-open');
+
+    // Manage active marker state
+    if (window._selectionIndicatorMarker) {
+      map.removeLayer(window._selectionIndicatorMarker);
+    }
+    window._selectionIndicatorMarker = L.marker([lat, lng], {
+      icon: L.divIcon({
+        className: 'custom-selection-indicator',
+        html: '<div class="selection-tooltip">Selected</div>',
+        iconSize: [80, 30],
+        iconAnchor: [40, 85]
+      }),
+      interactive: false,
+      zIndexOffset: 1000
+    }).addTo(map);
+
+    inspectorContent.innerHTML = `
+      <div class="inspector-view-layer">
+        <div class="inspector-header">
+          <h3 style="margin:0; font-size:1.1rem; color:var(--text-primary);">Asset Inspector</h3>
+          <button id="close-inspector-inner" class="btn-icon" style="background:var(--surface-secondary);border-radius:50%;">✕</button>
+        </div>
+        <div class="inspector-body">
+          ${popupHtml}
+        </div>
+      </div>
+    `;
+
+    document.getElementById('close-inspector-inner').onclick = () => {
+      layoutEl.classList.remove('inspector-open');
+      if (window._selectionIndicatorMarker) {
+        map.removeLayer(window._selectionIndicatorMarker);
+        window._selectionIndicatorMarker = null;
+      }
+    };
+
+    // Attach tab listeners
+    const tabLinks = inspectorContent.querySelectorAll('.tab-link');
+    const tabContents = inspectorContent.querySelectorAll('.tab-content');
+    tabLinks.forEach(link => {
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        tabContents.forEach(c => c.style.display = 'none');
+        tabLinks.forEach(l => l.classList.remove('active'));
+        const targetId = this.getAttribute('data-tab');
+        const target = inspectorContent.querySelector('#' + targetId);
+        if (target) target.style.display = 'block';
+        this.classList.add('active');
+      });
+    });
+
+    // ── Load authoritative details (Load Stress, technical data) ──
+    const detailsEl = inspectorContent.querySelector('.popup-post-details');
+    fetch(`/api/posts/${p.id}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data || data.error) return;
+        
+        // Patch NETWORK attributes
+        const trBtn = inspectorContent.querySelector('.btn-trace-downstream');
+        const outBtn = inspectorContent.querySelector('.btn-outage-sim');
+        if (trBtn) {
+            trBtn.setAttribute('data-pole', data.pole_number || '');
+            trBtn.setAttribute('data-bus', data.primary_bus_id || '');
+            trBtn.setAttribute('data-transformer-bus', data.transformer_bus_id || '');
+        }
+        if (outBtn) {
+            outBtn.setAttribute('data-pole', data.pole_number || '');
+            outBtn.setAttribute('data-bus', data.primary_bus_id || '');
+            outBtn.setAttribute('data-transformer-bus', data.transformer_bus_id || '');
+        }
+
+        const busId = data.primary_bus_id || data.pole_number;
+        let vrPromise = (busId) ? fetch('/api/voltage-regulators/by-bus/' + encodeURIComponent(busId)).then(r => r.json()).catch(() => null) : Promise.resolve(null);
+
+        vrPromise.then(vrRes => {
+          const vrData = (vrRes && vrRes.items && vrRes.items.length > 0) ? vrRes.items[0] : null;
+          let kvaDisplay = '—';
+          if (vrData && vrData.kva_rating != null) kvaDisplay = vrData.kva_rating;
+          else if (data.kva_rating != null) kvaDisplay = data.kva_rating;
+
+          let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong><br>`;
+          infoHtml += `ID: ${data.id}<br>`;
+          infoHtml += `Post Code: ${data.post_id || data.pole_number || '—'}<br>`;
+          infoHtml += `Status: ${data.status || 'N/A'}<br>`;
+          infoHtml += `Feeder: ${data.feeder || '—'}<br>`;
+          infoHtml += `kVA Rating: ${kvaDisplay}<br>`;
+          infoHtml += `Meter: ${data.meter_brand ? (data.meter_brand + (data.meter_id ? ' / ' + data.meter_id : '')) : (data.meter_id || '—')}<br>`;
+          infoHtml += `Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>`;
+
+          if (data.utilization_percent !== undefined) {
+              const util = data.utilization_percent;
+              const status = data.load_status || 'Unknown';
+              const statusClass = status.toLowerCase().replace(' ', '-');
+              let barColorClass = 'normal';
+              if (util >= 100) barColorClass = 'danger';
+              else if (util >= 80) barColorClass = 'warning';
+
+              infoHtml += `
+                <div class="stress-section" style="margin-top:10px; padding:10px; background:var(--surface-secondary); border-radius:8px;">
+                  <div class="stress-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-size:0.75rem; font-weight:700; color:var(--text-secondary);">LOAD STRESS</span>
+                    <span class="status-badge ${statusClass}" style="padding:2px 6px; border-radius:4px; font-size:0.7rem; font-weight:700;">${status}</span>
+                  </div>
+                  <div class="utilization-track" style="height:6px; background:var(--border); border-radius:3px; overflow:hidden;">
+                    <div class="utilization-fill ${barColorClass}" style="width: ${Math.min(util, 100)}%; height:100%;"></div>
+                  </div>
+                  <div class="stress-metrics" style="display:flex; justify-content:space-between; margin-top:6px; font-size:0.7rem; color:var(--text-secondary);">
+                    <span>Utilization: ${util.toFixed(1)}%</span>
+                    <span>Risk: ${data.ml_risk_level || 'Low'}</span>
+                  </div>
+                </div>
+              `;
+          }
+          if (detailsEl) detailsEl.innerHTML = infoHtml;
+        });
+      });
+
+    // ── Load connections section ──
+    const connsContainer = inspectorContent.querySelector('.popup-connections-inner');
+    fetch(`/api/posts/${p.id}/connections`)
+      .then(r => r.json())
+      .then(conns => {
+        const list = Array.isArray(conns) ? conns : (conns && conns.connections ? conns.connections : []);
+        if (list.length === 0) return;
+
+        let html = '<strong>Connections involving this post:</strong>';
+        html += '<ul class="post-connections-list" style="margin-top:8px; padding-left:1.2rem;">';
+        list.forEach(c => {
+            const name = (typeof c.name === 'string' && c.name && c.name.indexOf('{') !== 0) ? c.name : ('Connection #' + (c.id || ''));
+            html += `<li style="margin-bottom:8px;">${name.replace(/</g, '&lt;')} (id ${c.id}) — ${formatMeters(c.total_length || 0)} <br/><button class="btn btn-danger disconnect-from-post" data-conn-id="${c.id}" style="padding:2px 8px; font-size:0.7rem; margin-top:4px;">Disconnect</button></li>`;
+        });
+        html += '</ul>';
+        connsContainer.innerHTML = html;
+        
+        connsContainer.querySelectorAll('.disconnect-from-post').forEach(b => {
+          b.onclick = () => {
+            const id = b.dataset.connId;
+            showConfirmModal('Permanently delete this connection?', { title: 'Delete Connection', okText: 'Delete' }).then(conf => {
+              if (conf) {
+                fetch('/api/connections/' + id, { method: 'DELETE' }).then(r => r.json()).then(j => {
+                  if (j.result === 'deleted') {
+                    b.closest('li').remove();
+                    loadConnections();
+                  } else {
+                    showNoticeModal('Error', 'Failed to delete connection');
+                  }
+                });
+              }
+            });
+          };
+        });
+      });
+
+    bindInspectorButtons(inspectorContent);
+  }
+
+  function bindInspectorButtons(container) {
+      // 1. Street View
+      const svBtn = container.querySelector('.btn-street-view');
+      if (svBtn) svBtn.onclick = (e) => {
+          window.open(`https://www.google.com/maps/@${svBtn.dataset.lat},${svBtn.dataset.lng},3a,80y,0h,90t/data=!3m4!1e1!3m2!1s!2e0`, '_blank');
+      };
+
+      // 2. Primary Line Info
+      const plBtn = container.querySelector('.primary-line-overhead-btn');
+      if (plBtn) plBtn.onclick = () => {
+          const id = plBtn.dataset.busId || plBtn.dataset.postId;
+          fetch('/api/primary-lines/by-bus/' + encodeURIComponent(id))
+            .then(r => r.json())
+            .then(res => {
+               if (res.primary_lines && res.primary_lines.length > 0) showPrimaryLineOverheadModal(res.primary_lines[0]);
+               else fetch('/api/posts/' + plBtn.dataset.postId).then(r => r.json()).then(d => showPrimaryLineOverheadModal(d));
+            });
+      };
+
+      // 3. Distribution Transformer
+      const txBtn = container.querySelector('.distribution-transformer-btn');
+      if (txBtn) txBtn.onclick = () => {
+          fetch('/api/posts/' + txBtn.dataset.postId).then(r => r.json()).then(p => {
+              const bus = p.transformer_bus_id || p.primary_bus_id || p.pole_number;
+              fetch('/api/transformers/by-bus/' + encodeURIComponent(bus)).then(r => r.json()).then(t => {
+                  if (t.transformers && t.transformers.length > 0) showDistributionTransformerModal(t.transformers[0]);
+                  else showDistributionTransformerModal({ transformer_bus_id: bus });
+              });
+          });
+      };
+
+      // 4. Secondary Lines
+      const slBtn = container.querySelector('.secondary-lines-btn');
+      if (slBtn) slBtn.onclick = () => {
+          fetch('/api/posts/' + slBtn.dataset.postId).then(r => r.json()).then(p => {
+              const bus = p.transformer_bus_id || p.primary_bus_id || p.pole_number;
+              fetch('/api/transformers/by-bus/' + encodeURIComponent(bus)).then(r => r.json()).then(trRes => {
+                  if (trRes.transformers && trRes.transformers.length > 0) {
+                      const secBus = trRes.transformers[0].to_secondary_bus_id;
+                      if (!secBus) { showNoticeModal('Info', 'Transformer has no secondary bus defined.'); return; }
+                      fetch('/api/secondary-lines/by-bus/' + encodeURIComponent(secBus)).then(r => r.json()).then(res => showSecondaryLineModal(res));
+                  } else {
+                      showNoticeModal('Info', 'No transformer found to resolve secondary lines.');
+                  }
+              });
+          });
+      };
+
+      // 5. Service Drops
+      const sdBtn = container.querySelector('.service-drop-btn');
+      if (sdBtn) sdBtn.onclick = () => {
+          sdBtn.textContent = '⏳ Loading...';
+          fetch(`/api/posts/${sdBtn.dataset.postId}/service-drops`).then(r => r.json()).then(res => {
+              sdBtn.textContent = '🏠 Service Drops';
+              showServiceDropModal(res);
+          });
+      };
+
+      // 6. Connected Lines Visualization
+      const connBtn = container.querySelector('.btn-show-connections');
+      if (connBtn) connBtn.onclick = () => {
+          connBtn.textContent = '⏳ Loading...';
+          fetch(`/api/posts/${connBtn.dataset.postId}/connections`).then(r => r.json()).then(res => {
+              connBtn.textContent = 'View Connected Lines';
+              showConnectionsModal(res, connBtn.dataset.postId);
+          });
+      };
+
+      // 7. Network Analysis (Trace)
+      const trBtn = container.querySelector('.btn-trace-downstream');
+      if (trBtn) trBtn.onclick = () => {
+          const busId = trBtn.dataset.pole || trBtn.dataset.bus || trBtn.dataset.transformerBus;
+          if (!busId) { showNoticeModal('Info', 'No bus ID available'); return; }
+          trBtn.textContent = '⏳ Tracing...';
+          fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream')
+            .then(r => r.json())
+            .then(result => {
+                trBtn.textContent = '⚡ Trace Downstream';
+                if (result.error) { showNoticeModal('Error', result.error); return; }
+                
+                const buses = result.visited_buses || [];
+                let html = '<div class="trace-summary-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">';
+                html += '<div style="width:40px; height:40px; border-radius:10px; background:#e0f2fe; color:#0ea5e9; display:flex; align-items:center; justify-content:center; font-size:20px;">⚡</div>';
+                html += '<div><div style="font-weight:700; font-size:16px;">Trace Downstream</div><div style="font-size:12px; color:#64748b;">Starting Node: ' + busId + '</div></div></div>';
+                
+                html += '<div style="padding:16px; background:var(--surface-secondary); border-radius:8px; border:1px solid var(--border); margin-bottom:16px;">';
+                html += '<div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Total Downstream Nodes</div>';
+                html += '<div style="font-size:24px; font-weight:700; color:#0ea5e9;">' + buses.length + '</div>';
+                html += '</div>';
+
+                if (buses.length > 0) {
+                    html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Buses in Trace</div>';
+                    html += '<div style="max-height:180px; overflow-y:auto; font-size:12px; background:var(--surface-secondary); padding:10px; border-radius:8px; font-family:var(--font-mono); line-height:1.6;">';
+                    buses.forEach(function (b, idx) { 
+                        html += '<span style="color:#64748b;">' + (idx+1).toString().padStart(2, '0') + '. </span>' + b + '<br>'; 
+                    });
+                    html += '</div>';
+                }
+                
+                showNoticeModal('Trace Result', html);
+                visualizeNetworkAnalysis('trace', result, busId);
+            })
+            .catch(err => {
+                trBtn.textContent = '⚡ Trace Downstream';
+                showNoticeModal('Error', 'Trace failed: ' + (err.message || err));
+            });
+      };
+
+      // 8. Network Analysis (Outage)
+      const outBtn = container.querySelector('.btn-outage-sim');
+      if (outBtn) outBtn.onclick = () => {
+          const busId = outBtn.dataset.pole || outBtn.dataset.bus || outBtn.dataset.transformerBus;
+          if (!busId) { showNoticeModal('Info', 'No bus ID available'); return; }
+          outBtn.textContent = '⏳ Simulating...';
+          fetch('/api/network/simulate-outage?start_bus=' + encodeURIComponent(busId))
+            .then(r => r.json())
+            .then(result => {
+                outBtn.textContent = '🔴 Outage Simulation';
+                if (result.error) { showNoticeModal('Error', result.error); return; }
+                
+                let html = '<div class="outage-summary-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">';
+                html += '<div style="width:40px; height:40px; border-radius:10px; background:#fee2e2; color:#ef4444; display:flex; align-items:center; justify-content:center; font-size:20px;">⚠️</div>';
+                html += '<div><div style="font-weight:700; font-size:16px;">Outage Impact Analysis</div><div style="font-size:12px; color:#64748b;">Source: ' + busId + '</div></div></div>';
+                
+                html += '<div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:16px;">';
+                html += '<div style="padding:12px; background:var(--surface-secondary); border-radius:8px; border:1px solid var(--border);"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Affected Customers</div><div style="font-size:20px; font-weight:700; color:#ef4444;">' + (result.total_customers || 0) + '</div></div>';
+                html += '<div style="padding:12px; background:var(--surface-secondary); border-radius:8px; border:1px solid var(--border);"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Total Load Loss</div><div style="font-size:20px; font-weight:700; color:#ef4444;">' + (result.total_load_kwh || 0) + ' <span style="font-size:12px; font-weight:500;">kWh</span></div></div>';
+                html += '<div style="padding:12px; background:var(--surface-secondary); border-radius:8px; border:1px solid var(--border);"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Transformers</div><div style="font-size:20px; font-weight:700; color:var(--text-primary);">' + (result.affected_transformer_ids ? result.affected_transformer_ids.length : 0) + '</div></div>';
+                html += '<div style="padding:12px; background:var(--surface-secondary); border-radius:8px; border:1px solid var(--border);"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Downstream Nodes</div><div style="font-size:20px; font-weight:700; color:var(--text-primary);">' + (result.downstream_bus_count || 0) + '</div></div>';
+                html += '</div>';
+
+                const transIds = result.affected_transformer_ids || [];
+                if (transIds.length > 0) {
+                    html += '<div style="font-size:11px; padding:8px 12px; background:var(--surface-secondary); border-radius:6px; margin-bottom:16px; border:1px solid var(--border);"><strong>Transformers:</strong> ' + transIds.join(', ') + '</div>';
+                }
+
+                // Customer details
+                const customers = result.customer_details || [];
+                if (customers.length > 0) {
+                    html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Affected Customers List</div>';
+                    html += '<div class="table-scroll" style="max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; scrollbar-gutter: stable;">';
+                    html += '<table style="width:100%; border-collapse:collapse; font-size:11px; table-layout: fixed;">';
+                    html += '<thead style="background:var(--surface-secondary); position:sticky; top:0; z-index:10;"><tr style="border-bottom:1px solid var(--border);">';
+                    html += '<th style="padding:10px 8px; text-align:left; color:#64748b; width: 55%;">Customer</th>';
+                    html += '<th style="padding:10px 8px; text-align:left; color:#64748b; width: 22%;">Type</th>';
+                    html += '<th style="padding:10px 12px; text-align:right; color:#64748b; width: 23%;">kWh</th></tr></thead><tbody>';
+                    customers.forEach(function (c) {
+                        const kwhFormatted = (c.load_kwh || 0).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+                        html += '<tr style="border-bottom:1px solid var(--border); transition: background 0.2s;"><td style="padding:10px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">';
+                        html += '<div><strong title="' + (c.name || 'N/A') + '">' + (c.name || 'N/A') + '</strong></div><div style="font-size:9px; color:#94a3b8;">' + (c.customer_id || '') + '</div></td>';
+                        html += '<td style="padding:10px 8px;"><span style="display:inline-block; padding:2px 6px; background:#e0f2fe; color:#0369a1; border-radius:4px; font-size:9px; font-weight:700;">' + (c.type || 'RES') + '</span></td>';
+                        html += '<td style="padding:10px 12px; text-align:right; font-weight:600; color: var(--text-primary);">' + kwhFormatted + '</td></tr>';
+                    });
+                    html += '</tbody></table></div>';
+                }
+                
+                showNoticeModal('Outage Impact Analysis', html);
+                visualizeNetworkAnalysis('outage', result, busId);
+            })
+            .catch(err => {
+                outBtn.textContent = '🔴 Outage Simulation';
+                showNoticeModal('Error', 'Simulation failed: ' + (err.message || err));
+            });
+      };
+
+      // 9. Asset Modals
+      const bindAsset = (selector, apiPath, modalFn, label) => {
+          const btn = container.querySelector(selector);
+          if (btn) btn.onclick = () => {
+              fetch('/api/posts/' + btn.dataset.postId).then(r => r.json()).then(p => {
+                  const bus = p.transformer_bus_id || p.primary_bus_id || p.pole_number;
+                  fetch(`${apiPath}${encodeURIComponent(bus)}`).then(r => r.json()).then(res => {
+                      if (res.count > 0) modalFn(res);
+                      else showNoticeModal('Info', `No ${label} found for bus: ${bus}`);
+                  });
+              });
+          };
+      };
+      bindAsset('.voltage-regulator-btn', '/api/voltage-regulators/by-bus/', showVoltageRegulatorModal, 'Voltage Regulator');
+      bindAsset('.shunt-capacitor-btn', '/api/shunt-capacitors/by-bus/', showShuntCapacitorModal, 'Shunt Capacitor');
+      bindAsset('.shunt-inductor-btn', '/api/shunt-inductors/by-bus/', showShuntInductorModal, 'Shunt Inductor');
+      bindAsset('.series-inductor-btn', '/api/series-inductors/by-bus/', showSeriesInductorModal, 'Series Inductor');
+
+      // 10. Export
+      const expBtn = container.querySelector('.export-post-btn');
+      if (expBtn) expBtn.onclick = () => {
+          window.location = '/api/export/post/' + expBtn.dataset.postId;
+      };
+  }
+
   // Leaflet must be loaded before we use L
   if (typeof L === 'undefined') {
     showMapError('Map library failed to load. Check your connection or try again.');
@@ -1252,746 +1662,64 @@ document.addEventListener('DOMContentLoaded', function () {
     return R * c;
   }
 
-  // Helper to add markers to a layer
   function addPostMarker(layer, p) {
     const lat = parseFloat(p.lat);
     const lng = parseFloat(p.lng);
     if (Number.isNaN(lat) || Number.isNaN(lng)) return;
-
-    const popupHtml = `
-      <div class="post-popup-container">
-        <div class="post-popup-tabs">
-            <button class="tab-link active" data-tab="General-${p.id}">General</button>
-            <button class="tab-link" data-tab="Connections-${p.id}">Connections</button>
-            <button class="tab-link" data-tab="Assets-${p.id}">Assets</button>
-        </div>
-
-        <div id="General-${p.id}" class="tab-content" style="display: block;">
-            <div class="popup-post-details">
-              <strong>${(p.name || 'Post ' + p.id).replace(/</g, '&lt;')}</strong><br>
-              Feeder: ${(p.feeder || 'N/A').replace(/</g, '&lt;')}<br>
-              Status: ${(p.status || 'N/A').replace(/</g, '&lt;')}<br>
-              Coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}<br>
-              ID: ${p.id}
-            </div>
-            <div class="popup-connect-actions" style="margin-bottom:4px;">
-                <button class="btn btn-outline btn-street-view" data-lat="${lat}" data-lng="${lng}" data-post-id="${p.id}" title="Open Street View at this location">
-                  <svg xmlns="http://www.w3.org/2000/svg" height="16" width="16" viewBox="0 -960 960 960" fill="currentColor" style="vertical-align:middle;margin-right:4px;"><path d="M480-80q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm-40-82v-78q-33 0-56.5-23.5T360-320v-40L168-552q-3 18-5.5 36t-2.5 36q0 121 79.5 212T440-162Zm276-102q27-35 43.5-76t22.5-86H640v40q0 33 23.5 56.5T720-306v42Z"/></svg>
-                  Street View
-                </button>
-            </div>
-             <div class="popup-connect-actions">
-                <button class="btn btn-outline primary-line-overhead-btn" data-post-id="${p.id}" data-bus-id="${p.primary_bus_id || p.transformer_bus_id || p.pole_number || ''}">Primary line-overhead</button>
-                <button class="btn btn-outline distribution-transformer-btn" data-post-id="${p.id}">Distribution Transformer</button>
-            </div>
-        </div>
-
-        <div id="Connections-${p.id}" class="tab-content" style="display: none;">
-             <div class="popup-connect-actions">
-                <button class="btn btn-outline secondary-lines-btn" data-post-id="${p.id}">Secondary Lines</button>
-                <button class="btn btn-outline service-drop-btn" data-post-id="${p.id}">Secondary Service Drop</button>
-                <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connected Lines</button>
-            </div>
-            <div class="popup-connect-actions" style="margin-top:4px;">
-                <button class="btn btn-outline btn-trace-downstream" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">⚡ Trace Downstream</button>
-                <button class="btn btn-outline btn-outage-sim" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">🔴 Outage Simulation</button>
-            </div>
-        </div>
-
-        <div id="Assets-${p.id}" class="tab-content" style="display: none;">
-            <div class="popup-connect-actions grid-actions">
-              <button class="btn btn-outline voltage-regulator-btn" data-post-id="${p.id}">Voltage Regulator</button>
-              <button class="btn btn-outline shunt-capacitor-btn" data-post-id="${p.id}">Shunt Capacitor</button>
-              <button class="btn btn-outline shunt-inductor-btn" data-post-id="${p.id}">Shunt Inductor</button>
-              <button class="btn btn-outline series-inductor-btn" data-post-id="${p.id}">Series Inductor</button>
-            </div>
-        </div>
-      </div>
-    `;
 
     const isTransformer = p.has_transformer === true || (p.kva_rating != null && p.kva_rating > 0);
     const iconToUse = isTransformer ? transformerPoleIcon : poleIcon;
     const titleText = (p.name || `Post ${p.id}`) + (isTransformer ? ' (Transformer)' : '');
     const marker = L.marker([lat, lng], { title: titleText, icon: iconToUse });
 
-    // Store post data on marker for later access (connections, etc.)
+    // Store post data on marker
     marker._postData = p;
 
-    // keep a reference for selection / bulk operations
+    // Keep references for selection / mapping
     try { postMarkers[p.id] = marker; } catch (e) { }
-
-    // Also store in lookup maps for connection drawing
     if (p.pole_number) {
       poleToPostMap[p.pole_number] = p;
-      busToPostMap[p.pole_number] = p; // Primary bus is usually the pole number
+      busToPostMap[p.pole_number] = p;
     }
-    if (p.feeder) {
-      knownFeeders.add(p.feeder);
-      // Also create aliases for common bus naming patterns
-      if (p.primary_bus_id) {
-        busToPostMap[p.primary_bus_id] = p;
-      }
+    if (p.primary_bus_id) {
+      busToPostMap[p.primary_bus_id] = p;
     }
 
-    // Bind tooltip but control open/close to avoid overlapping tooltips
+    // Tooltip handling
     const tooltipText = `ID: ${p.id}` + (isTransformer ? ' (Transformer)' : '');
     marker.bindTooltip(tooltipText, { permanent: false, direction: 'top' });
     marker.addTo(layer);
     _allPostMarkers.push(marker);
 
-    // Ensure only one tooltip is visible at a time to prevent overlap
     marker.on('mouseover', function () {
-      try {
-        if (window._lastTooltipMarker && window._lastTooltipMarker !== marker) {
-          window._lastTooltipMarker.closeTooltip();
-        }
-      } catch (e) { }
-      try { marker.openTooltip(); } catch (e) { }
+      if (window._lastTooltipMarker && window._lastTooltipMarker !== marker) {
+        window._lastTooltipMarker.closeTooltip();
+      }
+      marker.openTooltip();
       window._lastTooltipMarker = marker;
     });
 
-    // Small delay on mouseout to avoid flicker when moving between nearby markers
     marker.on('mouseout', function () {
       setTimeout(function () {
-        try { marker.closeTooltip(); } catch (e) { }
+        marker.closeTooltip();
         if (window._lastTooltipMarker === marker) window._lastTooltipMarker = null;
       }, 250);
     });
+
+    // Fit map bounds
     bounds.extend([lat, lng]);
 
+    // Simplified click handler
     marker.on('click', function (e) {
       if (window._selectionMode) {
         toggleSelect(p.id, lat, lng, marker);
         return;
       }
-
       if (connectionMode) {
         addPointToConnection({ post_id: p.id, lat: lat, lng: lng });
         return;
       }
-      
-      const inspectorContent = document.getElementById('inspector-content');
-      const layoutEl = document.querySelector('.premium-layout');
-      if (inspectorContent && layoutEl) {
-        layoutEl.classList.add('inspector-open');
-
-        // Manage active marker state
-        if (window._selectionIndicatorMarker) {
-          map.removeLayer(window._selectionIndicatorMarker);
-        }
-        window._selectionIndicatorMarker = L.marker([lat, lng], {
-          icon: L.divIcon({
-            className: 'custom-selection-indicator',
-            html: '<div class="selection-tooltip">Selected</div>',
-            iconSize: [80, 30],
-            iconAnchor: [40, 85] // Position above the 70px pole icon
-          }),
-          interactive: false,
-          zIndexOffset: 1000
-        }).addTo(map);
-
-        inspectorContent.innerHTML = `
-          <div class="inspector-view-layer">
-            <div class="inspector-header">
-              <h3 style="margin:0; font-size:1.1rem; color:var(--text-primary);">Asset Inspector</h3>
-              <button id="close-inspector-inner" class="btn-icon" style="background:var(--surface-secondary);border-radius:50%;">✕</button>
-            </div>
-            <div class="inspector-body">
-              ${popupHtml}
-            </div>
-          </div>
-        `;
-        
-        document.getElementById('close-inspector-inner').onclick = () => {
-          layoutEl.classList.remove('inspector-open');
-          if (window._selectionIndicatorMarker) {
-            map.removeLayer(window._selectionIndicatorMarker);
-            window._selectionIndicatorMarker = null;
-          }
-        };
-
-        const popupEl = inspectorContent;
-      const tabLinks = popupEl.querySelectorAll('.tab-link');
-      const tabContents = popupEl.querySelectorAll('.tab-content');
-      tabLinks.forEach(link => {
-        link.addEventListener('click', function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          // Hide all separate tabs
-          tabContents.forEach(c => c.style.display = 'none');
-          tabLinks.forEach(l => l.classList.remove('active'));
-          // Show target
-          const targetId = this.getAttribute('data-tab');
-          const target = popupEl.querySelector('#' + targetId);
-          if (target) target.style.display = 'block';
-          this.classList.add('active');
-        });
-      });
-
-      // Street View button: open Google Maps Street View at this post's coordinates
-      const streetViewBtn = popupEl.querySelector('.btn-street-view');
-      if (streetViewBtn) {
-        streetViewBtn.onclick = function (e) {
-          e.preventDefault();
-          e.stopPropagation();
-          const svLat = streetViewBtn.getAttribute('data-lat');
-          const svLng = streetViewBtn.getAttribute('data-lng');
-          if (!svLat || !svLng) return;
-
-          // Google Maps Street View URL (opens directly in Street View mode)
-          const streetViewUrl = `https://www.google.com/maps/@${svLat},${svLng},3a,80y,0h,90t/data=!3m4!1e1!3m2!1s!2e0`;
-
-          // Open in new tab — Google blocks iframe embedding of Maps
-          window.open(streetViewUrl, '_blank', 'noopener');
-        };
-      }
-
-      // Primary line-overhead button: show modal with technical data
-      const primaryLineBtn = popupEl.querySelector('.primary-line-overhead-btn');
-      if (primaryLineBtn) {
-        primaryLineBtn.onclick = function () {
-          const postId = primaryLineBtn.getAttribute('data-post-id');
-          const busId = primaryLineBtn.getAttribute('data-bus-id');
-          if (!busId && !postId) return;
-
-          // Try fetching primary line data by bus ID first
-          const lookupId = busId || postId;
-          fetch('/api/primary-lines/by-bus/' + encodeURIComponent(lookupId))
-            .then(function (r) { return r.json(); })
-            .then(function (result) {
-              if (result && result.primary_lines && result.primary_lines.length > 0) {
-                // If line segments found, show the first one's technical data
-                showPrimaryLineOverheadModal(result.primary_lines[0]);
-              } else {
-                // Fallback to fetching the post detail (legacy or if no segments exist)
-                fetch('/api/posts/' + postId)
-                  .then(function (r) { return r.json(); })
-                  .then(function (data) {
-                    if (data && !data.error) showPrimaryLineOverheadModal(data);
-                  });
-              }
-            })
-            .catch(function () {
-              // Final fallback to post if endpoint fails
-              fetch('/api/posts/' + postId)
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                  if (data && !data.error) showPrimaryLineOverheadModal(data);
-                });
-            });
-        };
-      }
-
-      // Distribution Transformer button: fetch transformer by bus_id
-      const transformerBtn = popupEl.querySelector('.distribution-transformer-btn');
-      if (transformerBtn) {
-        transformerBtn.onclick = function () {
-          const postId = transformerBtn.getAttribute('data-post-id');
-          if (!postId) return;
-          // First get post to find primary_bus_id
-          fetch('/api/posts/' + postId)
-            .then(function (r) { return r.json(); })
-            .then(function (postData) {
-              if (postData && postData.error) return;
-              var busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
-              if (!busId) {
-                showNoticeModal('Info', 'No primary bus ID found for this post');
-                return;
-              }
-              fetch('/api/transformers/by-bus/' + encodeURIComponent(busId))
-                .then(function (r) { return r.json(); })
-                .then(function (result) {
-                  if (result && result.error) {
-                    showNoticeModal('Error', 'Error: ' + result.error);
-                    return;
-                  }
-                  if (!result.transformers || result.transformers.length === 0) {
-                    showNoticeModal('Info', 'No transformer found for bus ID: ' + busId);
-                    return;
-                  }
-                  // Show first transformer (or all if multiple)
-                  showDistributionTransformerModal(result.transformers[0]);
-                })
-                .catch(function (err) {
-                  showNoticeModal('Error', 'Failed to load transformer: ' + (err && err.message ? err.message : String(err)));
-                });
-            })
-            .catch(function () { });
-        };
-      }
-
-      // Secondary Lines button: fetch lines via Transformer's secondary bus ID
-      const secondaryLinesBtn = popupEl.querySelector('.secondary-lines-btn');
-      if (secondaryLinesBtn) {
-        secondaryLinesBtn.onclick = function () {
-          const postId = secondaryLinesBtn.getAttribute('data-post-id');
-          if (!postId) return;
-
-          // 1. Get Post Details to find Primary Bus ID
-          fetch('/api/posts/' + postId)
-            .then(function (r) { return r.json(); })
-            .then(function (postData) {
-              if (postData && postData.error) return;
-
-              var primaryBusId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
-              if (!primaryBusId) {
-                showNoticeModal('Info', 'No primary bus ID found for this post.');
-                return;
-              }
-
-              // 2. Find Transformer connected to this Primary Bus
-              fetch('/api/transformers/by-bus/' + encodeURIComponent(primaryBusId))
-                .then(function (r) { return r.json(); })
-                .then(function (transResult) {
-                  if (transResult && transResult.error) {
-                    console.warn('Transformer fetch error:', transResult.error);
-                    showNoticeModal('Info', 'No transformer found connected to this post. Secondary lines must be linked via a Distribution Transformer.');
-                    return;
-                  }
-
-                  if (!transResult.transformers || transResult.transformers.length === 0) {
-                    showNoticeModal('Info', 'No transformer found for bus ID: ' + primaryBusId + '. Cannot resolve secondary lines.');
-                    return;
-                  }
-
-                  // 3. Get Secondary Bus ID from the first found transformer
-                  var transformer = transResult.transformers[0];
-                  var secondaryBusId = transformer.to_secondary_bus_id;
-
-                  if (!secondaryBusId) {
-                    showNoticeModal('Info', 'Transformer found, but it has no Secondary Bus ID defined.');
-                    return;
-                  }
-
-                  // 4. Fetch Secondary Lines using the Transformer's Secondary Bus ID
-                  fetch('/api/secondary-lines/by-bus/' + encodeURIComponent(secondaryBusId))
-                    .then(function (r) { return r.json(); })
-                    .then(function (result) {
-                      if (result && result.error) {
-                        showNoticeModal('Error', 'Error fetching lines: ' + result.error);
-                        return;
-                      }
-                      showSecondaryLineModal(result);
-                    })
-                    .catch(function (err) {
-                      showNoticeModal('Error', 'Failed to load secondary lines: ' + (err.message || String(err)));
-                    });
-
-                })
-                .catch(function (err) {
-                  showNoticeModal('Error', 'Failed to check for transformer: ' + (err.message || String(err)));
-                });
-            })
-            .catch(function (err) {
-              console.error('Post details fetch failed:', err);
-            });
-        };
-      }
-
-      // Secondary Service Drop button: fetch drops via Secondary Line's to_bus_id
-      const serviceDropBtn = popupEl.querySelector('.service-drop-btn');
-      if (serviceDropBtn) {
-        serviceDropBtn.onclick = function () {
-          const postId = serviceDropBtn.getAttribute('data-post-id');
-          if (!postId) return;
-
-          serviceDropBtn.textContent = '⏳ Loading...';
-          fetch(`/api/posts/${postId}/service-drops`)
-            .then(r => r.json())
-            .then(result => {
-              serviceDropBtn.textContent = '🏠 Service Drops';
-              if (result.error) {
-                showNoticeModal('Error', 'Failed to load service drops: ' + result.error);
-                return;
-              }
-              showServiceDropModal({
-                count: result.count || 0,
-                service_drops: result.service_drops || []
-              });
-            })
-            .catch(err => {
-              serviceDropBtn.textContent = '🏠 Service Drops';
-              console.error('Service drop fetch failed:', err);
-              showNoticeModal('Error', 'Failed to load service drops: ' + (err.message || String(err)));
-            });
-        };
-      }
-
-      // Show Connected Lines Button
-      const showConnectionsBtn = popupEl.querySelector('.btn-show-connections');
-      if (showConnectionsBtn) {
-        showConnectionsBtn.onclick = function () {
-          const postId = showConnectionsBtn.getAttribute('data-post-id');
-          if (!postId) return;
-
-          // Show loading state or similar if desired
-          showConnectionsBtn.textContent = 'Loading...';
-
-          fetch('/api/posts/' + postId + '/connections')
-            .then(r => r.json())
-            .then(connections => {
-              showConnectionsBtn.textContent = 'View Connected Lines';
-              showConnectionsBtn.textContent = 'View Connected Lines';
-              if (!connections) {
-                showNoticeModal('Error', 'Failed to load connections.');
-                return;
-              }
-              if (connections.length === 0) {
-                showNoticeModal('Info', 'No connections found for this post.');
-                return;
-              }
-              showConnectionsModal(connections, postId);
-            })
-            .catch(err => {
-              console.error('Connection fetch failed:', err);
-              showConnectionsBtn.textContent = 'View Connected Lines';
-              showNoticeModal('Error', 'Error loading connections.');
-            });
-        };
-      }
-
-      // --- New Asset Handlers ---
-
-      // Voltage Regulator
-      const vrBtn = popupEl.querySelector('.voltage-regulator-btn');
-      if (vrBtn) {
-        vrBtn.onclick = function () {
-          const postId = vrBtn.getAttribute('data-post-id');
-          if (!postId) return;
-          fetch('/api/posts/' + postId)
-            .then(r => r.json())
-            .then(postData => {
-              if (postData.error) return;
-              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
-              if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
-              fetch('/api/voltage-regulators/by-bus/' + encodeURIComponent(busId))
-                .then(r => r.json())
-                .then(res => {
-                  if (res.error) { showNoticeModal('Error', res.error); return; }
-                  if (res.count === 0) { showNoticeModal('Info', 'No Voltage Regulators found for bus: ' + busId); return; }
-                  showVoltageRegulatorModal(res);
-                });
-            });
-        };
-      }
-
-      // Shunt Capacitor
-      const scBtn = popupEl.querySelector('.shunt-capacitor-btn');
-      if (scBtn) {
-        scBtn.onclick = function () {
-          const postId = scBtn.getAttribute('data-post-id');
-          if (!postId) return;
-          fetch('/api/posts/' + postId)
-            .then(r => r.json())
-            .then(postData => {
-              if (postData.error) return;
-              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
-              if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
-              fetch('/api/shunt-capacitors/by-bus/' + encodeURIComponent(busId))
-                .then(r => r.json())
-                .then(res => {
-                  if (res.error) { showNoticeModal('Error', res.error); return; }
-                  if (res.count === 0) { showNoticeModal('Info', 'No Shunt Capacitors found for bus: ' + busId); return; }
-                  showShuntCapacitorModal(res);
-                });
-            });
-        };
-      }
-
-      // Shunt Inductor
-      const siBtn = popupEl.querySelector('.shunt-inductor-btn');
-      if (siBtn) {
-        siBtn.onclick = function () {
-          const postId = siBtn.getAttribute('data-post-id');
-          if (!postId) return;
-          fetch('/api/posts/' + postId)
-            .then(r => r.json())
-            .then(postData => {
-              if (postData.error) return;
-              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
-              if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
-              fetch('/api/shunt-inductors/by-bus/' + encodeURIComponent(busId))
-                .then(r => r.json())
-                .then(res => {
-                  if (res.error) { showNoticeModal('Error', res.error); return; }
-                  if (res.count === 0) { showNoticeModal('Info', 'No Shunt Inductors found for bus: ' + busId); return; }
-                  showShuntInductorModal(res);
-                });
-            });
-        };
-      }
-
-      // Series Inductor
-      const eriBtn = popupEl.querySelector('.series-inductor-btn');
-      if (eriBtn) {
-        eriBtn.onclick = function () {
-          const postId = eriBtn.getAttribute('data-post-id');
-          if (!postId) return;
-          fetch('/api/posts/' + postId)
-            .then(r => r.json())
-            .then(postData => {
-              if (postData.error) return;
-              const busId = postData.transformer_bus_id || postData.primary_bus_id || postData.pole_number;
-              if (!busId) { showNoticeModal('Info', 'No bus ID found for this post'); return; }
-              fetch('/api/series-inductors/by-bus/' + encodeURIComponent(busId))
-                .then(r => r.json())
-                .then(res => {
-                  if (res.error) { showNoticeModal('Error', res.error); return; }
-                  if (res.count === 0) { showNoticeModal('Info', 'No Series Inductors found for bus: ' + busId); return; }
-                  showSeriesInductorModal(res);
-                });
-            });
-        };
-      }
-
-      // --- Trace Downstream ---
-      const traceBtn = popupEl.querySelector('.btn-trace-downstream');
-      if (traceBtn) {
-        traceBtn.onclick = function () {
-          const busId = traceBtn.getAttribute('data-pole') || traceBtn.getAttribute('data-bus') || traceBtn.getAttribute('data-transformer-bus');
-          if (!busId) { showNoticeModal('Info', 'No bus ID available for this post.'); return; }
-          traceBtn.textContent = '⏳ Tracing...';
-          fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream')
-            .then(r => r.json())
-            .then(result => {
-              traceBtn.textContent = '⚡ Trace Downstream';
-              if (result.error) { showNoticeModal('Error', result.error); return; }
-              const buses = result.visited_buses || [];
-              let html = '<div class="trace-summary-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">';
-              html += '<div style="width:40px; height:40px; border-radius:10px; background:#e0f2fe; color:#0ea5e9; display:flex; align-items:center; justify-content:center; font-size:20px;">⚡</div>';
-              html += '<div><div style="font-weight:700; font-size:16px;">Trace Downstream</div><div style="font-size:12px; color:#64748b;">Starting Node: ' + busId + '</div></div></div>';
-              
-              html += '<div style="padding:16px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0; margin-bottom:16px;">';
-              html += '<div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Total Downstream Nodes</div>';
-              html += '<div style="font-size:24px; font-weight:700; color:#0ea5e9;">' + buses.length + '</div>';
-              html += '</div>';
-
-              if (buses.length > 0) {
-                html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Buses in Trace</div>';
-                html += '<div style="max-height:180px; overflow-y:auto; font-size:12px; background:#f1f5f9; padding:10px; border-radius:8px; font-family:var(--font-mono); line-height:1.6;">';
-                buses.forEach(function (b, idx) { 
-                    html += '<span style="color:#64748b;">' + (idx+1).toString().padStart(2, '0') + '. </span>' + b + '<br>'; 
-                });
-                html += '</div>';
-              }
-              showNoticeModal('Trace Downstream Result', html);
-              visualizeNetworkAnalysis('trace', result, busId);
-            })
-            .catch(err => {
-              traceBtn.textContent = '⚡ Trace Downstream';
-              showNoticeModal('Error', 'Trace failed: ' + (err.message || err));
-            });
-        };
-      }
-
-      // --- Outage Simulation ---
-      const outageBtn = popupEl.querySelector('.btn-outage-sim');
-      if (outageBtn) {
-        outageBtn.onclick = function () {
-          const busId = outageBtn.getAttribute('data-pole') || outageBtn.getAttribute('data-bus') || outageBtn.getAttribute('data-transformer-bus');
-          if (!busId) { showNoticeModal('Info', 'No pole or bus ID available for this post.'); return; }
-          outageBtn.textContent = '⏳ Simulating...';
-          fetch('/api/network/simulate-outage?start_bus=' + encodeURIComponent(busId))
-            .then(r => r.json())
-            .then(result => {
-              outageBtn.textContent = '🔴 Outage Simulation';
-              if (result.error) { showNoticeModal('Error', result.error); return; }
-              let html = '<div class="outage-summary-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">';
-              html += '<div style="width:40px; height:40px; border-radius:10px; background:#fee2e2; color:#ef4444; display:flex; align-items:center; justify-content:center; font-size:20px;">⚠️</div>';
-              html += '<div><div style="font-weight:700; font-size:16px;">Outage Impact Analysis</div><div style="font-size:12px; color:#64748b;">Source: ' + busId + '</div></div></div>';
-              
-              html += '<div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:16px;">';
-              html += '<div style="padding:12px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Affected Customers</div><div style="font-size:20px; font-weight:700; color:#ef4444;">' + (result.total_customers || 0) + '</div></div>';
-              html += '<div style="padding:12px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Total Load Loss</div><div style="font-size:20px; font-weight:700; color:#ef4444;">' + (result.total_load_kwh || 0) + ' <span style="font-size:12px; font-weight:500;">kWh</span></div></div>';
-              html += '<div style="padding:12px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Transformers</div><div style="font-size:20px; font-weight:700; color:#1e293b;">' + (result.affected_transformer_ids ? result.affected_transformer_ids.length : 0) + '</div></div>';
-              html += '<div style="padding:12px; background:#f8fafc; border-radius:8px; border:1px solid #e2e8f0;"><div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Downstream Nodes</div><div style="font-size:20px; font-weight:700; color:#1e293b;">' + (result.downstream_bus_count || 0) + '</div></div>';
-              html += '</div>';
-
-              const transIds = result.affected_transformer_ids || [];
-              if (transIds.length > 0) {
-                  html += '<div style="font-size:12px; padding:8px 12px; background:#f1f5f9; border-radius:6px; margin-bottom:16px;"><strong>Transformers:</strong> ' + transIds.join(', ') + '</div>';
-              }
-
-              // Customer details
-              const customers = result.customer_details || [];
-              if (customers.length > 0) {
-                html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Affected Customers List</div>';
-                html += '<div class="table-scroll" style="max-height:220px; overflow-y:auto; border:1px solid #e2e8f0; border-radius:8px; scrollbar-gutter: stable;">';
-                html += '<table style="width:100%; border-collapse:collapse; font-size:12px; table-layout: fixed;">';
-                html += '<thead style="background:#f8fafc; position:sticky; top:0; z-index:10;"><tr style="border-bottom:1px solid #e2e8f0;">';
-                html += '<th style="padding:10px 8px; text-align:left; color:#64748b; width: 55%;">Customer</th>';
-                html += '<th style="padding:10px 8px; text-align:left; color:#64748b; width: 22%;">Type</th>';
-                html += '<th style="padding:10px 12px; text-align:right; color:#64748b; width: 23%;">kWh</th></tr></thead><tbody>';
-                customers.forEach(function (c) {
-                  const kwhFormatted = (c.load_kwh || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                  html += '<tr style="border-bottom:1px solid #f1f5f9; transition: background 0.2s;"><td style="padding:10px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">';
-                  html += '<div><strong title="' + (c.name || 'N/A') + '">' + (c.name || 'N/A') + '</strong></div><div style="font-size:10px; color:#94a3b8;">' + (c.customer_id || '') + '</div></td>';
-                  html += '<td style="padding:10px 8px;"><span style="display:inline-block; padding:2px 8px; background:#e0f2fe; color:#0369a1; border-radius:4px; font-size:10px; font-weight:700;">' + (c.type || 'RES') + '</span></td>';
-                  html += '<td style="padding:10px 12px; text-align:right; font-weight:600; color: #334155;">' + kwhFormatted + '</td></tr>';
-                });
-                html += '</tbody></table></div>';
-              }
-
-              showNoticeModal('Outage Impact Analysis', html);
-              visualizeNetworkAnalysis('outage', result, busId);
-            })
-            .catch(err => {
-              outageBtn.textContent = '🔴 Outage Simulation';
-              showNoticeModal('Error', 'Simulation failed: ' + (err.message || err));
-            });
-        };
-      }
-
-      // Load authoritative post details from the `post` table via API
-      try {
-        const detailsEl = popupEl.querySelector('.popup-post-details');
-        fetch(`/api/posts/${p.id}`)
-          .then(r => r.json())
-          .then(data => {
-            if (!data || data.error) return;
-
-            // Patch trace/outage button attributes with authoritative data
-            const freshPole = data.pole_number || '';
-            const freshBus = data.primary_bus_id || '';
-            const freshTransBus = data.transformer_bus_id || '';
-            const trBtnPatch = popupEl.querySelector('.btn-trace-downstream');
-            const outBtnPatch = popupEl.querySelector('.btn-outage-sim');
-            if (trBtnPatch) { trBtnPatch.setAttribute('data-pole', freshPole); trBtnPatch.setAttribute('data-bus', freshBus); trBtnPatch.setAttribute('data-transformer-bus', freshTransBus); }
-            if (outBtnPatch) { outBtnPatch.setAttribute('data-pole', freshPole); outBtnPatch.setAttribute('data-bus', freshBus); outBtnPatch.setAttribute('data-transformer-bus', freshTransBus); }
-
-            // Fetch Voltage Regulator to get kVA Rating if available
-            const busId = data.primary_bus_id || data.pole_number;
-            let vrPromise = Promise.resolve(null);
-
-            if (busId) {
-              vrPromise = fetch('/api/voltage-regulators/by-bus/' + encodeURIComponent(busId))
-                .then(r => r.json())
-                .then(res => {
-                  if (res.items && res.items.length > 0) return res.items[0];
-                  return null;
-                })
-                .catch(() => null);
-            }
-
-            vrPromise.then(vrData => {
-              const latText = (typeof data.lat === 'number') ? data.lat.toFixed(6) : (data.lat || '');
-              const lngText = (typeof data.lng === 'number') ? data.lng.toFixed(6) : (data.lng || '');
-
-              // Determine KVA: prefer VR data if available, else Post data
-              let kvaDisplay = '—';
-              if (vrData && vrData.kva_rating != null) {
-                kvaDisplay = vrData.kva_rating;
-              } else if (data.kva_rating != null) {
-                kvaDisplay = data.kva_rating;
-              }
-
-              let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong><br>`;
-              infoHtml += `Post ID: ${data.post_id || data.pole_number || '—'}<br>`;
-              infoHtml += `Status: ${data.status || 'N/A'}<br>`;
-              infoHtml += `Feeder: ${data.feeder || '—'}<br>`;
-              infoHtml += `kVA Rating: ${kvaDisplay}<br>`;
-              infoHtml += `Meter: ${data.meter_brand ? (data.meter_brand + (data.meter_id ? ' / ' + data.meter_id : '')) : (data.meter_id || '—')}<br>`;
-              infoHtml += `Coordinates: ${latText}, ${lngText}<br>`;
-
-              // Add Load Stress Section if data is available
-              if (data.utilization_percent !== undefined) {
-                const util = data.utilization_percent;
-                const status = data.load_status || 'Unknown';
-                const statusClass = status.toLowerCase().replace(' ', '-');
-                
-                let barColorClass = 'normal';
-                if (util >= 100) barColorClass = 'danger';
-                else if (util >= 80) barColorClass = 'warning';
-
-                infoHtml += `
-                  <div class="stress-section">
-                    <div class="stress-header">
-                      <span>LOAD STRESS</span>
-                      <span class="status-badge ${statusClass}">${status}</span>
-                    </div>
-                    <div class="utilization-track">
-                      <div class="utilization-fill ${barColorClass}" style="width: ${Math.min(util, 100)}%"></div>
-                    </div>
-                    <div class="stress-metrics">
-                      <span>Condition Risk: ${data.ml_risk_level || 'Low'}</span>
-                      <span>Grid Impact: ${data.impact_level || 'Low'}</span>
-                    </div>
-                    <div class="stress-metrics" style="margin-top: 4px; border-top: 1px dashed var(--border); padding-top: 4px;">
-                      <span>Rel. Utilization: ${util.toFixed(1)}%</span>
-                      <span>Priority: ${data.risk_level || 'Low'}</span>
-                    </div>
-                  </div>
-                `;
-              }
-
-              if (detailsEl) detailsEl.innerHTML = infoHtml;
-            });
-          }).catch(() => { });
-      } catch (e) { console.error('Failed to fetch post details', e); }
-
-      // Load connections that include this post — section is inside the popup (modal) content
-      const connectionsContainer = popupEl.querySelector('.popup-connections-inner');
-      if (!connectionsContainer) return;
-      connectionsContainer.innerHTML = '';
-      fetch(`/api/posts/${p.id}/connections`)
-        .then(r => r.json())
-        .then(function (conns) {
-          if (!conns || !Array.isArray(conns)) conns = (conns && conns.connections) ? conns.connections : [];
-          if (conns.length === 0) return;
-          const section = document.createElement('div');
-          section.className = 'post-connections-section';
-          section.setAttribute('aria-label', 'Connections that include this post');
-          const title = document.createElement('strong');
-          title.textContent = 'Connections that include this post:';
-          section.appendChild(title);
-          const list = document.createElement('ul');
-          list.className = 'post-connections-list';
-          conns.forEach(function (c) {
-            const li = document.createElement('li');
-            const name = (typeof c.name === 'string' && c.name && c.name.indexOf('{') !== 0) ? c.name : ('Connection #' + (c.id != null ? c.id : ''));
-            const ids = (c.points || []).map(function (pt) { return pt.post_id ? '#' + pt.post_id : (pt.lat != null && pt.lng != null ? pt.lat.toFixed(6) + ',' + pt.lng.toFixed(6) : ''); }).join(', ');
-            li.innerHTML = (name.replace(/</g, '&lt;')) + ' (id ' + (c.id != null ? c.id : '') + ') — ' + formatMeters(c.total_length || 0) + '<br/>IDs: ' + (ids || '—') + ' <button class="btn btn-danger disconnect-from-post" data-conn-id="' + (c.id != null ? c.id : '') + '">Disconnect</button>';
-            list.appendChild(li);
-          });
-          section.appendChild(list);
-          connectionsContainer.appendChild(section);
-
-          // attach handlers scoped to the newly created section
-          const btns = section.querySelectorAll('.disconnect-from-post');
-          btns.forEach(b => {
-            b.addEventListener('click', function (ev) {
-              ev.preventDefault();
-              const id = b.getAttribute('data-conn-id');
-              showConfirmModal('Disconnect/delete this connection?', { title: 'Delete connection', okText: 'Delete', cancelText: 'Cancel' })
-                .then(function (confirmed) {
-                  if (!confirmed) return;
-                  fetch('/api/connections/' + id, { method: 'DELETE' })
-                    .then(r => r.json())
-                    .then(j => {
-                      if (j && j.result === 'deleted') {
-                        showNoticeModal('Deleted', 'Connection deleted');
-                        loadConnections();
-                        // remove section item from DOM
-                        b.closest('li').remove();
-                        // if no more items, remove section entirely
-                        if (!section.querySelector('li')) section.remove();
-                      } else {
-                        showNoticeModal('Delete failed', 'Delete failed: ' + JSON.stringify(j));
-                      }
-                    }).catch(err => showNoticeModal('Delete failed', 'Delete failed: ' + err));
-                });
-            });
-          });
-        }).catch(err => console.error('Failed to load post connections', err));
-      const expBtn = popupEl.querySelector('.export-post');
-      if (expBtn) {
-        expBtn.addEventListener('click', function (ev) {
-          ev.preventDefault();
-          // trigger file download
-          window.location = '/api/export/post/' + p.id;
-        });
-      }
-      }
+      openPostInInspector(p);
     });
 
     return marker;
@@ -3314,18 +3042,30 @@ document.addEventListener('DOMContentLoaded', function () {
   var combinedSearchHTML = `
     <div class="search-flex-container" style="display:flex; align-items:center; flex-direction:row-reverse; gap:8px;">
       <div class="expandable-search-wrapper">
-        <button id="search-icon-btn" class="search-icon-btn" title="Search Customer">
+        <button id="search-icon-btn" class="search-icon-btn" title="Search Map">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 -960 960 960" fill="currentColor" width="20" height="20">
             <path d="M784-120 532-372q-30 24-69 38t-83 14q-109 0-184.5-75.5T120-580q0-109 75.5-184.5T380-840q109 0 184.5 75.5T640-580q0 44-14 83t-38 69l252 252-56 56ZM380-400q75 0 127.5-52.5T560-580q0-75-52.5-127.5T380-760q-75 0-127.5 52.5T200-580q0 75 52.5 127.5T380-400Z"/>
           </svg>
         </button>
       </div>
+      
       <div id="search-bar-expanded" class="search-bar-expanded">
-        <div style="position:relative; width: 100%;">
-          <input id="customer-search-input" class="top-search-input"
-            type="text" placeholder="Customer ID…"
-            autocomplete="off" spellcheck="false" />
-          <div id="customer-search-suggestions" class="customer-search-suggestions"></div>
+        <div style="display:flex; align-items:center; background: var(--surface); border: 1.5px solid var(--border); border-radius: 20px; padding: 2px 12px; box-shadow: var(--shadow-sm); width: 100%;">
+          <!-- Mode Filter -->
+          <div class="search-mode-selector" style="display:flex; align-items:center; border-right: 1px solid var(--border); padding-right: 8px; margin-right: 8px;">
+            <select id="search-mode-select" style="background:transparent; border:none; font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); cursor:pointer; outline:none; padding: 4px 0;">
+              <option value="customer" selected>Customer</option>
+              <option value="coord">Coordinates</option>
+            </select>
+          </div>
+          
+          <div style="position:relative; flex: 1;">
+            <input id="customer-search-input" class="top-search-input"
+              type="text" placeholder="Customer ID…"
+              style="border:none !important; box-shadow:none !important; padding: 6px 0 !important; width: 100%;"
+              autocomplete="off" spellcheck="false" />
+            <div id="customer-search-suggestions" class="customer-search-suggestions" style="top: calc(100% + 10px);"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -3399,17 +3139,51 @@ document.addEventListener('DOMContentLoaded', function () {
   var selectedCustomerData = null;
   var customerSearchHighlight = null;
 
-  // Search customers as user types with loading state
-  customerSearchInput.addEventListener('input', function (e) {
+    // Manage search mode
+    var modeSelect = document.getElementById('search-mode-select');
+    modeSelect.addEventListener('change', function() {
+        var mode = modeSelect.value;
+        customerSearchInput.placeholder = mode === 'customer' ? 'Customer ID…' : 'Lat, Lng (e.g. 14.5, 120.9)';
+        customerSearchInput.value = '';
+        customerSearchSuggestions.classList.remove('active');
+        customerSearchInput.focus();
+    });
+
+    // Search input handler
+    customerSearchInput.addEventListener('input', function (e) {
     clearTimeout(customerSearchTimeout);
     var query = e.target.value.trim();
+    var mode = modeSelect.value;
 
     if (!query || query.length < 1) {
       customerSearchSuggestions.classList.remove('active');
       return;
     }
 
-    // Show loading state
+    if (mode === 'coord') {
+      // Check if input looks like coordinates: "lat, lng"
+      var coordRegex = /^-?\d+(\.\d+)?[\s,]+-?\d+(\.\d+)?$/;
+      if (coordRegex.test(query)) {
+          customerSearchSuggestions.innerHTML = `<div class="customer-search-item" id="find-nearest-btn">
+            <div class="customer-search-item-id">📍 Find Nearest Post</div>
+            <div class="customer-search-item-name">${query}</div>
+          </div>`;
+          customerSearchSuggestions.classList.add('active');
+          
+          document.getElementById('find-nearest-btn').onclick = function() {
+              var parts = query.split(/[\s,]+/).filter(Boolean);
+              if (parts.length >= 2) {
+                  findNearestPost(parts[0], parts[1]);
+              }
+          };
+      } else {
+          customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-empty">Format: Lat, Lng</div>';
+          customerSearchSuggestions.classList.add('active');
+      }
+      return;
+    }
+
+    // Show loading state for customer search
     customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading">🔍 Searching...</div>';
     customerSearchSuggestions.classList.add('active');
 
@@ -3510,6 +3284,53 @@ document.addEventListener('DOMContentLoaded', function () {
         console.error('Error fetching customer location:', err);
         alert('Error loading customer location');
       });
+  }
+
+  function findNearestPost(lat, lng) {
+      customerSearchSuggestions.classList.remove('active');
+      customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading">📡 Locating nearest post...</div>';
+      customerSearchSuggestions.classList.add('active');
+
+      fetch(`/api/posts/nearest?lat=${lat}&lng=${lng}`)
+        .then(r => r.json())
+        .then(data => {
+            customerSearchSuggestions.classList.remove('active');
+            if (data.error) {
+                showNoticeModal('Not Found', 'No posts found near these coordinates.');
+                return;
+            }
+
+            // Highlight and zoom
+            if (window._selectionIndicatorMarker) {
+                map.removeLayer(window._selectionIndicatorMarker);
+            }
+
+            window._selectionIndicatorMarker = L.circleMarker([data.lat, data.lng], {
+                radius: 25,
+                fillColor: '#ef4444',
+                color: '#b91c1c',
+                weight: 3,
+                opacity: 0.8,
+                fillOpacity: 0.4,
+                className: 'analysis-source-node' // Use existing animation
+            }).addTo(map);
+
+            map.setView([data.lat, data.lng], 19);
+            
+            // Re-fetch full post details to ensure all fields are present
+            fetch(`/api/posts/${data.id}`)
+              .then(r => r.json())
+              .then(fullData => {
+                  if (fullData && !fullData.error) {
+                      openPostInInspector(fullData);
+                  }
+              });
+        })
+        .catch(err => {
+            customerSearchSuggestions.classList.remove('active');
+            console.error('Nearest post error:', err);
+            showNoticeModal('Error', 'Failed to communicate with spatial server.');
+        });
   }
 
   // ── 2. Route layer ──
