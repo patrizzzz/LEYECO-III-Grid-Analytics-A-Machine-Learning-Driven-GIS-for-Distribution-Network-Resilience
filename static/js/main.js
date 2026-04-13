@@ -2873,8 +2873,98 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function showNoticeModal(title, message) {
-     const html = `<div class="info-card"><p style="margin:0; font-size:1.05rem;">${message || ''}</p></div>`;
-     renderInInspector(title || 'Notice', html);
+    const existing = document.getElementById('custom-notice-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'custom-notice-modal';
+    Object.assign(overlay.style, {
+      position: 'fixed', top: '0', left: '0',
+      width: '100vw', height: '100vh',
+      backgroundColor: 'rgba(15, 23, 42, 0.55)',
+      backdropFilter: 'blur(6px)',
+      zIndex: '999999',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      opacity: '0', transition: 'opacity 0.2s ease'
+    });
+
+    const card = document.createElement('div');
+    Object.assign(card.style, {
+      background: '#ffffff',
+      borderRadius: '16px',
+      padding: '28px 28px 22px',
+      width: '90%', maxWidth: '480px',
+      boxShadow: '0 25px 50px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.04)',
+      transform: 'scale(0.94) translateY(12px)',
+      transition: 'all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+      display: 'flex', flexDirection: 'column', gap: '0'
+    });
+
+    // Icon bar
+    const iconMap = { 'Error': '❌', 'Info': 'ℹ️', 'Success': '✅', 'Outage Impact Analysis': '⚠️', 'Trace Downstream Result': '⚡', 'Analysis': '🔄', 'Outage Impact': '🔴' };
+    const icon = iconMap[title] || '📋';
+
+    const header = document.createElement('div');
+    Object.assign(header.style, { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' });
+
+    const iconEl = document.createElement('div');
+    Object.assign(iconEl.style, {
+      width: '42px', height: '42px', borderRadius: '10px',
+      background: title === 'Error' ? '#fee2e2' : title.includes('Outage') ? '#fff1f2' : '#f0f9ff',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: '20px', flexShrink: '0'
+    });
+    iconEl.textContent = icon;
+
+    const titleEl = document.createElement('h3');
+    titleEl.textContent = title || 'Notice';
+    Object.assign(titleEl.style, { margin: '0', color: '#0f172a', fontSize: '1.15rem', fontWeight: '700', lineHeight: '1.2' });
+
+    header.appendChild(iconEl);
+    header.appendChild(titleEl);
+
+    const body = document.createElement('div');
+    body.innerHTML = message || '';
+    Object.assign(body.style, {
+      color: '#475569', fontSize: '0.9rem', lineHeight: '1.6',
+      marginBottom: '22px', maxHeight: '55vh', overflowY: 'auto',
+      paddingRight: '4px'
+    });
+
+    const footer = document.createElement('div');
+    Object.assign(footer.style, { display: 'flex', justifyContent: 'flex-end' });
+
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'Acknowledge';
+    Object.assign(okBtn.style, {
+      padding: '9px 22px', backgroundColor: '#0ea5e9',
+      color: 'white', border: 'none', borderRadius: '8px',
+      fontWeight: '600', fontSize: '0.9rem', cursor: 'pointer',
+      transition: 'background 0.2s ease'
+    });
+    okBtn.onmouseover = () => okBtn.style.backgroundColor = '#0284c7';
+    okBtn.onmouseout = () => okBtn.style.backgroundColor = '#0ea5e9';
+
+    const close = () => {
+      overlay.style.opacity = '0';
+      card.style.transform = 'scale(0.94) translateY(12px)';
+      setTimeout(() => overlay.remove(), 220);
+    };
+
+    okBtn.onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
+
+    footer.appendChild(okBtn);
+    card.appendChild(header);
+    card.appendChild(body);
+    card.appendChild(footer);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => {
+      overlay.style.opacity = '1';
+      card.style.transform = 'scale(1) translateY(0)';
+    });
   }
 
   // Save a connection from the current points
