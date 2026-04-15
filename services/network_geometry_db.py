@@ -468,7 +468,7 @@ def get_network_geometry(app):
                     coord = {
                         "lat": float(lat),
                         "lng": float(lng),
-                        "feeder": (bn.feeder or "").strip() or None,
+                        "feeder": (post.feeder if post and post.feeder else bn.feeder or "").strip() or None,
                         "circuit": None, # BusNode doesn't have circuit yet
                         "pole_number": pole_no,
                     }
