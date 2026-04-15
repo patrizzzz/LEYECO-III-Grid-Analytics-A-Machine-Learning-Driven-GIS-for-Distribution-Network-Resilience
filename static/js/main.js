@@ -1565,16 +1565,16 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!name) return '#d1d5db';
     const n = name.trim().toLowerCase();
     
-    // Highlight specific municipalities in color, everything else gray
-    if (n.includes('capoocan')) return '#ff7675';   // Pink/Reddish
-    if (n.includes('carigara')) return '#74b9ff';   // Light Blue
-    if (n.includes('barugo'))   return '#0984e3';   // Blue
-    if (n.includes('tunga'))    return '#00cec9';   // Cyan
-    if (n.includes('jaro'))     return '#a29bfe';   // Purple
-    if (n.includes('san miguel')) return '#55efc4'; // Green / Lime
-    if (n.includes('santa fe'))  return '#fdcb6e';  // Orange
-    if (n.includes('alangalang')) return '#6c5ce7'; // Purple/Magenta
-    if (n.includes('pastrana'))  return '#00b894';  // Dark Green
+    // Matched to LEYECO III System Map image
+    if (n.includes('capoocan'))  return '#ff7675';   // Salmon / Soft Red
+    if (n.includes('carigara'))  return '#fab1a0';   // Light Orange / Peach
+    if (n.includes('barugo'))    return '#ff9ff3';   // Bright Pink
+    if (n.includes('san miguel')) return '#badc58';  // Lime Green
+    if (n.includes('tunga'))     return '#00d2d3';   // Light Blue / Cyan
+    if (n.includes('alangalang')) return '#a29bfe';  // Lavender
+    if (n.includes('jaro'))      return '#6c5ce7';   // Purple / Violet
+    if (n.includes('santa fe'))   return '#feca57';  // Amber / Yellow-Orange
+    if (n.includes('pastrana'))  return '#1dd1a1';   // Mint / Teal Green
     
     // Default color for non-highlighted municipalities
     return '#d1d5db'; // Light Gray
@@ -1759,6 +1759,7 @@ document.addEventListener('DOMContentLoaded', function () {
         posts.forEach(p => {
           if (p && p.lat && p.lng) {
             addPostMarker(postsLayer, p);
+            if (p.feeder) knownFeeders.add(p.feeder);
             addedCount++;
           } else {
             console.warn('Skipping post with missing coords:', p);
@@ -1766,6 +1767,9 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         console.log(`Added ${addedCount} markers to posts layer`);
+
+        // Refresh the feeder list UI after posts are loaded
+        if (typeof window._refreshFeederList === 'function') window._refreshFeederList();
 
         // Add postsLayer to map by default
         postsLayer.addTo(map);
