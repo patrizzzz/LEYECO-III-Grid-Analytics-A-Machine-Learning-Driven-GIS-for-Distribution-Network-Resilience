@@ -3070,6 +3070,7 @@ document.addEventListener('DOMContentLoaded', function () {
               autocomplete="off" spellcheck="false" />
             <div id="customer-search-suggestions" class="customer-search-suggestions" style="top: calc(100% + 10px);"></div>
           </div>
+          <button id="search-clear-btn" type="button" class="search-clear-btn" title="Clear Search" aria-label="Clear Search">&times;</button>
         </div>
       </div>
     </div>
@@ -3100,6 +3101,12 @@ document.addEventListener('DOMContentLoaded', function () {
   var searchBarExpanded = document.getElementById('search-bar-expanded');
   var customerSearchInput = document.getElementById('customer-search-input');
   var customerSearchSuggestions = document.getElementById('customer-search-suggestions');
+  var searchClearBtn = document.getElementById('search-clear-btn');
+
+  function updateSearchClearButtonVisibility() {
+    if (!searchClearBtn || !customerSearchInput) return;
+    searchClearBtn.classList.toggle('active', customerSearchInput.value.trim().length > 0);
+  }
 
   function toggleSearchBar(show) {
     if (show === undefined) {
@@ -3125,9 +3132,50 @@ document.addEventListener('DOMContentLoaded', function () {
   // Keyboard support
   customerSearchInput.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
-      toggleSearchBar(false);
+      if (customerSearchInput.value) {
+          clearAllSearch();
+      } else {
+          toggleSearchBar(false);
+      }
       e.preventDefault();
     }
+  });
+
+  // Clear search logic
+  function clearAllSearch() {
+    customerSearchInput.value = '';
+    selectedCustomerData = null;
+    customerSearchSuggestions.classList.remove('active');
+    updateSearchClearButtonVisibility();
+    
+    // Clear map highlights
+    if (customerSearchHighlight) {
+      map.removeLayer(customerSearchHighlight);
+      customerSearchHighlight = null;
+    }
+    if (window._selectionIndicatorMarker) {
+        map.removeLayer(window._selectionIndicatorMarker);
+        window._selectionIndicatorMarker = null;
+    }
+    
+    // Clear routes/directions
+    if (typeof clearRoute === 'function') {
+      clearRoute();
+    }
+    
+    customerSearchInput.focus();
+  }
+
+  if (searchClearBtn) {
+    searchClearBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      clearAllSearch();
+    });
+  }
+
+  // Toggle clear button visibility
+  customerSearchInput.addEventListener('input', function() {
+    updateSearchClearButtonVisibility();
   });
 
   // Clear search when closing
@@ -3150,6 +3198,7 @@ document.addEventListener('DOMContentLoaded', function () {
         customerSearchInput.placeholder = mode === 'customer' ? 'Customer ID…' : 'Lat, Lng (e.g. 14.5, 120.9)';
         customerSearchInput.value = '';
         customerSearchSuggestions.classList.remove('active');
+        updateSearchClearButtonVisibility();
         customerSearchInput.focus();
     });
 
@@ -3256,6 +3305,7 @@ document.addEventListener('DOMContentLoaded', function () {
         selectedCustomerData = data;
         customerSearchInput.value = data.customer.customer_id;
         customerSearchSuggestions.classList.remove('active');
+        updateSearchClearButtonVisibility();
 
         // Highlight customer location on map if post location exists
         if (data.connected_post) {
@@ -3269,16 +3319,30 @@ document.addEventListener('DOMContentLoaded', function () {
           var lng = data.connected_post.lng;
 
           customerSearchHighlight = L.circleMarker([lat, lng], {
-            radius: 20,
+            radius: 25,
             fillColor: '#fbbf24',
             color: '#f59e0b',
-            weight: 3,
-            opacity: 0.8,
-            fillOpacity: 0.6
+            weight: 4,
+            opacity: 0.9,
+            fillOpacity: 0.5,
+            className: 'analysis-source-node' // Use existing animation for visibility
           }).addTo(map);
 
-          // Zoom to customer location
-          map.setView([lat, lng], 17);
+          // Fly to customer location (smoother than setView)
+          try { map.flyTo([lat, lng], 18); } catch (e) { map.setView([lat, lng], 18); }
+          
+          // AUTO-OPEN INSPECTOR for the connected post
+          // Try to find full post data from markers or fetch it
+          const postId = data.connected_post.id;
+          const marker = postMarkers[postId];
+          if (marker && marker._postData) {
+            openPostInInspector(marker._postData);
+          } else {
+            // Fallback: fetch post details if marker not ready
+            fetch('/api/posts/' + postId)
+              .then(r => r.json())
+              .then(p => { if (!p.error) openPostInInspector(p); });
+          }
         }
 
         // AUTO-TRIGGER ROUTE FINDING
@@ -3289,6 +3353,7 @@ document.addEventListener('DOMContentLoaded', function () {
         alert('Error loading customer location');
       });
   }
+  updateSearchClearButtonVisibility();
 
   function findNearestPost(lat, lng) {
       customerSearchSuggestions.classList.remove('active');
