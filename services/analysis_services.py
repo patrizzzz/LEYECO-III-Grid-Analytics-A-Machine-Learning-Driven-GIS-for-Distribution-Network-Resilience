@@ -500,28 +500,59 @@ def find_customer_post_location(customer_id):
     def get_post_by_bus_or_pole(bus_id):
         if not bus_id: return None
         bus_id = str(bus_id).strip()
+        
+        # Try direct match with bus ID or pole number
         p = Post.query.filter((Post.primary_bus_id == bus_id) | (Post.pole_number == bus_id)).first()
         if p and p.lat and p.lng: return p
         
+        # Try finding via BusNode table (maps technical bus IDs to poles)
         bn = BusNode.query.filter_by(bus_id=bus_id).first()
-        if bn and bn.pole_number:
-            p = Post.query.filter_by(pole_number=bn.pole_number).first()
-            if p and p.lat and p.lng: return p
+        if bn:
+            # First try direct foreign key if present
+            if bn.pole_id:
+                p = db.session.get(Post, bn.pole_id)
+                if p and p.lat and p.lng: return p
+            # Fallback to matching by pole number string
+            if bn.pole_number:
+                p = Post.query.filter_by(pole_number=bn.pole_number).first()
+                if p and p.lat and p.lng: return p
+            
+        # Try finding via DistributionTransformer (if the ID itself is a transformer ID)
+        if bus_id.startswith('DT'):
+            dt = DistributionTransformer.query.filter_by(transformer_id=bus_id).first()
+            if dt:
+                # Recursively look for the post linked to the transformer's primary side
+                return get_post_by_bus_or_pole(dt.from_primary_bus_id)
+                
         return None
 
     # 3. Use high-performance SQL trace to find the upstream path
-    upstream_ids = TopologyService.trace_upstream_sql(ssd.from_bus_id.strip())
+    try:
+        upstream_ids = TopologyService.trace_upstream_sql(ssd.from_bus_id.strip())
+    except Exception as e:
+        print(f"[find_customer_post_location] ERROR: Trace failed for bus {ssd.from_bus_id}: {e}")
+        return None
     
     # Check the path for the first Post or Transformer primary node
     for curr in upstream_ids:
+        # Check if the node itself is a post
         post = get_post_by_bus_or_pole(curr)
         if post:
             return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
             
+        # Check if the node is a secondary bus of a transformer
         dt = DistributionTransformer.query.filter_by(to_secondary_bus_id=curr).first()
         if dt:
             p_post = get_post_by_bus_or_pole(dt.from_primary_bus_id)
             if p_post:
                 return {'lat': p_post.lat, 'lng': p_post.lng, 'id': p_post.id, 'name': p_post.name}
+                
+        # Handle case where the transformer ID itself is in the trace (depends on how data was connected)
+        if curr.startswith('DT'):
+            dt = DistributionTransformer.query.filter_by(transformer_id=curr).first()
+            if dt:
+                p_post = get_post_by_bus_or_pole(dt.from_primary_bus_id)
+                if p_post:
+                    return {'lat': p_post.lat, 'lng': p_post.lng, 'id': p_post.id, 'name': p_post.name}
 
     return None

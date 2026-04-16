@@ -1739,16 +1739,40 @@ document.addEventListener('DOMContentLoaded', function () {
   // Load canonical posts (filtered to PH)
   function loadPosts() {
     console.log('🔄 Loading posts...');
-    return fetch('/api/posts?in_ph=1&per_page=1000')
+    const perPage = 1000;
+    const fetchPostsPage = (page) => fetch(`/api/posts?in_ph=1&per_page=${perPage}&page=${page}`)
       .then(r => {
         if (!r.ok) throw new Error(`API error: ${r.status}`);
         return r.json();
-      })
-      .then(response => {
-        console.log('Posts API response:', response);
+      });
 
-        // Handle both old array format and new paginated format
-        const posts = Array.isArray(response) ? response : (response.data || []);
+    return fetchPostsPage(1)
+      .then(response => {
+        let posts = Array.isArray(response) ? response : (response.data || []);
+        const totalPages = (!Array.isArray(response) && response.pagination && response.pagination.total_pages)
+          ? response.pagination.total_pages
+          : 1;
+
+        if (totalPages <= 1) {
+          return posts;
+        }
+
+        const pageFetches = [];
+        for (let page = 2; page <= totalPages; page++) {
+          pageFetches.push(fetchPostsPage(page));
+        }
+
+        return Promise.all(pageFetches).then(pagedResponses => {
+          pagedResponses.forEach(pageResponse => {
+            const pagePosts = Array.isArray(pageResponse) ? pageResponse : (pageResponse.data || []);
+            posts = posts.concat(pagePosts);
+          });
+          return posts;
+        });
+      })
+      .then(posts => {
+        console.log('Posts loaded from API:', posts.length);
+
         console.log('Posts to render on map:', posts.length, posts);
 
         if (!posts || posts.length === 0) {
@@ -3160,6 +3184,7 @@ document.addEventListener('DOMContentLoaded', function () {
               autocomplete="off" spellcheck="false" />
             <div id="customer-search-suggestions" class="customer-search-suggestions" style="top: calc(100% + 10px);"></div>
           </div>
+          <button id="search-clear-btn" type="button" class="search-clear-btn" title="Clear Search" aria-label="Clear Search">&times;</button>
         </div>
       </div>
     </div>
@@ -3190,6 +3215,12 @@ document.addEventListener('DOMContentLoaded', function () {
   var searchBarExpanded = document.getElementById('search-bar-expanded');
   var customerSearchInput = document.getElementById('customer-search-input');
   var customerSearchSuggestions = document.getElementById('customer-search-suggestions');
+  var searchClearBtn = document.getElementById('search-clear-btn');
+
+  function updateSearchClearButtonVisibility() {
+    if (!searchClearBtn || !customerSearchInput) return;
+    searchClearBtn.classList.toggle('active', customerSearchInput.value.trim().length > 0);
+  }
 
   function toggleSearchBar(show) {
     if (show === undefined) {
@@ -3214,10 +3245,77 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // Keyboard support
   customerSearchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      var mode = modeSelect ? modeSelect.value : 'customer';
+      if (mode === 'coord') {
+        e.preventDefault();
+        var query = (customerSearchInput.value || '').trim();
+        var parts = query.split(/[\s,]+/).filter(Boolean);
+        if (parts.length >= 2) {
+          var lat = parseFloat(parts[0]);
+          var lng = parseFloat(parts[1]);
+          if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            findNearestPost(lat, lng);
+            return;
+          }
+        }
+        showNoticeModal('Invalid Input', 'Please enter valid coordinates in this format: Lat, Lng');
+        return;
+      }
+    }
     if (e.key === 'Escape') {
-      toggleSearchBar(false);
+      if (customerSearchInput.value) {
+          clearAllSearch();
+      } else {
+          toggleSearchBar(false);
+      }
       e.preventDefault();
     }
+  });
+
+  // Clear search logic
+  function clearAllSearch() {
+    customerSearchInput.value = '';
+    selectedCustomerData = null;
+    customerSearchSuggestions.classList.remove('active');
+    updateSearchClearButtonVisibility();
+    
+    // Clear map highlights
+    if (customerSearchHighlight) {
+      map.removeLayer(customerSearchHighlight);
+      customerSearchHighlight = null;
+    }
+    if (window._selectionIndicatorMarker) {
+        map.removeLayer(window._selectionIndicatorMarker);
+        window._selectionIndicatorMarker = null;
+    }
+    if (window._nearestInputMarker) {
+        map.removeLayer(window._nearestInputMarker);
+        window._nearestInputMarker = null;
+    }
+    if (window._nearestDistanceLine) {
+        map.removeLayer(window._nearestDistanceLine);
+        window._nearestDistanceLine = null;
+    }
+    
+    // Clear routes/directions
+    if (typeof clearRoute === 'function') {
+      clearRoute();
+    }
+    
+    customerSearchInput.focus();
+  }
+
+  if (searchClearBtn) {
+    searchClearBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      clearAllSearch();
+    });
+  }
+
+  // Toggle clear button visibility
+  customerSearchInput.addEventListener('input', function() {
+    updateSearchClearButtonVisibility();
   });
 
   // Clear search when closing
@@ -3240,6 +3338,7 @@ document.addEventListener('DOMContentLoaded', function () {
         customerSearchInput.placeholder = mode === 'customer' ? 'Customer ID…' : 'Lat, Lng (e.g. 14.5, 120.9)';
         customerSearchInput.value = '';
         customerSearchSuggestions.classList.remove('active');
+        updateSearchClearButtonVisibility();
         customerSearchInput.focus();
     });
 
@@ -3267,7 +3366,13 @@ document.addEventListener('DOMContentLoaded', function () {
           document.getElementById('find-nearest-btn').onclick = function() {
               var parts = query.split(/[\s,]+/).filter(Boolean);
               if (parts.length >= 2) {
-                  findNearestPost(parts[0], parts[1]);
+                  var lat = parseFloat(parts[0]);
+                  var lng = parseFloat(parts[1]);
+                  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    findNearestPost(lat, lng);
+                  } else {
+                    showNoticeModal('Invalid Input', 'Please enter valid coordinates in this format: Lat, Lng');
+                  }
               }
           };
       } else {
@@ -3346,6 +3451,7 @@ document.addEventListener('DOMContentLoaded', function () {
         selectedCustomerData = data;
         customerSearchInput.value = data.customer.customer_id;
         customerSearchSuggestions.classList.remove('active');
+        updateSearchClearButtonVisibility();
 
         // Highlight customer location on map if post location exists
         if (data.connected_post) {
@@ -3359,16 +3465,30 @@ document.addEventListener('DOMContentLoaded', function () {
           var lng = data.connected_post.lng;
 
           customerSearchHighlight = L.circleMarker([lat, lng], {
-            radius: 20,
+            radius: 25,
             fillColor: '#fbbf24',
             color: '#f59e0b',
-            weight: 3,
-            opacity: 0.8,
-            fillOpacity: 0.6
+            weight: 4,
+            opacity: 0.9,
+            fillOpacity: 0.5,
+            className: 'analysis-source-node' // Use existing animation for visibility
           }).addTo(map);
 
-          // Zoom to customer location
-          map.setView([lat, lng], 17);
+          // Fly to customer location (smoother than setView)
+          try { map.flyTo([lat, lng], 18); } catch (e) { map.setView([lat, lng], 18); }
+          
+          // AUTO-OPEN INSPECTOR for the connected post
+          // Try to find full post data from markers or fetch it
+          const postId = data.connected_post.id;
+          const marker = postMarkers[postId];
+          if (marker && marker._postData) {
+            openPostInInspector(marker._postData);
+          } else {
+            // Fallback: fetch post details if marker not ready
+            fetch('/api/posts/' + postId)
+              .then(r => r.json())
+              .then(p => { if (!p.error) openPostInInspector(p); });
+          }
         }
 
         // AUTO-TRIGGER ROUTE FINDING
@@ -3379,6 +3499,7 @@ document.addEventListener('DOMContentLoaded', function () {
         alert('Error loading customer location');
       });
   }
+  updateSearchClearButtonVisibility();
 
   function findNearestPost(lat, lng) {
       customerSearchSuggestions.classList.remove('active');
@@ -3398,6 +3519,12 @@ document.addEventListener('DOMContentLoaded', function () {
             if (window._selectionIndicatorMarker) {
                 map.removeLayer(window._selectionIndicatorMarker);
             }
+            if (window._nearestInputMarker) {
+                map.removeLayer(window._nearestInputMarker);
+            }
+            if (window._nearestDistanceLine) {
+                map.removeLayer(window._nearestDistanceLine);
+            }
 
             window._selectionIndicatorMarker = L.circleMarker([data.lat, data.lng], {
                 radius: 25,
@@ -3409,7 +3536,39 @@ document.addEventListener('DOMContentLoaded', function () {
                 className: 'analysis-source-node' // Use existing animation
             }).addTo(map);
 
+            // Mark the exact typed coordinate and draw a dashed connector to nearest pole.
+            window._nearestInputMarker = L.circleMarker([lat, lng], {
+                radius: 7,
+                fillColor: '#2563eb',
+                color: '#1d4ed8',
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.9
+            }).addTo(map);
+
+            window._nearestDistanceLine = L.polyline([[lat, lng], [data.lat, data.lng]], {
+                color: '#2563eb',
+                weight: 3,
+                opacity: 0.9,
+                dashArray: '8,8'
+            }).addTo(map);
+
             map.setView([data.lat, data.lng], 19);
+            customerSearchInput.value = `${lat}, ${lng}`;
+            updateSearchClearButtonVisibility();
+
+            // Show nearest selection details including distance from typed coordinates.
+            const distMeters = Number(data.distance_meters);
+            const distText = Number.isFinite(distMeters) ? `${distMeters.toFixed(2)} m` : 'N/A';
+            const postLabel = data.pole_number || data.post_id || data.id || 'Unknown';
+            window._nearestDistanceLine.bindTooltip(
+              `From exact point to nearest post: ${distText}`,
+              { permanent: true, direction: 'center', className: 'map-distance-tooltip' }
+            ).openTooltip();
+            showNoticeModal(
+              'Nearest Post Found',
+              `Nearest post: ${postLabel}\nDistance from ${lat}, ${lng}: ${distText}`
+            );
             
             // Re-fetch full post details to ensure all fields are present
             fetch(`/api/posts/${data.id}`)
