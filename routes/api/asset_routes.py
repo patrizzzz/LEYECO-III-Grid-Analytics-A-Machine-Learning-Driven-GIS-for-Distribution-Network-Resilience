@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request, g, current_app
 from extensions import db
 from sqlalchemy import text, func
+import math
 from models import (
     Post, Meter, LatLongData, BusNode, 
     DistributionLineSegment, SecondaryLineSegment, 
@@ -45,28 +46,66 @@ def api_posts_nearest():
     try:
         lat = request.args.get('lat', type=float)
         lng = request.args.get('lng', type=float)
+        in_ph = str(request.args.get('in_ph', '')).lower() in ('1', 'true', 'yes')
+        pole_only = str(request.args.get('pole_only', '')).lower() in ('1', 'true', 'yes')
         if lat is None or lng is None:
             return jsonify({'error': 'lat and lng required'}), 400
-        
-        # Use PostGIS ST_Distance for accurate spatial lookup
-        # We order by distance and take the first (closest) result
-        nearest_post = Post.query.order_by(
-            func.ST_Distance(
-                Post.geom, 
-                func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326)
+
+        # Basic coordinate validation to avoid meaningless searches.
+        if lat < -90 or lat > 90 or lng < -180 or lng > 180:
+            return jsonify({'error': 'invalid latitude/longitude'}), 400
+
+        query_point = func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326)
+
+        # Keep nearest lookup aligned with "real poles" shown on map.
+        query = Post.query.filter(Post.lat.isnot(None), Post.lng.isnot(None))
+        if in_ph:
+            query = query.filter(Post.lat >= 4.0, Post.lat <= 22.0, Post.lng >= 116.0, Post.lng <= 127.5)
+        if pole_only:
+            query = query.filter(func.nullif(func.trim(Post.pole_number), '').isnot(None))
+
+        # Prefer geospatial distance when PostGIS metadata is available.
+        # If unavailable, fallback to Haversine distance using plain lat/lng math.
+        db_point = func.ST_SetSRID(func.ST_MakePoint(Post.lng, Post.lat), 4326)
+        geo_dist_expr = func.ST_DistanceSphere(db_point, query_point)
+        try:
+            nearest_post = query.order_by(geo_dist_expr.asc(), Post.id.asc()).first()
+        except Exception:
+            db.session.rollback()
+            lat_rad = func.radians(Post.lat)
+            lng_rad = func.radians(Post.lng)
+            q_lat_rad = func.radians(lat)
+            q_lng_rad = func.radians(lng)
+            earth_radius_m = 6371000.0
+            haversine_expr = earth_radius_m * 2.0 * func.asin(
+                func.sqrt(
+                    func.pow(func.sin((lat_rad - q_lat_rad) / 2.0), 2) +
+                    func.cos(q_lat_rad) * func.cos(lat_rad) *
+                    func.pow(func.sin((lng_rad - q_lng_rad) / 2.0), 2)
+                )
             )
-        ).first()
-        
-        if not nearest_post:
-            # Fallback: simple Euclidean distance if geom is missing for some reason
-            nearest_post = Post.query.order_by(
-                (Post.lat - lat)**2 + (Post.lng - lng)**2
-            ).first()
-            
+            nearest_post = query.order_by(haversine_expr.asc(), Post.id.asc()).first()
+
         if not nearest_post:
             return jsonify({'error': 'No posts found'}), 404
-            
-        return jsonify(nearest_post.to_dict())
+
+        # Add distance to help UI/debugging and validate nearest pick.
+        nearest_data = nearest_post.to_dict()
+        try:
+            # Calculate precise distance in Python so response works in both modes.
+            lat1 = math.radians(float(lat))
+            lng1 = math.radians(float(lng))
+            lat2 = math.radians(float(nearest_post.lat))
+            lng2 = math.radians(float(nearest_post.lng))
+            d_lat = lat2 - lat1
+            d_lng = lng2 - lng1
+            a = math.sin(d_lat / 2.0) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(d_lng / 2.0) ** 2
+            c = 2.0 * math.asin(math.sqrt(a))
+            nearest_data['distance_meters'] = float(6371000.0 * c)
+        except Exception:
+            nearest_data['distance_meters'] = None
+
+        return jsonify(nearest_data)
     except Exception as e:
         current_app.logger.error('Failed to find nearest post: %s', e)
         return jsonify({'error': str(e)}), 500
