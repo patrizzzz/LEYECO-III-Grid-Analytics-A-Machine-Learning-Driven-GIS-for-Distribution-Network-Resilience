@@ -264,6 +264,63 @@
     background: linear-gradient(135deg, #047857, #065f46);
   }
 
+  .export-image-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 1rem;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #eff6ff, #f8fbff);
+  }
+
+  .export-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .export-field label {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .export-field select {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 0.82rem;
+    background: #fff;
+    color: var(--text-primary);
+  }
+
+  .btn-export-image {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 14px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.84rem;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: all .2s;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, .25);
+  }
+
+  .btn-export-image:hover {
+    background: linear-gradient(135deg, #1d4ed8, #1e40af);
+  }
+
+  .btn-export-image:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+  }
+
   /* ── Danger Zone ── */
   .danger-card {
     background: #fef2f2;
@@ -691,7 +748,7 @@
     <!-- Export Panel -->
     <div class="res-upload-panel" id="panel-export">
       <div class="res-upload-panel-header">
-        <h3>📊 Master CSV Export</h3>
+        <h3>📊 Export</h3>
         <button class="res-panel-close" aria-label="Close">✕</button>
       </div>
       <div class="res-upload-panel-body">
@@ -707,6 +764,39 @@
             </svg>
             Export Master CSV
           </a>
+        </div>
+
+        <div class="export-image-card">
+          <p style="margin:0;font-size:0.82rem;color:var(--text-secondary);line-height:1.5;">
+            Export a comprehensive network image (PNG) by feeder or municipality.
+          </p>
+
+          <div class="export-field">
+            <label for="export-filter-type">Filter by</label>
+            <select id="export-filter-type">
+              <option value="feeder">Feeder</option>
+              <option value="municipality">Municipality</option>
+            </select>
+          </div>
+
+          <div class="export-field">
+            <label for="export-filter-value">Filter value</label>
+            <select id="export-filter-value">
+              <option value="">Select value...</option>
+            </select>
+          </div>
+
+          <div class="export-field">
+            <label for="export-image-size">Image size</label>
+            <select id="export-image-size">
+              <option value="1920x1080">HD (1920 x 1080)</option>
+              <option value="2560x1440">QHD (2560 x 1440)</option>
+              <option value="3840x2160">4K (3840 x 2160)</option>
+            </select>
+          </div>
+
+          <button id="export-network-image-btn" class="btn-export-image">Download Network Image (PNG)</button>
+          <div id="export-network-image-status" class="status-msg"></div>
         </div>
       </div>
     </div>
@@ -1198,6 +1288,405 @@
     const manageFilesLink = document.querySelector('[data-panel="panel-manage-files"]');
     if (manageFilesLink) {
       manageFilesLink.addEventListener('click', fetchFullHistory);
+    }
+
+    // --- Network Image Export ---
+    const exportFilterTypeEl = document.getElementById('export-filter-type');
+    const exportFilterValueEl = document.getElementById('export-filter-value');
+    const exportImageSizeEl = document.getElementById('export-image-size');
+    const exportImageBtn = document.getElementById('export-network-image-btn');
+    const exportImageStatusEl = document.getElementById('export-network-image-status');
+    let exportOptionsCache = { feeders: [], municipalities: [] };
+
+    function setExportStatus(message, color) {
+      if (!exportImageStatusEl) return;
+      exportImageStatusEl.textContent = message || '';
+      exportImageStatusEl.style.color = color || 'var(--text-secondary)';
+    }
+
+    function populateExportFilterValues() {
+      if (!exportFilterTypeEl || !exportFilterValueEl) return;
+      const mode = exportFilterTypeEl.value === 'municipality' ? 'municipalities' : 'feeders';
+      const values = exportOptionsCache[mode] || [];
+      exportFilterValueEl.innerHTML = '<option value="">Select value...</option>';
+      values.forEach(function (v) {
+        const option = document.createElement('option');
+        option.value = v;
+        option.textContent = v;
+        exportFilterValueEl.appendChild(option);
+      });
+      if (!values.length) {
+        setExportStatus('No filter values found. Upload more network data first.', '#b45309');
+      } else {
+        setExportStatus('', '');
+      }
+    }
+
+    function loadExportOptions() {
+      return fetch('/api/export/network/options')
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          exportOptionsCache = {
+            feeders: Array.isArray(res.feeders) ? res.feeders : [],
+            municipalities: Array.isArray(res.municipalities) ? res.municipalities : []
+          };
+          populateExportFilterValues();
+        })
+        .catch(function (err) {
+          setExportStatus('Failed to load export filters: ' + err.message, '#dc2626');
+        });
+    }
+
+    function drawNetworkExportImage(payload, width, height, labelText) {
+      const lines = Array.isArray(payload.lines) ? payload.lines : [];
+      const posts = Array.isArray(payload.posts) ? payload.posts : [];
+      const municipalityBoundary = Array.isArray(payload.municipality_boundary) ? payload.municipality_boundary : [];
+      const allPoints = [];
+
+      lines.forEach(function (line) {
+        if (Number.isFinite(line.lat1) && Number.isFinite(line.lng1)) allPoints.push([line.lat1, line.lng1]);
+        if (Number.isFinite(line.lat2) && Number.isFinite(line.lng2)) allPoints.push([line.lat2, line.lng2]);
+      });
+      posts.forEach(function (p) {
+        if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) allPoints.push([p.lat, p.lng]);
+      });
+      municipalityBoundary.forEach(function (geom) {
+        const gType = geom && geom.type;
+        const coords = geom && geom.coordinates;
+        if (!coords) return;
+        if (gType === 'Polygon') {
+          coords.forEach(function (ring) {
+            ring.forEach(function (pt) {
+              if (Array.isArray(pt) && Number.isFinite(pt[1]) && Number.isFinite(pt[0])) allPoints.push([pt[1], pt[0]]);
+            });
+          });
+        } else if (gType === 'MultiPolygon') {
+          coords.forEach(function (poly) {
+            poly.forEach(function (ring) {
+              ring.forEach(function (pt) {
+                if (Array.isArray(pt) && Number.isFinite(pt[1]) && Number.isFinite(pt[0])) allPoints.push([pt[1], pt[0]]);
+              });
+            });
+          });
+        }
+      });
+
+      if (allPoints.length < 2) {
+        throw new Error('Not enough geometry for export. Try another filter.');
+      }
+
+      let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+      allPoints.forEach(function (pt) {
+        minLat = Math.min(minLat, pt[0]);
+        maxLat = Math.max(maxLat, pt[0]);
+        minLng = Math.min(minLng, pt[1]);
+        maxLng = Math.max(maxLng, pt[1]);
+      });
+
+      const padRatio = 0.06;
+      const latPad = Math.max((maxLat - minLat) * padRatio, 0.0005);
+      const lngPad = Math.max((maxLng - minLng) * padRatio, 0.0005);
+      minLat -= latPad; maxLat += latPad; minLng -= lngPad; maxLng += lngPad;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+
+      ctx.fillStyle = '#e9f0f5';
+      ctx.fillRect(0, 0, width, height);
+      // Add subtle "map-like" texture so export is not plain white.
+      ctx.strokeStyle = 'rgba(148, 163, 184, 0.20)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < width; x += 120) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < height; y += 120) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+
+      const margin = 60;
+      const innerW = width - (margin * 2);
+      const innerH = height - (margin * 2);
+      const lngSpan = Math.max(maxLng - minLng, 1e-9);
+      const latSpan = Math.max(maxLat - minLat, 1e-9);
+
+      function project(lat, lng) {
+        const x = margin + ((lng - minLng) / lngSpan) * innerW;
+        const y = margin + (1 - ((lat - minLat) / latSpan)) * innerH;
+        return [x, y];
+      }
+
+      function getExportLineColor(line) {
+        const phasing = (line && line.phasing ? String(line.phasing) : '').toUpperCase().trim();
+        const hasA = phasing.includes('A');
+        const hasB = phasing.includes('B');
+        const hasC = phasing.includes('C');
+        if (hasA && !hasB && !hasC) return '#8B4513'; // Brown
+        if (hasB && !hasA && !hasC) return '#000000'; // Black
+        if (hasC && !hasA && !hasB) return '#808080'; // Gray
+        if ((hasA && hasB) || (hasB && hasC) || (hasC && hasA)) return '#800080'; // Purple multi-phase
+
+        const circuit = (line && line.circuit ? String(line.circuit) : '').trim().toLowerCase();
+        if (circuit === '3 phase') return '#228B22';
+        if (circuit === 'single phase') return '#d63031';
+        if (circuit === 'v phase') return '#0984e3';
+        return '#3b82f6';
+      }
+
+      function getExportLineWeight(line) {
+        const connType = (line && line.connection_type ? String(line.connection_type) : '').toLowerCase();
+        const base = Math.max(1, width / 1280);
+        if (connType.includes('primary') || connType.includes('distribution')) return 3.2 * base;
+        if (connType.includes('secondary')) return 2.2 * base;
+        return 1.8 * base;
+      }
+
+      function drawPolygonRing(ring, stroke, fill, lineWidth, alpha) {
+        if (!Array.isArray(ring) || ring.length < 3) return;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ring.forEach(function (pt, idx) {
+          if (!Array.isArray(pt) || !Number.isFinite(pt[1]) || !Number.isFinite(pt[0])) return;
+          const xy = project(pt[1], pt[0]);
+          if (idx === 0) ctx.moveTo(xy[0], xy[1]);
+          else ctx.lineTo(xy[0], xy[1]);
+        });
+        ctx.closePath();
+        if (fill) {
+          ctx.fillStyle = fill;
+          ctx.fill();
+        }
+        if (stroke) {
+          ctx.strokeStyle = stroke;
+          ctx.lineWidth = lineWidth;
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+
+      function polygonAreaAbs(ring) {
+        if (!Array.isArray(ring) || ring.length < 3) return 0;
+        let sum = 0;
+        for (let i = 0; i < ring.length; i++) {
+          const j = (i + 1) % ring.length;
+          const p1 = ring[i];
+          const p2 = ring[j];
+          if (!Array.isArray(p1) || !Array.isArray(p2)) continue;
+          sum += (p1[0] * p2[1]) - (p2[0] * p1[1]);
+        }
+        return Math.abs(sum / 2);
+      }
+
+      function ringSegments(ring) {
+        const segments = [];
+        if (!Array.isArray(ring) || ring.length < 2) return segments;
+        for (let i = 0; i < ring.length - 1; i++) {
+          const a = ring[i], b = ring[i + 1];
+          if (!Array.isArray(a) || !Array.isArray(b)) continue;
+          segments.push([a, b]);
+        }
+        return segments;
+      }
+
+      function segmentKey(a, b) {
+        const fmt = function (pt) { return (Number(pt[0]).toFixed(6) + ',' + Number(pt[1]).toFixed(6)); };
+        const p1 = fmt(a);
+        const p2 = fmt(b);
+        return p1 < p2 ? (p1 + '|' + p2) : (p2 + '|' + p1);
+      }
+
+      function drawMunicipalityOuterBoundary(geometries) {
+        const segmentCounts = {};
+        const segmentLookup = {};
+        const outerRings = [];
+
+        geometries.forEach(function (geom) {
+          const gType = geom && geom.type;
+          const coords = geom && geom.coordinates;
+          if (!coords) return;
+          if (gType === 'Polygon' && Array.isArray(coords[0])) {
+            outerRings.push(coords[0]);
+          } else if (gType === 'MultiPolygon') {
+            coords.forEach(function (poly) {
+              if (poly && Array.isArray(poly[0])) outerRings.push(poly[0]);
+            });
+          }
+        });
+
+        outerRings.forEach(function (ring) {
+          ringSegments(ring).forEach(function (seg) {
+            const key = segmentKey(seg[0], seg[1]);
+            segmentCounts[key] = (segmentCounts[key] || 0) + 1;
+            segmentLookup[key] = seg;
+          });
+        });
+
+        // Fill municipality softly from largest outer ring so linework remains clear.
+        let largest = null;
+        let largestArea = 0;
+        outerRings.forEach(function (ring) {
+          const a = polygonAreaAbs(ring);
+          if (a > largestArea) {
+            largestArea = a;
+            largest = ring;
+          }
+        });
+        if (largest) {
+          drawPolygonRing(largest, null, 'rgba(20, 184, 166, 0.10)', 0, 1);
+        }
+
+        // Draw only boundary edges that are not shared by adjacent polygons.
+        ctx.save();
+        ctx.strokeStyle = '#0f766e';
+        ctx.lineWidth = Math.max(2, width / 1300);
+        ctx.globalAlpha = 0.85;
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        Object.keys(segmentCounts).forEach(function (key) {
+          if (segmentCounts[key] !== 1) return;
+          const seg = segmentLookup[key];
+          const p1 = project(seg[0][1], seg[0][0]);
+          const p2 = project(seg[1][1], seg[1][0]);
+          ctx.beginPath();
+          ctx.moveTo(p1[0], p1[1]);
+          ctx.lineTo(p2[0], p2[1]);
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+
+      // Draw selected municipality boundary (outer perimeter only).
+      if (municipalityBoundary.length) {
+        drawMunicipalityOuterBoundary(municipalityBoundary);
+      }
+
+      // Draw line casing first to improve readability.
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
+      ctx.globalAlpha = 1;
+      lines.forEach(function (line) {
+        if (!Number.isFinite(line.lat1) || !Number.isFinite(line.lng1) || !Number.isFinite(line.lat2) || !Number.isFinite(line.lng2)) return;
+        const p1 = project(line.lat1, line.lng1);
+        const p2 = project(line.lat2, line.lng2);
+        const w = getExportLineWeight(line);
+        ctx.beginPath();
+        ctx.moveTo(p1[0], p1[1]);
+        ctx.lineTo(p2[0], p2[1]);
+        ctx.lineWidth = w + Math.max(1.1, width / 2200);
+        ctx.stroke();
+      });
+
+      // Draw colored lines on top with same map color rules.
+      lines.forEach(function (line) {
+        if (!Number.isFinite(line.lat1) || !Number.isFinite(line.lng1) || !Number.isFinite(line.lat2) || !Number.isFinite(line.lng2)) return;
+        const p1 = project(line.lat1, line.lng1);
+        const p2 = project(line.lat2, line.lng2);
+        ctx.strokeStyle = getExportLineColor(line);
+        ctx.lineWidth = getExportLineWeight(line);
+        ctx.beginPath();
+        ctx.moveTo(p1[0], p1[1]);
+        ctx.lineTo(p2[0], p2[1]);
+        ctx.stroke();
+      });
+
+      // Draw poles as small points for context
+      ctx.fillStyle = '#111827';
+      ctx.globalAlpha = 0.75;
+      const pointRadius = Math.max(1.4, width / 1600);
+      posts.forEach(function (p) {
+        if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return;
+        const point = project(p.lat, p.lng);
+        ctx.beginPath();
+        ctx.arc(point[0], point[1], pointRadius, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+
+      // Header and metadata
+      ctx.fillStyle = '#0f172a';
+      ctx.font = '700 28px Segoe UI, Arial, sans-serif';
+      ctx.fillText('LEYECO Network Export', margin, 38);
+      ctx.font = '500 16px Segoe UI, Arial, sans-serif';
+      ctx.fillStyle = '#334155';
+      ctx.fillText(labelText, margin, 62);
+      ctx.fillText('Lines: ' + lines.length + '   Poles: ' + posts.length, margin, 84);
+
+      return canvas;
+    }
+
+    function runNetworkImageExport() {
+      if (!exportFilterTypeEl || !exportFilterValueEl || !exportImageSizeEl || !exportImageBtn) return;
+      const filterType = exportFilterTypeEl.value;
+      const filterValue = exportFilterValueEl.value;
+      if (!filterValue) {
+        setExportStatus('Please select a filter value first.', '#dc2626');
+        return;
+      }
+
+      const sizeParts = (exportImageSizeEl.value || '1920x1080').split('x');
+      const width = parseInt(sizeParts[0], 10) || 1920;
+      const height = parseInt(sizeParts[1], 10) || 1080;
+
+      exportImageBtn.disabled = true;
+      setExportStatus('Preparing export data...', '#0369a1');
+
+      const qs = new URLSearchParams({
+        filter_type: filterType,
+        filter_value: filterValue,
+        include_posts: '1'
+      });
+
+      fetch('/api/export/network/data?' + qs.toString())
+        .then(function (r) { return r.json(); })
+        .then(function (payload) {
+          if (payload.error) throw new Error(payload.error);
+          setExportStatus('Rendering image...', '#0369a1');
+          const label = (filterType === 'feeder' ? 'Feeder: ' : 'Municipality: ') + filterValue;
+          const canvas = drawNetworkExportImage(payload, width, height, label);
+          const safeValue = String(filterValue).replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'network';
+          const filename = 'network_' + filterType + '_' + safeValue + '_' + width + 'x' + height + '.png';
+          canvas.toBlob(function (blob) {
+            if (!blob) {
+              setExportStatus('Failed to generate image blob.', '#dc2626');
+              exportImageBtn.disabled = false;
+              return;
+            }
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            setExportStatus('Export complete. Downloaded ' + filename, '#059669');
+            exportImageBtn.disabled = false;
+          }, 'image/png');
+        })
+        .catch(function (err) {
+          setExportStatus('Export failed: ' + err.message, '#dc2626');
+          exportImageBtn.disabled = false;
+        });
+    }
+
+    if (exportFilterTypeEl) {
+      exportFilterTypeEl.addEventListener('change', populateExportFilterValues);
+    }
+    if (exportImageBtn) {
+      exportImageBtn.addEventListener('click', runNetworkImageExport);
+    }
+    const exportPanelLink = document.querySelector('[data-panel="panel-export"]');
+    if (exportPanelLink) {
+      exportPanelLink.addEventListener('click', loadExportOptions);
     }
 
   });

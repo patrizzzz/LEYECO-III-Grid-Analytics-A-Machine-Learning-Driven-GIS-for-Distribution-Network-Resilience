@@ -1,11 +1,92 @@
 from flask import Blueprint, jsonify, request, g, current_app, Response
-import io, csv, math, requests, traceback
+import io, csv, math, requests, traceback, json
+from pathlib import Path
 from extensions import db
+from sqlalchemy import func
 from models import Post, DistributionLineSegment, SecondaryLineSegment, DistributionTransformer, Customer, EnergyConsumption, SecondaryServiceDrop
 from services.analysis_services import get_grid_health_analytics, calculate_transformer_load_stress, calculate_outage_impact, find_customer_post_location
 from services.network_geometry_db import get_network_geometry
 
 analysis_api_bp = Blueprint('analysis_api', __name__)
+
+
+def _load_barangay_boundaries_geojson():
+    """
+    Load municipality/barangay boundaries used by map UI.
+    Returns parsed GeoJSON dict or None if file is unavailable.
+    """
+    try:
+        geojson_path = Path(current_app.root_path) / 'static' / 'data' / 'barangay-boundaries.json'
+        if not geojson_path.exists():
+            return None
+        with geojson_path.open('r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _point_in_ring(lng, lat, ring):
+    """Ray-casting point-in-polygon test for a single linear ring."""
+    inside = False
+    n = len(ring)
+    if n < 3:
+        return False
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i][0], ring[i][1]
+        xj, yj = ring[j][0], ring[j][1]
+        intersects = ((yi > lat) != (yj > lat)) and (
+            lng < (xj - xi) * (lat - yi) / ((yj - yi) or 1e-12) + xi
+        )
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
+def _point_in_polygon_coords(lng, lat, polygon_coords):
+    """
+    polygon_coords: GeoJSON Polygon coordinates [outerRing, hole1, ...]
+    """
+    if not polygon_coords:
+        return False
+    # Must be inside outer ring and outside holes.
+    if not _point_in_ring(lng, lat, polygon_coords[0]):
+        return False
+    for hole in polygon_coords[1:]:
+        if _point_in_ring(lng, lat, hole):
+            return False
+    return True
+
+
+def _point_in_feature_geometry(lng, lat, geometry):
+    if not geometry:
+        return False
+    gtype = geometry.get('type')
+    coords = geometry.get('coordinates')
+    if gtype == 'Polygon':
+        return _point_in_polygon_coords(lng, lat, coords)
+    if gtype == 'MultiPolygon':
+        return any(_point_in_polygon_coords(lng, lat, poly) for poly in (coords or []))
+    return False
+
+
+def _get_municipality_geometries(geojson_data):
+    """
+    Groups features by municipality name (NAME_2 or name), returns:
+    { municipality_name: [geometry1, geometry2, ...] }
+    """
+    muni_map = {}
+    if not geojson_data:
+        return muni_map
+    for feat in (geojson_data.get('features') or []):
+        props = feat.get('properties') or {}
+        muni = (props.get('NAME_2') or props.get('name') or '').strip()
+        geom = feat.get('geometry')
+        if not muni or not geom:
+            continue
+        muni_map.setdefault(muni, []).append(geom)
+    return muni_map
 
 @analysis_api_bp.route('/network-geometry', methods=['GET'])
 def api_network_geometry():
@@ -87,6 +168,132 @@ def export_master_csv():
                         cust = cust_map.get(d.to_customer_id); cc = [_v(cust.customer_id) if cust else _v(d.to_customer_id), _v(cust.name) if cust else '', _v(cust.customer_type) if cust else '', _v(cust.service_voltage) if cust else '', _v(cust.phase) if cust else '']
                         w.writerow(pc + dc + tc + sc + drc + cc + [round(kwh_map.get(d.to_customer_id, 0), 2)]); yield out.getvalue(); out.seek(0); out.truncate(0)
     return Response(generate(), mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=master_export.csv'})
+
+
+@analysis_api_bp.route('/export/network/options', methods=['GET'])
+def export_network_options():
+    """Return feeder/municipality options for network image export filters."""
+    try:
+        feeders = [
+            (r[0] or '').strip()
+            for r in db.session.query(Post.feeder)
+            .filter(Post.feeder.isnot(None), func.length(func.trim(Post.feeder)) > 0)
+            .distinct()
+            .order_by(Post.feeder.asc())
+            .all()
+        ]
+        geojson_data = _load_barangay_boundaries_geojson()
+        muni_map = _get_municipality_geometries(geojson_data)
+        municipalities = sorted(muni_map.keys())
+        # Fallback when boundary file is unavailable.
+        if not municipalities:
+            municipalities = [
+                (r[0] or '').strip()
+                for r in db.session.query(Post.area)
+                .filter(Post.area.isnot(None), func.length(func.trim(Post.area)) > 0)
+                .distinct()
+                .order_by(Post.area.asc())
+                .all()
+            ]
+        return jsonify({
+            'feeders': feeders,
+            'municipalities': municipalities,
+        }), 200
+    except Exception as e:
+        current_app.logger.error('Failed to load export options: %s', e)
+        return jsonify({'feeders': [], 'municipalities': [], 'error': str(e)}), 500
+
+
+@analysis_api_bp.route('/export/network/data', methods=['GET'])
+def export_network_data():
+    """
+    Return filtered posts + lines for image export.
+    Filter modes:
+      - filter_type=feeder & filter_value=<feeder>
+      - filter_type=municipality & filter_value=<municipality name from barangay-boundaries.json>
+    """
+    try:
+        filter_type = (request.args.get('filter_type') or '').strip().lower()
+        filter_value = (request.args.get('filter_value') or '').strip()
+        include_posts = (request.args.get('include_posts') or '1').strip().lower() in ('1', 'true', 'yes')
+
+        if filter_type not in ('feeder', 'municipality'):
+            return jsonify({'error': 'filter_type must be "feeder" or "municipality"'}), 400
+        if not filter_value:
+            return jsonify({'error': 'filter_value is required'}), 400
+
+        post_query = Post.query.filter(Post.lat.isnot(None), Post.lng.isnot(None))
+        if filter_type == 'feeder':
+            post_query = post_query.filter(func.lower(func.trim(Post.feeder)) == filter_value.lower())
+        else:
+            geojson_data = _load_barangay_boundaries_geojson()
+            muni_map = _get_municipality_geometries(geojson_data)
+            muni_geometries = muni_map.get(filter_value, [])
+            if muni_geometries:
+                # Use geometry-based inclusion (authoritative map boundary source).
+                matched_posts = []
+                for p in post_query.all():
+                    if p.lat is None or p.lng is None:
+                        continue
+                    lng = float(p.lng)
+                    lat = float(p.lat)
+                    if any(_point_in_feature_geometry(lng, lat, g) for g in muni_geometries):
+                        matched_posts.append(p)
+                posts = matched_posts
+            else:
+                # Fallback to area text match only if boundary file/data is unavailable.
+                posts = post_query.filter(func.lower(func.trim(Post.area)) == filter_value.lower()).all()
+
+        if filter_type == 'feeder':
+            posts = post_query.all()
+        posts_out = [p.to_dict() for p in posts] if include_posts else []
+
+        # Build bus-id lookup from selected posts to keep only relevant lines.
+        selected_bus_ids = set()
+        for p in posts:
+            for bus_val in (p.pole_number, p.primary_bus_id, p.sec_bus_id, p.transformer_bus_id):
+                val = (bus_val or '').strip()
+                if val:
+                    selected_bus_ids.add(val)
+
+        data = get_network_geometry(current_app)
+        lines = data.get('lines', []) if isinstance(data, dict) else []
+        filtered_lines = []
+
+        if filter_type == 'feeder':
+            target = filter_value.lower()
+            for line in lines:
+                line_feeder = (line.get('feeder') or '').strip().lower()
+                if line_feeder == target:
+                    filtered_lines.append(line)
+        else:
+            # Municipality filter: keep lines connected to selected posts by bus id.
+            for line in lines:
+                from_bus = (line.get('from_bus') or '').strip()
+                to_bus = (line.get('to_bus') or '').strip()
+                if (from_bus and from_bus in selected_bus_ids) or (to_bus and to_bus in selected_bus_ids):
+                    filtered_lines.append(line)
+
+        municipality_boundary = []
+        if filter_type == 'municipality':
+            geojson_data = _load_barangay_boundaries_geojson()
+            muni_map = _get_municipality_geometries(geojson_data)
+            municipality_boundary = muni_map.get(filter_value, [])
+
+        return jsonify({
+            'filter_type': filter_type,
+            'filter_value': filter_value,
+            'posts': posts_out,
+            'lines': filtered_lines,
+            'municipality_boundary': municipality_boundary,
+            'meta': {
+                'post_count': len(posts_out),
+                'line_count': len(filtered_lines),
+            }
+        }), 200
+    except Exception as e:
+        current_app.logger.error('Failed to build export network data: %s', e)
+        return jsonify({'error': str(e), 'posts': [], 'lines': []}), 500
 
 @analysis_api_bp.route('/transformer-location/<transformer_id>', methods=['GET'])
 def api_transformer_location(transformer_id):

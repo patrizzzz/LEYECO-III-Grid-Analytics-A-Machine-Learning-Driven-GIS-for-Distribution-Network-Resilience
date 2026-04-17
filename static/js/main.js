@@ -470,12 +470,9 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   const mainCanvas = L.canvas();
-  const postsLayer = L.markerClusterGroup({
-    disableClusteringAtZoom: 16,
-    spiderfyOnMaxZoom: true,
-    maxClusterRadius: 40,
-    showCoverageOnHover: false
-  });
+  // Render poles/posts without clustering so network lines stay readable at all zoom levels.
+  const postsLayer = L.layerGroup();
+  const postTracksLayer = L.layerGroup();
   const latlongLayer = L.layerGroup();
   const connectionsLayer = L.layerGroup();
   const primaryLinesLayer = L.layerGroup().addTo(map);
@@ -648,8 +645,8 @@ document.addEventListener('DOMContentLoaded', function () {
   let usePhasingColor = localStorage.getItem('usePhasingColor') === 'true' || false;
 
   // --- Global Line Weight State (separate per line type) ---
-  let primaryLineWeight = parseInt(localStorage.getItem('primaryLineWeight')) || 3;
-  let secondaryLineWeight = parseInt(localStorage.getItem('secondaryLineWeight')) || 2;
+  let primaryLineWeight = parseInt(localStorage.getItem('primaryLineWeight')) || 2;
+  let secondaryLineWeight = parseInt(localStorage.getItem('secondaryLineWeight')) || 1;
 
   // Helper function to get weight per connection type
   function getLineWeight(connType) {
@@ -893,7 +890,9 @@ document.addEventListener('DOMContentLoaded', function () {
     const layerDefaults = {
       'Posts (canonical)': true,
       'LatLongData (raw)': false,
-      'Network lines (DB)': true
+      'Primary Lines': true,
+      'Secondary Lines': true,
+      'Network Lines (DB)': true
     };
 
     Object.keys(overlays).forEach(function (name) {
@@ -1403,6 +1402,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // Clear all map layers (posts, connections, lines)
   function clearAllMapLayers() {
     postsLayer.clearLayers();
+    postTracksLayer.clearLayers();
     connectionsLayer.clearLayers();
     if (typeof networkLinesLayer !== 'undefined') networkLinesLayer.clearLayers();
     primaryLinesLayer.clearLayers();
@@ -1607,6 +1607,112 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // --- Zoom Event Logic with Debounce ---
+  function applyZoomVisibility() {
+    const zoom = map.getZoom();
+    if (zoom < 13) {
+      // Zoomed out: hide markers only; keep line layers visible for tracking.
+      if (map.hasLayer(postsLayer)) map.removeLayer(postsLayer);
+      if (!map.hasLayer(postTracksLayer)) map.addLayer(postTracksLayer);
+    } else {
+      // Zoomed in: show full detail (poles/transformers + line layers).
+      if (!map.hasLayer(postsLayer)) map.addLayer(postsLayer);
+      if (map.hasLayer(postTracksLayer)) map.removeLayer(postTracksLayer);
+    }
+
+    // Always honor line overlay toggles at any zoom level.
+    if (primaryLayerOverlayOn) {
+      if (!map.hasLayer(primaryLinesLayer)) map.addLayer(primaryLinesLayer);
+    } else if (map.hasLayer(primaryLinesLayer)) {
+      map.removeLayer(primaryLinesLayer);
+    }
+
+    if (secondaryLayerOverlayOn) {
+      if (!map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
+    } else if (map.hasLayer(secondaryLinesLayer)) {
+      map.removeLayer(secondaryLinesLayer);
+    }
+  }
+
+  function buildPostTrackLines(posts) {
+    postTracksLayer.clearLayers();
+    if (!Array.isArray(posts) || posts.length < 2) return;
+
+    const byFeeder = {};
+    posts.forEach(function (p) {
+      const lat = parseFloat(p.lat);
+      const lng = parseFloat(p.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      const feeder = (p.feeder && String(p.feeder).trim()) || '__NO_FEEDER__';
+      if (!byFeeder[feeder]) byFeeder[feeder] = [];
+      byFeeder[feeder].push([lat, lng]);
+    });
+
+    function samplePoints(points, maxPoints) {
+      if (points.length <= maxPoints) return points.slice();
+      const step = Math.ceil(points.length / maxPoints);
+      const sampled = [];
+      for (let i = 0; i < points.length; i += step) sampled.push(points[i]);
+      return sampled;
+    }
+
+    function buildNearestNeighborChains(points, maxJumpDegrees) {
+      if (points.length <= 1) return [];
+      const remaining = points.slice();
+      const chains = [];
+
+      while (remaining.length) {
+        let startIdx = 0;
+        for (let i = 1; i < remaining.length; i++) {
+          if (remaining[i][1] < remaining[startIdx][1]) startIdx = i; // western-most
+        }
+        const chain = [remaining.splice(startIdx, 1)[0]];
+
+        while (remaining.length) {
+          const last = chain[chain.length - 1];
+          let bestIdx = -1;
+          let bestDist = Infinity;
+          for (let i = 0; i < remaining.length; i++) {
+            const dLat = remaining[i][0] - last[0];
+            const dLng = remaining[i][1] - last[1];
+            const dist = Math.sqrt((dLat * dLat) + (dLng * dLng));
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestIdx = i;
+            }
+          }
+
+          // Stop this chain when the next point is too far (prevents fake bridge lines).
+          if (bestIdx < 0 || bestDist > maxJumpDegrees) break;
+          chain.push(remaining.splice(bestIdx, 1)[0]);
+        }
+
+        chains.push(chain);
+      }
+
+      return chains;
+    }
+
+    Object.keys(byFeeder).forEach(function (feederName) {
+      const feederPoints = byFeeder[feederName];
+      if (!feederPoints || feederPoints.length < 2) return;
+      const sampled = samplePoints(feederPoints, 250);
+      // ~0.006 deg ~= ~600-700m in this area; avoids long fake jumps between distant poles.
+      const chains = buildNearestNeighborChains(sampled, 0.006);
+      chains.forEach(function (chain) {
+        if (chain.length < 2) return;
+        L.polyline(chain, {
+          color: '#111827',
+          weight: 2,
+          opacity: 0.6,
+          lineCap: 'round',
+          lineJoin: 'round',
+          interactive: false,
+          renderer: mainCanvas
+        }).addTo(postTracksLayer);
+      });
+    });
+  }
+
   let zoomTimeout;
   map.on('zoomend', function() {
     clearTimeout(zoomTimeout);
@@ -1616,17 +1722,11 @@ document.addEventListener('DOMContentLoaded', function () {
         
         // Update Municipality/Barangay labels based on zoom
         updateMunicipalityLabels();
-        
-        if (zoom < 13) {
-            if (map.hasLayer(postsLayer)) map.removeLayer(postsLayer);
-            if (map.hasLayer(secondaryLinesLayer)) map.removeLayer(secondaryLinesLayer);
-        } else {
-            if (!map.hasLayer(postsLayer)) map.addLayer(postsLayer);
-            // Only re-add layers if the user's overlay checkbox is ON
-            if (secondaryLayerOverlayOn && !map.hasLayer(secondaryLinesLayer)) map.addLayer(secondaryLinesLayer);
-        }
+
+        applyZoomVisibility();
     }, 300);
   });
+  applyZoomVisibility();
 
   function updateNetworkLineColors() {
     function updateLayer(layer) {
@@ -1791,13 +1891,18 @@ document.addEventListener('DOMContentLoaded', function () {
         });
 
         console.log(`Added ${addedCount} markers to posts layer`);
+        buildPostTrackLines(posts);
 
         // Refresh the feeder list UI after posts are loaded
         if (typeof window._refreshFeederList === 'function') window._refreshFeederList();
 
-        // Add postsLayer to map by default
-        postsLayer.addTo(map);
-        console.log('Posts layer added to map');
+        // Show posts only when zoomed in to reduce lag at low zoom levels.
+        if (map.getZoom() >= 13) {
+          postsLayer.addTo(map);
+          console.log('Posts layer added to map');
+        } else {
+          console.log('Posts layer kept hidden at low zoom for performance');
+        }
 
         // Fit map if we added markers (use isValid() guard — isEmpty() isn't available in this Leaflet build)
         if (typeof bounds.isValid === 'function' ? bounds.isValid() : !bounds.isEmpty) {
