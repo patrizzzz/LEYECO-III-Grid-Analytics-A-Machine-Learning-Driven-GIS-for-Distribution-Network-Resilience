@@ -18,6 +18,7 @@ Output: GeoJSON FeatureCollection and a lines list for map overlay.
 """
 
 from collections import defaultdict
+import heapq
 import json
 import math
 import re
@@ -323,8 +324,11 @@ def lines_to_geojson(lines, nodes):
         if line.get("connection_type") == "Secondary_to_Customer":
             continue
 
-        # GeoJSON LineString: [lng, lat], [lng, lat]
-        coords = [[line["lng1"], line["lat1"]], [line["lng2"], line["lat2"]]]
+        path_ll = line.get("path_latlngs")
+        if path_ll and len(path_ll) >= 2:
+            coords = [[pt[1], pt[0]] for pt in path_ll]
+        else:
+            coords = [[line["lng1"], line["lat1"]], [line["lng2"], line["lat2"]]]
         length_m = line.get("length_meters")
         props = {
             "feature_type": "edge",
@@ -336,9 +340,12 @@ def lines_to_geojson(lines, nodes):
             "feeder": line.get("feeder"),
             "circuit": line.get("circuit"),
             "phasing": line.get("phasing"),
+            "route_auto": line.get("route_auto"),
         }
         if length_m is not None:
             props["length_meters"] = round(length_m, 2)
+        if line.get("length_meters_source") is not None:
+            props["length_meters_source"] = round(float(line["length_meters_source"]), 2)
         features.append(
             {
                 "type": "Feature",
@@ -350,7 +357,21 @@ def lines_to_geojson(lines, nodes):
     return {"type": "FeatureCollection", "features": features}
 
 
-def _add_edge(lines, bus_to_coord, from_bus, to_bus, connection_type, feeder=None, circuit=None, phasing=None, processed_edges=None, used_buses=None):
+def _add_edge(
+    lines,
+    bus_to_coord,
+    from_bus,
+    to_bus,
+    connection_type,
+    feeder=None,
+    circuit=None,
+    phasing=None,
+    processed_edges=None,
+    used_buses=None,
+    display_from_bus=None,
+    display_to_bus=None,
+    length_meters_source=None,
+):
     """
     Append one line to `lines` if both bus IDs resolve to coordinates. 
     Uses bus_to_coord for lookup.
@@ -394,22 +415,331 @@ def _add_edge(lines, bus_to_coord, from_bus, to_bus, connection_type, feeder=Non
     if used_buses is not None:
         used_buses.add(from_bus)
         used_buses.add(to_bus)
+        if display_from_bus:
+            used_buses.add(display_from_bus.strip())
+        if display_to_bus:
+            used_buses.add(display_to_bus.strip())
 
-    lines.append({
+    show_from = (display_from_bus or from_bus).strip()
+    show_to = (display_to_bus or to_bus).strip()
+    line_row = {
         "lat1": a["lat"],
         "lng1": a["lng"],
         "lat2": b["lat"],
         "lng2": b["lng"],
         "from_pole": a.get("pole_number"),
         "to_pole": b.get("pole_number"),
-        "from_bus": from_bus,
-        "to_bus": to_bus,
+        "from_bus": show_from,
+        "to_bus": show_to,
         "feeder": (feeder or "").strip() or a.get("feeder") or b.get("feeder"),
         "circuit": (circuit or "").strip() or a.get("circuit") or b.get("circuit"),
         "phasing": (phasing or "").strip() or None,
         "connection_type": connection_type,
-        "length_meters": round(dist, 2) if dist is not None else None
-    })
+        "length_meters": round(dist, 2) if dist is not None else None,
+    }
+    if length_meters_source is not None:
+        line_row["length_meters_source"] = float(length_meters_source)
+    lines.append(line_row)
+
+
+def _haversine_from_coords(a, b):
+    """Distance in meters between two coord dicts."""
+    if not a or not b:
+        return None
+    return _haversine_meters(a.get("lat"), a.get("lng"), b.get("lat"), b.get("lng"))
+
+
+def _best_variant_endpoint(bus_to_coord, base_bus, other_bus, expected_length_m):
+    """
+    For known bad IDs (e.g. P0000000108 vs P0000000108-63), find a better
+    variant endpoint that matches expected segment length.
+    """
+    base = (base_bus or "").strip()
+    other = (other_bus or "").strip()
+    if not base or not other or expected_length_m is None:
+        return base
+    if base not in bus_to_coord or other not in bus_to_coord:
+        return base
+
+    other_coord = bus_to_coord.get(other)
+    base_coord = bus_to_coord.get(base)
+    current_dist = _haversine_from_coords(base_coord, other_coord)
+    if current_dist is None:
+        return base
+
+    # Only heal obviously impossible mappings.
+    severe_mismatch = current_dist > max(1000, expected_length_m * 6)
+    if not severe_mismatch:
+        return base
+
+    prefix = base + "-"
+    candidates = [k for k in bus_to_coord.keys() if k.startswith(prefix)]
+    if not candidates:
+        return base
+
+    best_bus = base
+    best_score = abs(current_dist - expected_length_m)
+    for cand in candidates:
+        cand_dist = _haversine_from_coords(bus_to_coord.get(cand), other_coord)
+        if cand_dist is None:
+            continue
+        score = abs(cand_dist - expected_length_m)
+        if score < best_score:
+            best_score = score
+            best_bus = cand
+
+    # Accept only if this is a strong improvement.
+    if best_bus != base:
+        best_dist = _haversine_from_coords(bus_to_coord.get(best_bus), other_coord)
+        if best_dist is not None and best_dist < current_dist * 0.35:
+            return best_bus
+    return base
+
+
+def _build_distribution_adjacency(segments):
+    """Undirected graph: bus_id -> neighbor bus_ids from all distribution segments."""
+    adj = defaultdict(set)
+    for seg in segments:
+        u = (seg.from_bus_id or "").strip()
+        v = (seg.to_bus_id or "").strip()
+        if u and v:
+            adj[u].add(v)
+            adj[v].add(u)
+    return {k: list(v) for k, v in adj.items()}
+
+
+def _dijkstra_path_buses(adj, bus_to_coord, start, end, skip_edge):
+    """
+    Shortest path by summed haversine edge weights.
+    skip_edge: (a, b) undirected edge to forbid (the segment being rendered).
+    Returns ordered list of bus IDs, or None if unreachable.
+    """
+    if start not in bus_to_coord or end not in bus_to_coord:
+        return None
+    if start == end:
+        return [start]
+    skip = tuple(sorted((skip_edge[0].strip(), skip_edge[1].strip()))) if skip_edge else None
+
+    dist = {start: 0.0}
+    prev = {}
+    pq = [(0.0, start)]
+
+    while pq:
+        d, u = heapq.heappop(pq)
+        if d > dist.get(u, float("inf")) + 1e-9:
+            continue
+        if u == end:
+            break
+        for v in adj.get(u, []):
+            if skip and tuple(sorted((u, v))) == skip:
+                continue
+            w = _haversine_from_coords(bus_to_coord.get(u), bus_to_coord.get(v))
+            if w is None:
+                continue
+            nd = d + w
+            if nd < dist.get(v, float("inf")):
+                dist[v] = nd
+                prev[v] = u
+                heapq.heappush(pq, (nd, v))
+
+    if end not in dist:
+        return None
+    if end != start and end not in prev:
+        return None
+
+    path = []
+    cur = end
+    while True:
+        path.append(cur)
+        if cur == start:
+            break
+        p = prev.get(cur)
+        if p is None:
+            return None
+        cur = p
+    path.reverse()
+    return path
+
+
+def _path_length_along_buses(path_buses, bus_to_coord):
+    if not path_buses or len(path_buses) < 2:
+        return None
+    total = 0.0
+    for i in range(len(path_buses) - 1):
+        d = _haversine_from_coords(
+            bus_to_coord.get(path_buses[i]),
+            bus_to_coord.get(path_buses[i + 1]),
+        )
+        if d is None:
+            return None
+        total += d
+    return round(total, 2)
+
+
+def _greedy_walk_toward_end(adj, bus_to_coord, start, end, skip_edge, max_hops=400):
+    """
+    Walk from start choosing each step's neighbor whose coordinates are closest to `end`
+    (never traverses the undirected skip_edge). If `end` is not reached, append `end`
+    anyway so the polyline can close with a short final span (visual only when no graph edge).
+    """
+    if start not in bus_to_coord or end not in bus_to_coord:
+        return None
+    if start == end:
+        return [start]
+    skip = tuple(sorted((skip_edge[0].strip(), skip_edge[1].strip()))) if skip_edge else None
+    end_c = bus_to_coord.get(end)
+    path = [start]
+    current = start
+    for _ in range(max_hops):
+        if current == end:
+            return path
+        best_nb = None
+        best_d = float("inf")
+        for nb in adj.get(current, []):
+            if skip and tuple(sorted((current, nb))) == skip:
+                continue
+            c1 = bus_to_coord.get(nb)
+            if not c1:
+                continue
+            d = _haversine_from_coords(c1, end_c)
+            if d < best_d:
+                best_d = d
+                best_nb = nb
+        if best_nb is None:
+            break
+        if len(path) >= 2 and best_nb == path[-2]:
+            break
+        path.append(best_nb)
+        current = best_nb
+    if path[-1] != end:
+        path.append(end)
+    return path if len(path) >= 2 else None
+
+
+def _append_distribution_segment_line(
+    lines,
+    bus_to_coord,
+    seg,
+    adj,
+    processed_edges,
+    used_buses,
+):
+    """
+    Draw one distribution segment: logical From/To stay the CSV row IDs.
+    Geometry may follow an auto-routed path through intermediate buses.
+    """
+    orig_from = (seg.from_bus_id or "").strip()
+    orig_to = (seg.to_bus_id or "").strip()
+    if not orig_from or not orig_to:
+        return
+
+    edge_key = tuple(sorted([orig_from, orig_to]))
+    if edge_key in processed_edges:
+        return
+
+    expected_len = seg.length_meters
+    a = bus_to_coord.get(orig_from)
+    b = bus_to_coord.get(orig_to)
+    direct_dist = _haversine_from_coords(a, b)
+
+    path_buses = _dijkstra_path_buses(
+        adj, bus_to_coord, orig_from, orig_to, (orig_from, orig_to)
+    )
+    route_geo = _path_length_along_buses(path_buses, bus_to_coord) if path_buses else None
+
+    use_route = False
+    if (
+        path_buses
+        and len(path_buses) >= 2
+        and route_geo is not None
+        and direct_dist is not None
+    ):
+        # Prefer routed path when it is clearly shorter than the bad direct chord,
+        # or when it uses intermediate poles (not a single hop).
+        if len(path_buses) >= 3:
+            use_route = route_geo < direct_dist * 0.98
+        elif route_geo < direct_dist * 0.85:
+            use_route = True
+
+    # If shortest-path routing cannot connect (e.g. bogus direct edge is the only link),
+    # walk along branches toward the target, then close to the logical endpoint bus.
+    if not use_route and direct_dist is not None and expected_len is not None:
+        mismatch = direct_dist > max(1000.0, float(expected_len) * 6.0)
+    else:
+        mismatch = False
+    if not use_route and mismatch:
+        alt = _greedy_walk_toward_end(
+            adj, bus_to_coord, orig_from, orig_to, (orig_from, orig_to)
+        )
+        if alt and len(alt) >= 3:
+            rg = _path_length_along_buses(alt, bus_to_coord)
+            last_hop = _haversine_from_coords(
+                bus_to_coord.get(alt[-2]), bus_to_coord.get(alt[-1])
+            ) if len(alt) >= 2 else None
+            exp = float(expected_len) if expected_len is not None else 0.0
+            # Total path may be longer than the bogus chord; trust branch walk + short final span to `to_bus`.
+            if (
+                rg is not None
+                and last_hop is not None
+                and len(alt) >= 4
+                and last_hop <= max(350.0, exp * 3.0 if exp else 350.0)
+            ):
+                path_buses = alt
+                route_geo = rg
+                use_route = True
+
+    if use_route and path_buses:
+        pts = []
+        for bid in path_buses:
+            c = bus_to_coord.get(bid)
+            if not c:
+                use_route = False
+                break
+            pts.append([float(c["lat"]), float(c["lng"])])
+        if use_route and len(pts) >= 2:
+            processed_edges.add(edge_key)
+            for bid in path_buses:
+                used_buses.add(bid)
+            lat1, lng1 = pts[0][0], pts[0][1]
+            lat2, lng2 = pts[-1][0], pts[-1][1]
+            lines.append(
+                {
+                    "lat1": lat1,
+                    "lng1": lng1,
+                    "lat2": lat2,
+                    "lng2": lng2,
+                    "path_latlngs": pts,
+                    "from_pole": bus_to_coord.get(orig_from, {}).get("pole_number"),
+                    "to_pole": bus_to_coord.get(orig_to, {}).get("pole_number"),
+                    "from_bus": orig_from,
+                    "to_bus": orig_to,
+                    "feeder": (a.get("feeder") if a else None) or (b.get("feeder") if b else None),
+                    "circuit": None,
+                    "phasing": (seg.phasing or "").strip() or None,
+                    "connection_type": "Distribution_Line",
+                    "length_meters": route_geo,
+                    "length_meters_source": float(expected_len) if expected_len is not None else None,
+                    "route_auto": True,
+                }
+            )
+            return
+
+    # Fallback: healed endpoints, straight segment (popup still shows orig_from / orig_to)
+    from_healed = _best_variant_endpoint(bus_to_coord, orig_from, orig_to, expected_len)
+    to_healed = _best_variant_endpoint(bus_to_coord, orig_to, from_healed, expected_len)
+    _add_edge(
+        lines,
+        bus_to_coord,
+        from_healed,
+        to_healed,
+        "Distribution_Line",
+        phasing=seg.phasing,
+        processed_edges=processed_edges,
+        used_buses=used_buses,
+        display_from_bus=orig_from,
+        display_to_bus=orig_to,
+        length_meters_source=float(expected_len) if expected_len is not None else None,
+    )
 
 
 def get_network_geometry(app):
@@ -674,8 +1004,17 @@ def get_network_geometry(app):
             # 1. Distribution line segments (from_bus_id → to_bus_id)
             try:
                 from models import DistributionLineSegment
-                for seg in db.session.query(DistributionLineSegment).all():
-                    _add_edge(lines, bus_to_coord, seg.from_bus_id, seg.to_bus_id, "Distribution_Line", phasing=seg.phasing, processed_edges=processed_edges, used_buses=used_buses)
+                dist_segments = db.session.query(DistributionLineSegment).all()
+                dist_adj = _build_distribution_adjacency(dist_segments)
+                for seg in dist_segments:
+                    _append_distribution_segment_line(
+                        lines,
+                        bus_to_coord,
+                        seg,
+                        dist_adj,
+                        processed_edges,
+                        used_buses,
+                    )
             except Exception as e:
                 app.logger.warning("DistributionLineSegment in network geometry: %s", e)
 

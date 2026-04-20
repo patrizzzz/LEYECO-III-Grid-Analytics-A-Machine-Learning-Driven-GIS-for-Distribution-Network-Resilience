@@ -2176,8 +2176,47 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
           if (hintEl) { hintEl.style.display = 'none'; }
         }
-        // Chain segments into continuous paths so the network draws as connected lines, not many separate straight segments
-        var paths = chainSegmentsIntoPaths(lines);
+        // Render exact segment topology from DB/CSV so popup From/To always maps to one real row.
+        // Set to true only if you explicitly want merged visual paths.
+        var mergeNetworkSegments = false;
+        var paths = mergeNetworkSegments
+          ? chainSegmentsIntoPaths(lines)
+          : lines.map(function (line) {
+              var pathLatlngs = line.path_latlngs;
+              var points;
+              if (pathLatlngs && pathLatlngs.length >= 2) {
+                points = pathLatlngs.map(function (pt) {
+                  return [parseFloat(pt[0]), parseFloat(pt[1])];
+                });
+              } else {
+                var lat1 = parseFloat(line.lat1);
+                var lng1 = parseFloat(line.lng1);
+                var lat2 = parseFloat(line.lat2);
+                var lng2 = parseFloat(line.lng2);
+                if (Number.isNaN(lat1) || Number.isNaN(lng1) || Number.isNaN(lat2) || Number.isNaN(lng2)) return null;
+                points = [[lat1, lng1], [lat2, lng2]];
+              }
+              return {
+                points: points,
+                meta: {
+                  connection_type: line.connection_type || '',
+                  circuit: line.circuit,
+                  feeder: line.feeder,
+                  phasing: line.phasing,
+                  from_bus: line.from_bus,
+                  to_bus: line.to_bus,
+                  length_meters: line.length_meters,
+                  length_meters_source: line.length_meters_source,
+                  route_auto: line.route_auto,
+                  segments: 1,
+                  all_buses: new Set([line.from_bus, line.to_bus].filter(Boolean))
+                }
+              };
+            }).filter(Boolean);
+        // Build a searchable index of connections (from/to -> polyline)
+        window._connectionLineIndex = new Map();
+        function _indexKey(a, b) { return String(a || '').trim() + '→' + String(b || '').trim(); }
+
         paths.forEach(function (pathObj) {
           var points = pathObj.points;
           var meta = pathObj.meta;
@@ -2205,23 +2244,55 @@ document.addEventListener('DOMContentLoaded', function () {
           poly._allBuses = Array.from(meta.all_buses);
           if (meta.feeder) knownFeeders.add(meta.feeder);
 
-          var segStr = meta.segments > 1 ? ' (' + meta.segments + ' segments)' : '';
+          var isMergedPath = meta.segments > 1;
+          var segStr = isMergedPath ? ' (' + meta.segments + ' segments)' : '';
+          var fromLabel = isMergedPath ? 'Path Start:' : 'From:';
+          var toLabel = isMergedPath ? 'Path End:' : 'To:';
+          var topologyNote = isMergedPath
+            ? `<div class="popup-note">Merged path endpoints; not a single CSV row.</div>`
+            : '';
+          var routeNote = meta.route_auto
+            ? `<div class="popup-note">Line shape follows the network path; From/To are the segment record.</div>`
+            : '';
+          var lenShow = (meta.length_meters_source != null && !Number.isNaN(meta.length_meters_source))
+            ? meta.length_meters_source
+            : meta.length_meters;
+          var lenLabel = meta.route_auto && meta.length_meters_source != null ? 'Segment length (CSV):' : 'Length:';
+          var lenRow = (lenShow != null && !Number.isNaN(lenShow))
+            ? `<div class="popup-kv-label">${lenLabel}</div><div class="popup-kv-value">${Number(lenShow).toFixed(2)} m</div>`
+            : '';
+          var routeLenRow = (meta.route_auto && meta.length_meters != null && !Number.isNaN(meta.length_meters) && meta.length_meters_source != null)
+            ? `<div class="popup-kv-label">Drawn path length:</div><div class="popup-kv-value">${Number(meta.length_meters).toFixed(2)} m</div>`
+            : '';
           var popup = `<div class="popup-card">
             <div class="popup-card-header">
               <h4 class="popup-card-title">⚡ ${(connType.replace(/_/g, ' → ') || 'Network')}${segStr}</h4>
             </div>
             <div class="popup-card-body">
               <div class="popup-kv-grid">
-                <div class="popup-kv-label">From:</div><div class="popup-kv-value">${meta.from_bus || '—'}</div>
-                <div class="popup-kv-label">To:</div><div class="popup-kv-value">${meta.to_bus || '—'}</div>
+                <div class="popup-kv-label">${fromLabel}</div><div class="popup-kv-value">${meta.from_bus || '—'}</div>
+                <div class="popup-kv-label">${toLabel}</div><div class="popup-kv-value">${meta.to_bus || '—'}</div>
                 <div class="popup-kv-label">Feeder:</div><div class="popup-kv-value">${meta.feeder || '—'}</div>
                 <div class="popup-kv-label">Circuit:</div><div class="popup-kv-value">${meta.circuit || '—'}</div>
                 <div class="popup-kv-label">Phasing:</div><div class="popup-kv-value">${meta.phasing || 'N/A'}</div>
-                ${meta.length_meters != null && !Number.isNaN(meta.length_meters) ? `<div class="popup-kv-label">Length:</div><div class="popup-kv-value">${Number(meta.length_meters).toFixed(2)} m</div>` : ''}
+                ${lenRow}
+                ${routeLenRow}
               </div>
+              ${topologyNote}
+              ${routeNote}
             </div>
           </div>`;
           poly.bindPopup(popup);
+
+          // Index this segment for connection search (both directions)
+          if (meta && meta.from_bus && meta.to_bus) {
+            const k1 = _indexKey(meta.from_bus, meta.to_bus);
+            const k2 = _indexKey(meta.to_bus, meta.from_bus);
+            window._connectionLineIndex.set(k1, { key: k1, from_bus: meta.from_bus, to_bus: meta.to_bus, feeder: meta.feeder, circuit: meta.circuit, phasing: meta.phasing, poly: poly });
+            if (!window._connectionLineIndex.has(k2)) {
+              window._connectionLineIndex.set(k2, { key: k2, from_bus: meta.to_bus, to_bus: meta.from_bus, feeder: meta.feeder, circuit: meta.circuit, phasing: meta.phasing, poly: poly });
+            }
+          }
           
           // Add to master network layer
           if (typeof networkLinesLayer !== 'undefined') poly.addTo(networkLinesLayer);
@@ -3279,6 +3350,7 @@ document.addEventListener('DOMContentLoaded', function () {
             <select id="search-mode-select" style="background:transparent; border:none; font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); cursor:pointer; outline:none; padding: 4px 0;">
               <option value="customer" selected>Customer</option>
               <option value="coord">Coordinates</option>
+              <option value="connection">Connection</option>
             </select>
           </div>
           
@@ -3287,7 +3359,7 @@ document.addEventListener('DOMContentLoaded', function () {
               type="text" placeholder="Customer ID…"
               style="border:none !important; box-shadow:none !important; padding: 6px 0 !important; width: 100%;"
               autocomplete="off" spellcheck="false" />
-            <div id="customer-search-suggestions" class="customer-search-suggestions" style="top: calc(100% + 10px);"></div>
+            <div id="customer-search-suggestions" class="customer-search-suggestions" style="top: calc(100% + 10px); max-height: 320px; overflow-y: auto; overscroll-behavior: contain;"></div>
           </div>
           <button id="search-clear-btn" type="button" class="search-clear-btn" title="Clear Search" aria-label="Clear Search">&times;</button>
         </div>
@@ -3384,6 +3456,18 @@ document.addEventListener('DOMContentLoaded', function () {
     selectedCustomerData = null;
     customerSearchSuggestions.classList.remove('active');
     updateSearchClearButtonVisibility();
+
+    // Restore temporarily hidden network lines (connection isolate mode)
+    try {
+      if (window._isolatedConnection && window._isolatedConnection.hidden && window._isolatedConnection.hidden.length) {
+        if (typeof networkLinesLayer !== 'undefined' && networkLinesLayer) {
+          window._isolatedConnection.hidden.forEach(function (lyr) {
+            try { networkLinesLayer.addLayer(lyr); } catch (e) {}
+          });
+        }
+      }
+      window._isolatedConnection = null;
+    } catch (e) {}
     
     // Clear map highlights
     if (customerSearchHighlight) {
@@ -3440,7 +3524,12 @@ document.addEventListener('DOMContentLoaded', function () {
     var modeSelect = document.getElementById('search-mode-select');
     modeSelect.addEventListener('change', function() {
         var mode = modeSelect.value;
-        customerSearchInput.placeholder = mode === 'customer' ? 'Customer ID…' : 'Lat, Lng (e.g. 14.5, 120.9)';
+        customerSearchInput.placeholder =
+          mode === 'customer'
+            ? 'Customer ID…'
+            : (mode === 'coord'
+                ? 'Lat, Lng (e.g. 14.5, 120.9)'
+                : 'From or To bus (e.g. P0000000108 or 0108→0110)');
         customerSearchInput.value = '';
         customerSearchSuggestions.classList.remove('active');
         updateSearchClearButtonVisibility();
@@ -3484,6 +3573,146 @@ document.addEventListener('DOMContentLoaded', function () {
           customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-empty">Format: Lat, Lng</div>';
           customerSearchSuggestions.classList.add('active');
       }
+      return;
+    }
+
+    if (mode === 'connection') {
+      // Local search against already-loaded network geometry index
+      const idx = window._connectionLineIndex;
+      if (!idx || idx.size === 0) {
+        customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-loading">⏳ Loading network lines…</div>';
+        customerSearchSuggestions.classList.add('active');
+        return;
+      }
+
+      const q = query.toUpperCase();
+      const qDigits = String(query || '').replace(/[^\d]/g, ''); // allow "108" to match "P0000000108"
+      function busMatchScore(busStr) {
+        const b = String(busStr || '').toUpperCase();
+        if (!b) return 999;
+        if (b === q) return 0;
+        if (qDigits) {
+          // score stronger if bus ends with digits (e.g. ...0108 ends with 108)
+          const bDigits = b.replace(/[^\d]/g, '');
+          if (bDigits.endsWith(qDigits)) return 1;
+          if (bDigits.includes(qDigits)) return 3;
+        }
+        if (b.startsWith(q)) return 4;
+        if (b.includes(q)) return 6;
+        return 50;
+      }
+      const results = [];
+      idx.forEach(function (v) {
+        const from = String(v.from_bus || '').toUpperCase();
+        const to = String(v.to_bus || '').toUpperCase();
+        const key = String(v.key || '').toUpperCase();
+        if (from.includes(q) || to.includes(q) || key.includes(q)) results.push(v);
+      });
+
+      if (results.length === 0) {
+        customerSearchSuggestions.innerHTML = '<div class="customer-search-item customer-search-empty">No connections found</div>';
+        customerSearchSuggestions.classList.add('active');
+        return;
+      }
+
+      // Rank: exact/strong bus matches first, then shorter keys, then alpha.
+      results.sort(function (a, b) {
+        const aScore = Math.min(busMatchScore(a.from_bus), busMatchScore(a.to_bus));
+        const bScore = Math.min(busMatchScore(b.from_bus), busMatchScore(b.to_bus));
+        if (aScore !== bScore) return aScore - bScore;
+        const ak = String(a.key || '');
+        const bk = String(b.key || '');
+        if (ak.length !== bk.length) return ak.length - bk.length;
+        return ak.localeCompare(bk);
+      });
+      const top = results.slice(0, 40);
+      customerSearchSuggestions.innerHTML = top.map(function (r, i) {
+        const label = (r.from_bus || '') + ' → ' + (r.to_bus || '');
+        const meta = [r.feeder ? ('Feeder ' + r.feeder) : null, r.phasing ? ('Phase ' + r.phasing) : null].filter(Boolean).join(' • ');
+        return (
+          '<div class="customer-search-item" data-conn-key="' + r.key.replace(/"/g, '&quot;') + '" tabindex="' + i + '">' +
+            '<div class="customer-search-item-id">🔗 ' + label + '</div>' +
+            '<div class="customer-search-item-name">' + (meta || 'Connection') + '</div>' +
+          '</div>'
+        );
+      }).join('');
+      customerSearchSuggestions.classList.add('active');
+
+      // Attach click/enter handlers
+      var items = customerSearchSuggestions.querySelectorAll('.customer-search-item');
+      items.forEach(function (item) {
+        item.addEventListener('click', function (e) {
+          e.stopPropagation();
+          const key = item.getAttribute('data-conn-key');
+          const rec = idx.get(key);
+          if (!rec || !rec.poly) return;
+          customerSearchSuggestions.classList.remove('active');
+          customerSearchInput.value = rec.from_bus + ' → ' + rec.to_bus;
+          updateSearchClearButtonVisibility();
+
+          // Zoom and open popup
+          try {
+            // Ensure network layers are visible (filters/layer toggles can hide polylines)
+            try {
+              if (typeof networkLinesLayer !== 'undefined' && networkLinesLayer && !map.hasLayer(networkLinesLayer)) {
+                map.addLayer(networkLinesLayer);
+              }
+            } catch (e0) {}
+
+            // Ensure the polyline is on-map so bounds/zoom feel consistent
+            try {
+              if (!map.hasLayer(rec.poly)) {
+                if (typeof networkLinesLayer !== 'undefined' && networkLinesLayer) {
+                  rec.poly.addTo(networkLinesLayer);
+                } else {
+                  rec.poly.addTo(map);
+                }
+              }
+            } catch (e1) {}
+
+            // Isolate this searched connection: temporarily hide all other network lines until user clears search (X)
+            try {
+              if (typeof networkLinesLayer !== 'undefined' && networkLinesLayer) {
+                // Restore any previous isolate first
+                if (window._isolatedConnection && window._isolatedConnection.hidden && window._isolatedConnection.hidden.length) {
+                  window._isolatedConnection.hidden.forEach(function (lyr) {
+                    try { networkLinesLayer.addLayer(lyr); } catch (e) {}
+                  });
+                }
+                var hidden = [];
+                networkLinesLayer.eachLayer(function (lyr) {
+                  if (lyr === rec.poly) return;
+                  try {
+                    networkLinesLayer.removeLayer(lyr);
+                    hidden.push(lyr);
+                  } catch (e) {}
+                });
+                window._isolatedConnection = { poly: rec.poly, hidden: hidden };
+              }
+            } catch (eIso) {}
+
+            const b = rec.poly.getBounds();
+            // Prefer animated fly, fall back to fitBounds
+            if (typeof map.flyToBounds === 'function') {
+              map.flyToBounds(b.pad(0.25), { maxZoom: 19, padding: [60, 60] });
+            } else {
+              map.fitBounds(b.pad(0.25), { maxZoom: 19, padding: [60, 60] });
+            }
+            rec.poly.openPopup();
+          } catch (err) {
+            // Fallback: just open popup
+            try {
+              // Last-resort: center on line and open popup
+              const c = rec.poly.getBounds().getCenter();
+              try { map.setView([c.lat, c.lng], Math.max(map.getZoom() || 16, 16)); } catch (e3) {}
+              rec.poly.openPopup();
+            } catch (e2) {}
+          }
+        });
+        item.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') item.click();
+        });
+      });
       return;
     }
 

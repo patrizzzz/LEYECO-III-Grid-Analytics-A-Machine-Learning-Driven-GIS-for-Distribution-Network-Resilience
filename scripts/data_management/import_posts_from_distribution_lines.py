@@ -8,8 +8,8 @@ import sys
 import pandas as pd
 from pathlib import Path
 from app import app, db
-from utils.network_utils import infer_connections_from_posts
-from models import Post
+from utils.network_utils import infer_connections_from_posts, normalize_bus_id
+from models import Post, LineConnection
 
 
 def normalize_column_name(name):
@@ -66,8 +66,9 @@ def import_buses(csv_file):
                     if col.startswith(base): return r[col]
                 return None
 
-            stats = {'created': 0, 'updated': 0, 'skipped': 0, 'errors': 0}
+            stats = {'created': 0, 'updated': 0, 'skipped': 0, 'errors': 0, 'connections_created': 0}
             seen_buses = set()
+            seen_connections = set()
 
             for idx, row in df.iterrows():
                 from_bus = str(get_val(row, 'from_bus') or '').strip()
@@ -99,7 +100,10 @@ def import_buses(csv_file):
                     'earth_resistivity': sanitize_float(get_val(row, 'earth_resistivity')),
                 }
 
-                for bus in (from_bus, to_bus):
+                from_bus_norm = normalize_bus_id(from_bus)
+                to_bus_norm = normalize_bus_id(to_bus)
+
+                for bus in (from_bus_norm, to_bus_norm):
                     if not bus or bus == 'nan' or bus in seen_buses:
                         continue
                     
@@ -111,31 +115,60 @@ def import_buses(csv_file):
                         'primary_bus_id': bus,
                         'status': 'active'
                     }
-                    if lat is not None and lng is not None:
+                    post_data = {
+                        'pole_number': bus,
+                        'name': f'Post {bus}',
+                        'primary_bus_id': bus,
+                        'status': 'active'
+                    }
+                    if lat is not None and lng is not None and lat != 0.0 and lng != 0.0:
                         post_data['lat'] = lat
                         post_data['lng'] = lng
-                    else:
-                        post_data['lat'] = 0.0
-                        post_data['lng'] = 0.0
 
                     # Only from_bus gets the technical data from this row
-                    if bus == from_bus:
+                    if bus == from_bus_norm:
                         post_data.update(tech_data)
 
                     existing = Post.query.filter_by(pole_number=bus).first()
                     if existing:
                         for k, v in post_data.items():
-                            setattr(existing, k, v)
+                            if v is not None:
+                                setattr(existing, k, v)
                         stats['updated'] += 1
                     else:
+                        # For new posts, if coords are missing, default to 0.0 but don't overwrite if existing
+                        if 'lat' not in post_data: post_data['lat'] = 0.0
+                        if 'lng' not in post_data: post_data['lng'] = 0.0
                         db.session.add(Post(**post_data))
                         stats['created'] += 1
+
+                # Build explicit topology from CSV rows (From Bus ID -> To Bus ID)
+                if from_bus_norm and to_bus_norm:
+                    key = (from_bus_norm, to_bus_norm, 'Primary_to_Primary')
+                    if key not in seen_connections:
+                        seen_connections.add(key)
+                        existing_conn = LineConnection.query.filter_by(
+                            from_bus=from_bus_norm,
+                            to_bus=to_bus_norm,
+                            connection_type='Primary_to_Primary'
+                        ).first()
+                        if not existing_conn:
+                            db.session.add(LineConnection(
+                                from_bus=from_bus_norm,
+                                to_bus=to_bus_norm,
+                                connection_type='Primary_to_Primary',
+                                phasing=str(get_val(row, 'phasing') or '').strip() or None
+                            ))
+                            stats['connections_created'] += 1
 
                 if (stats['created'] + stats['updated']) % 100 == 0:
                     db.session.flush()
 
             db.session.commit()
-            print(f"Post import complete. Created: {stats['created']}, Updated: {stats['updated']}")
+            print(
+                f"Post import complete. Created: {stats['created']}, "
+                f"Updated: {stats['updated']}, Connections: {stats['connections_created']}"
+            )
 
             # Try to infer connections after import
             try:
