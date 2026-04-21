@@ -448,7 +448,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   var map;
   try {
-    map = L.map(mapEl).setView([12.8797, 121.7740], 6);
+    map = L.map(mapEl).setView([11.255, 124.745], 11);
     window._mapInstance = map;
 
     // If a specific post location was passed via URL params, remember it
@@ -823,6 +823,101 @@ document.addEventListener('DOMContentLoaded', function () {
     L.DomEvent.disableClickPropagation(container);
     L.DomEvent.disableScrollPropagation(container);
 
+    // --- Helper: Create Section ---
+    function createSection(title, iconSvg) {
+      const section = document.createElement('div');
+      section.className = 'msp-section';
+      section.innerHTML = `
+        <div class="msp-section-title">
+          ${iconSvg || ''}
+          <span>${title}</span>
+        </div>
+      `;
+      const list = document.createElement('div');
+      list.className = 'msp-option-list';
+      section.appendChild(list);
+      return { section, list };
+    }
+
+    // --- Helper: Create Toggle Row ---
+    function createToggleRow(label, isOn, onChange) {
+      const row = document.createElement('label');
+      row.className = 'msp-option';
+      
+      const text = document.createElement('span');
+      text.textContent = label;
+      
+      const switchParent = document.createElement('div');
+      switchParent.className = 'msp-switch';
+      
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = isOn;
+      input.addEventListener('change', (e) => onChange(e.target.checked));
+      
+      const slider = document.createElement('span');
+      slider.className = 'msp-slider-round';
+      
+      switchParent.appendChild(input);
+      switchParent.appendChild(slider);
+      
+      row.appendChild(text);
+      row.appendChild(switchParent);
+      return { row, input };
+    }
+
+    // --- Helper: Create Radio Row ---
+    function createRadioRow(label, groupName, isChecked, onChange) {
+      const row = document.createElement('label');
+      row.className = 'msp-option';
+      
+      const text = document.createElement('span');
+      text.textContent = label;
+      
+      const radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = groupName;
+      radio.checked = isChecked;
+      radio.style.cursor = 'pointer';
+      radio.addEventListener('change', (e) => { if(e.target.checked) onChange(); });
+      
+      row.appendChild(text);
+      row.appendChild(radio);
+      return row;
+    }
+
+    // --- Helper: Create Slider Row ---
+    function createSliderRow(label, value, min, max, onChange) {
+      const containerValue = document.createElement('div');
+      containerValue.className = 'msp-range-container';
+      
+      const headerValue = document.createElement('div');
+      headerValue.className = 'msp-range-header';
+      headerValue.innerHTML = `
+        <span class="msp-range-label">${label}</span>
+        <span class="msp-range-value">${value}</span>
+      `;
+      
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.className = 'msp-range';
+      input.style.appearance = 'none';
+      input.min = min;
+      input.max = max;
+      input.value = value;
+      
+      const valueSpan = headerValue.querySelector('.msp-range-value');
+      input.addEventListener('input', (e) => {
+        const val = e.target.value;
+        valueSpan.textContent = val;
+        onChange(parseInt(val));
+      });
+      
+      containerValue.appendChild(headerValue);
+      containerValue.appendChild(input);
+      return containerValue;
+    }
+
     // State for collapse
     let collapsed = false;
 
@@ -830,17 +925,17 @@ document.addEventListener('DOMContentLoaded', function () {
     const header = document.createElement('div');
     header.className = 'msp-header';
     header.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
         <circle cx="12" cy="12" r="3"/>
       </svg>
-      <span style="font-size: 1.05rem;">Map Settings</span>
+      <span>Map Settings</span>
       <button class="msp-toggle" title="Collapse">▾</button>
     `;
 
     const body = document.createElement('div');
     body.className = 'msp-body';
-    body.style.maxHeight = '400px';
+    body.style.maxHeight = '480px';
     body.style.overflowY = 'auto';
 
     header.querySelector('.msp-toggle').addEventListener('click', function () {
@@ -851,42 +946,21 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // === Section 1: Base Map ===
-    const baseSection = document.createElement('div');
-    baseSection.className = 'msp-section';
-    baseSection.innerHTML = '<div class="msp-section-title">Base Map</div>';
-    const baseList = document.createElement('div');
-    baseList.className = 'msp-option-list';
-
-    let currentBase = 'Standard';
-    Object.keys(baseLayers).forEach(function (name) {
-      const row = document.createElement('label');
-      row.className = 'msp-option';
-      const radio = document.createElement('input');
-      radio.type = 'radio';
-      radio.name = 'base-map';
-      radio.checked = name === 'Standard';
-      radio.addEventListener('change', function () {
-        if (this.checked) {
-          if (currentBase && baseLayers[currentBase]) map.removeLayer(baseLayers[currentBase]);
-          baseLayers[name].addTo(map);
-          currentBase = name;
-        }
-      });
-      const span = document.createElement('span');
-      span.textContent = name;
-      row.appendChild(radio);
-      row.appendChild(span);
-      baseList.appendChild(row);
+    const mapIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"></polygon><line x1="8" y1="2" x2="8" y2="18"></line><line x1="16" y1="6" x2="16" y2="22"></line></svg>`;
+    const { section: s1, list: l1 } = createSection('Base Map', mapIcon);
+    let currentBaseName = 'Standard';
+    Object.keys(baseLayers).forEach(name => {
+      l1.appendChild(createRadioRow(name, 'base-map', name === 'Standard', () => {
+        if (currentBaseName && baseLayers[currentBaseName]) map.removeLayer(baseLayers[currentBaseName]);
+        baseLayers[name].addTo(map);
+        currentBaseName = name;
+      }));
     });
-    baseSection.appendChild(baseList);
+    body.appendChild(s1);
 
     // === Section 2: Layers ===
-    const layerSection = document.createElement('div');
-    layerSection.className = 'msp-section';
-    layerSection.innerHTML = '<div class="msp-section-title">Layers</div>';
-    const layerList = document.createElement('div');
-    layerList.className = 'msp-option-list';
-
+    const layerIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>`;
+    const { section: s2, list: l2 } = createSection('Layers', layerIcon);
     const layerDefaults = {
       'Posts (canonical)': true,
       'LatLongData (raw)': false,
@@ -895,16 +969,11 @@ document.addEventListener('DOMContentLoaded', function () {
       'Network Lines (DB)': true
     };
 
-    Object.keys(overlays).forEach(function (name) {
-      const row = document.createElement('label');
-      row.className = 'msp-option';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
+    Object.keys(overlays).forEach(name => {
       const isOn = layerDefaults[name] !== false;
-      cb.checked = isOn;
       if (isOn) overlays[name].addTo(map);
-      cb.addEventListener('change', function () {
-        if (this.checked) {
+      const { row } = createToggleRow(name, isOn, (checked) => {
+        if (checked) {
           overlays[name].addTo(map);
           if (name === 'Primary Lines') primaryLayerOverlayOn = true;
           if (name === 'Secondary Lines') secondaryLayerOverlayOn = true;
@@ -914,379 +983,140 @@ document.addEventListener('DOMContentLoaded', function () {
           if (name === 'Secondary Lines') secondaryLayerOverlayOn = false;
         }
       });
-      const span = document.createElement('span');
-      span.textContent = name;
-      row.appendChild(cb);
-      row.appendChild(span);
-      layerList.appendChild(row);
+      l2.appendChild(row);
     });
 
-    // window._applyPoleTransformerFilter = applyMapFilters;
+    const sep = document.createElement('div');
+    sep.style.borderTop = '1px solid var(--border)';
+    sep.style.margin = '4px 0';
+    l2.appendChild(sep);
 
-    const separatorDiv = document.createElement('div');
-    separatorDiv.style.borderTop = '1px solid rgba(0,0,0,0.08)';
-    separatorDiv.style.margin = '6px 0 4px';
-    separatorDiv.style.paddingTop = '4px';
-    layerList.appendChild(separatorDiv);
-
-    // Show Poles toggle
-    const poleRow = document.createElement('label');
-    poleRow.className = 'msp-option';
-    const poleCb = document.createElement('input');
-    poleCb.type = 'checkbox';
-    poleCb.checked = true;
-    poleCb.addEventListener('change', function () {
-      showPoles = this.checked;
-      applyMapFilters();
-    });
-    const poleSpan = document.createElement('span');
-    poleSpan.textContent = 'Show Poles';
-    poleRow.appendChild(poleCb);
-    poleRow.appendChild(poleSpan);
-    layerList.appendChild(poleRow);
-
-    // Show Transformers toggle
-    const transRow = document.createElement('label');
-    transRow.className = 'msp-option';
-    const transCb = document.createElement('input');
-    transCb.type = 'checkbox';
-    transCb.checked = true;
-    transCb.addEventListener('change', function () {
-      showTransformers = this.checked;
-      applyMapFilters();
-    });
-    const transSpan = document.createElement('span');
-    transSpan.textContent = 'Show Transformers';
-    transRow.appendChild(transCb);
-    transRow.appendChild(transSpan);
-    layerList.appendChild(transRow);
-
-    // Show Primary Lines toggle
-    const priLineRow = document.createElement('label');
-    priLineRow.className = 'msp-option';
-    const priLineCb = document.createElement('input');
-    priLineCb.type = 'checkbox';
-    priLineCb.checked = true;
-    priLineCb.addEventListener('change', function () {
-      showPrimaryLines = this.checked;
-      applyMapFilters();
-    });
-    const priLineSpan = document.createElement('span');
-    priLineSpan.textContent = 'Show Primary Lines';
-    priLineRow.appendChild(priLineCb);
-    priLineRow.appendChild(priLineSpan);
-    layerList.appendChild(priLineRow);
-
-    // Show Secondary Lines toggle
-    const secLineRow = document.createElement('label');
-    secLineRow.className = 'msp-option';
-    const secLineCb = document.createElement('input');
-    secLineCb.type = 'checkbox';
-    secLineCb.checked = true;
-    secLineCb.addEventListener('change', function () {
-      showSecondaryLines = this.checked;
-      applyMapFilters();
-    });
-    const secLineSpan = document.createElement('span');
-    secLineSpan.textContent = 'Show Secondary Lines';
-    secLineRow.appendChild(secLineCb);
-    secLineRow.appendChild(secLineSpan);
-    layerList.appendChild(secLineRow);
-
-    layerSection.appendChild(layerList);
+    l2.appendChild(createToggleRow('Show Poles', true, (chk) => { showPoles = chk; applyMapFilters(); }).row);
+    l2.appendChild(createToggleRow('Show Transformers', true, (chk) => { showTransformers = chk; applyMapFilters(); }).row);
+    l2.appendChild(createToggleRow('Show Primary Lines', true, (chk) => { showPrimaryLines = chk; applyMapFilters(); }).row);
+    l2.appendChild(createToggleRow('Show Secondary Lines', true, (chk) => { showSecondaryLines = chk; applyMapFilters(); }).row);
+    body.appendChild(s2);
 
     // === Section 3: Feeder Filter ===
-    const feederSection = document.createElement('div');
-    feederSection.className = 'msp-section';
-    feederSection.innerHTML = '<div class="msp-section-title">Feeder Filter</div>';
-    const feederList = document.createElement('div');
-    feederList.className = 'msp-option-list msp-feeder-list';
-    feederList.innerHTML = '<span class="msp-hint">Loading feeders…</span>';
-    feederSection.appendChild(feederList);
+    const feederIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>`;
+    const { section: s3, list: l3 } = createSection('Feeder Filter', feederIcon);
+    l3.classList.add('msp-feeder-list');
+    l3.innerHTML = '<span class="msp-hint">Loading feeders…</span>';
+    body.appendChild(s3);
 
-    // Refresh feeder list after post data is loaded
     window._refreshFeederList = function () {
-      feederList.innerHTML = '<span class="msp-hint">Loading feeders…</span>';
+      l3.innerHTML = '';
+      if (!applyMapFiltersDebounced) applyMapFiltersDebounced = debounce(applyMapFilters, 120);
+      if (knownFeeders.size === 0) { l3.innerHTML = '<span class="msp-hint">No feeders found</span>'; return; }
 
-      // Build debounced filter on first use
-      if (!applyMapFiltersDebounced) {
-        applyMapFiltersDebounced = debounce(applyMapFilters, 120);
-      }
-
-      if (knownFeeders.size === 0) {
-        feederList.innerHTML = '<span class="msp-hint">No feeders found</span>';
-        return;
-      }
-
-      // If no saved state, ensure all currently known feeders are active
       const savedFeedersRaw = localStorage.getItem('mapActiveFeeders');
-      if (!savedFeedersRaw) {
-        knownFeeders.forEach(f => activeFeeders.add(f));
-      }
+      if (!savedFeedersRaw) knownFeeders.forEach(f => activeFeeders.add(f));
 
-      feederList.innerHTML = '';
-      // "Show All" option
-      const allRow = document.createElement('label');
-      allRow.className = 'msp-option msp-feeder-all';
-      const allCb = document.createElement('input');
-      allCb.type = 'checkbox';
-      // "Show All" is checked only if every feeder is active
-      allCb.checked = activeFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
-      const allSpan = document.createElement('span');
-      allSpan.textContent = 'Show All';
-      allSpan.style.fontWeight = '600';
-      allRow.appendChild(allCb);
-      allRow.appendChild(allSpan);
-      feederList.appendChild(allRow);
-
-      const feederCbs = [];
-      const sortedFeeders = Array.from(knownFeeders).sort();
-      sortedFeeders.forEach(function (fname) {
-        const hasSaved = savedFeedersRaw !== null;
-        const row = document.createElement('label');
-        row.className = 'msp-option';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        const shouldBeChecked = !hasSaved || activeFeeders.has(fname);
-        cb.checked = shouldBeChecked;
-        cb.dataset.feeder = fname;
-        cb.addEventListener('change', function () {
-          if (this.checked) { activeFeeders.add(fname); }
-          else { activeFeeders.delete(fname); }
-          // Sync "Show All"
-          allCb.checked = activeFeeders.size === knownFeeders.size;
-          if (applyMapFiltersDebounced) applyMapFiltersDebounced();
-          else applyMapFilters();
-        });
-        const span = document.createElement('span');
-        span.textContent = fname;
-        row.appendChild(cb);
-        row.appendChild(span);
-        feederList.appendChild(row);
-        feederCbs.push(cb);
-      });
-
-      allCb.addEventListener('change', function () {
-        feederCbs.forEach(function (cb) {
-          cb.checked = allCb.checked;
-          if (allCb.checked) { activeFeeders.add(cb.dataset.feeder); }
-          else { activeFeeders.delete(cb.dataset.feeder); }
+      // Show All
+      const isAllActive = activeFeeders.size === 0 || activeFeeders.size === knownFeeders.size;
+      const { row: allRow, input: allCb } = createToggleRow('Show All', isAllActive, (checked) => {
+        feederCheckboxes.forEach(cb => {
+          cb.checked = checked;
+          if (checked) activeFeeders.add(cb.dataset.feeder);
+          else activeFeeders.delete(cb.dataset.feeder);
         });
         if (applyMapFiltersDebounced) applyMapFiltersDebounced();
-        else applyMapFilters();
+      });
+      allRow.style.background = 'rgba(59, 130, 246, 0.08)';
+      allRow.style.marginBottom = '4px';
+      l3.appendChild(allRow);
+
+      const feederCheckboxes = [];
+      Array.from(knownFeeders).sort().forEach(fname => {
+        const shouldChecked = !savedFeedersRaw || activeFeeders.has(fname);
+        const { row, input } = createToggleRow(fname, shouldChecked, (checked) => {
+          if (checked) activeFeeders.add(fname);
+          else activeFeeders.delete(fname);
+          allCb.checked = activeFeeders.size === knownFeeders.size;
+          if (applyMapFiltersDebounced) applyMapFiltersDebounced();
+        });
+        input.dataset.feeder = fname;
+        l3.appendChild(row);
+        feederCheckboxes.push(input);
       });
     };
 
     // === Section 3.5: Phase Filter ===
-    const phaseSection = document.createElement('div');
-    phaseSection.className = 'msp-section';
-    phaseSection.innerHTML = '<div class="msp-section-title">Phase Filter</div>';
-    const phaseList = document.createElement('div');
-    phaseList.className = 'msp-option-list';
-
-    const phases = [
+    const phaseIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`;
+    const { section: s4, list: l4 } = createSection('Phase Filter', phaseIcon);
+    [
       { id: '1', label: 'Single Phase' },
       { id: '2', label: 'Double Phase' },
       { id: '3', label: 'Three Phase' }
-    ];
-
-    phases.forEach(function (p) {
-      const row = document.createElement('label');
-      row.className = 'msp-option';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.checked = activePhaseCategories.has(p.id);
-      cb.addEventListener('change', function () {
-        if (this.checked) activePhaseCategories.add(p.id);
+    ].forEach(p => {
+      l4.appendChild(createToggleRow(p.label, activePhaseCategories.has(p.id), (chk) => {
+        if (chk) activePhaseCategories.add(p.id);
         else activePhaseCategories.delete(p.id);
-        try {
-          localStorage.setItem('mapActivePhases', JSON.stringify(Array.from(activePhaseCategories)));
-        } catch (e) { /* ignore */ }
+        localStorage.setItem('mapActivePhases', JSON.stringify(Array.from(activePhaseCategories)));
         if (applyMapFiltersDebounced) applyMapFiltersDebounced();
-        else applyMapFilters(); // Re-run filter logic
-      });
-      const span = document.createElement('span');
-      span.textContent = p.label;
-      row.appendChild(cb);
-      row.appendChild(span);
-      phaseList.appendChild(row);
+      }).row);
     });
-    phaseSection.appendChild(phaseList);
+    body.appendChild(s4);
 
     // === Section 4: Visualization ===
-    const vizSection = document.createElement('div');
-    vizSection.className = 'msp-section';
-    vizSection.innerHTML = '<div class="msp-section-title">Visualization</div>';
-
-    // Global color picker row
+    const vizIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4"></circle><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"></line><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"></line><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"></line><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"></line></svg>`;
+    const { section: s5, list: l5 } = createSection('Visualization', vizIcon);
+    
+    // Color Picker
     const colorRow = document.createElement('div');
     colorRow.className = 'msp-color-row';
-
-    const colorLabel = document.createElement('span');
-    colorLabel.textContent = 'Line Color';
-    colorLabel.className = 'msp-color-label';
-
-    const colorInput = document.createElement('input');
-    colorInput.type = 'color';
-    colorInput.className = 'msp-color-input';
-    colorInput.value = globalLineColor || '#000000';
-
-    const resetBtn = document.createElement('button');
-    resetBtn.className = 'msp-reset-btn';
-    resetBtn.textContent = '✕';
-    resetBtn.title = 'Reset to default';
-    resetBtn.style.display = globalLineColor ? '' : 'none';
-
-    colorRow.appendChild(colorLabel);
-    colorRow.appendChild(colorInput);
-    colorRow.appendChild(resetBtn);
-
-    // Stroke weight slider — Primary Lines
-    const priWeightRow = document.createElement('div');
-    priWeightRow.className = 'msp-color-row';
-    priWeightRow.style.marginTop = '8px';
-
-    const priWeightLabel = document.createElement('span');
-    priWeightLabel.textContent = 'Primary Thickness';
-    priWeightLabel.className = 'msp-color-label';
-
-    const priWeightContainer = document.createElement('div');
-    priWeightContainer.style.display = 'flex';
-    priWeightContainer.style.alignItems = 'center';
-    priWeightContainer.style.flex = '1';
-    priWeightContainer.style.gap = '8px';
-
-    const priWeightInput = document.createElement('input');
-    priWeightInput.type = 'range';
-    priWeightInput.min = '1';
-    priWeightInput.max = '10';
-    priWeightInput.step = '1';
-    priWeightInput.value = primaryLineWeight;
-    priWeightInput.style.flex = '1';
-    priWeightInput.style.cursor = 'pointer';
-
-    const priWeightDisplay = document.createElement('span');
-    priWeightDisplay.textContent = primaryLineWeight;
-    priWeightDisplay.style.minWidth = '20px';
-    priWeightDisplay.style.textAlign = 'right';
-    priWeightDisplay.style.fontSize = '12px';
-    priWeightDisplay.style.fontWeight = '500';
-
-    priWeightContainer.appendChild(priWeightInput);
-    priWeightContainer.appendChild(priWeightDisplay);
-    priWeightRow.appendChild(priWeightLabel);
-    priWeightRow.appendChild(priWeightContainer);
-
-    // Stroke weight slider — Secondary Lines
-    const secWeightRow = document.createElement('div');
-    secWeightRow.className = 'msp-color-row';
-    secWeightRow.style.marginTop = '6px';
-
-    const secWeightLabel = document.createElement('span');
-    secWeightLabel.textContent = 'Secondary Thickness';
-    secWeightLabel.className = 'msp-color-label';
-
-    const secWeightContainer = document.createElement('div');
-    secWeightContainer.style.display = 'flex';
-    secWeightContainer.style.alignItems = 'center';
-    secWeightContainer.style.flex = '1';
-    secWeightContainer.style.gap = '8px';
-
-    const secWeightInput = document.createElement('input');
-    secWeightInput.type = 'range';
-    secWeightInput.min = '1';
-    secWeightInput.max = '10';
-    secWeightInput.step = '1';
-    secWeightInput.value = secondaryLineWeight;
-    secWeightInput.style.flex = '1';
-    secWeightInput.style.cursor = 'pointer';
-
-    const secWeightDisplay = document.createElement('span');
-    secWeightDisplay.textContent = secondaryLineWeight;
-    secWeightDisplay.style.minWidth = '20px';
-    secWeightDisplay.style.textAlign = 'right';
-    secWeightDisplay.style.fontSize = '12px';
-    secWeightDisplay.style.fontWeight = '500';
-
-    secWeightContainer.appendChild(secWeightInput);
-    secWeightContainer.appendChild(secWeightDisplay);
-    secWeightRow.appendChild(secWeightLabel);
-    secWeightRow.appendChild(secWeightContainer);
-
-    // Phasing toggle row
-    const phasingRow = document.createElement('label');
-    phasingRow.className = 'msp-option';
-    phasingRow.style.marginTop = '8px';
-
-    const phasingCb = document.createElement('input');
-    phasingCb.type = 'checkbox';
-    phasingCb.id = 'phasing-color-toggle';
-    phasingCb.checked = usePhasingColor;
-
-    const phasingSpan = document.createElement('span');
-    phasingSpan.textContent = 'Color by Phasing';
-    phasingSpan.style.flex = '1';
-
-    const helpIcon = document.createElement('span');
-    helpIcon.className = 'msp-help-icon';
-    helpIcon.textContent = '?';
-    helpIcon.title = 'Color lines by electrical phase:\nPhase A = Brown\nPhase B = Black\nPhase C = Gray\nMulti-phase = Purple';
-
-    phasingRow.appendChild(phasingCb);
-    phasingRow.appendChild(phasingSpan);
-    phasingRow.appendChild(helpIcon);
-
-    vizSection.appendChild(colorRow);
-    vizSection.appendChild(priWeightRow);
-    vizSection.appendChild(secWeightRow);
-    vizSection.appendChild(phasingRow);
-
-    // Event handlers for visualization controls
-    colorInput.addEventListener('input', function (e) {
+    colorRow.innerHTML = `
+      <span class="msp-range-label">Line Color</span>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <input type="color" class="msp-color-input" value="${globalLineColor || '#3b82f6'}">
+        <button class="msp-reset-btn" title="Reset" style="${globalLineColor ? '' : 'none'}">✕</button>
+      </div>
+    `;
+    const cInp = colorRow.querySelector('.msp-color-input');
+    const rBtn = colorRow.querySelector('.msp-reset-btn');
+    cInp.addEventListener('input', (e) => {
       globalLineColor = e.target.value;
       localStorage.setItem('globalLineColor', globalLineColor);
-      resetBtn.style.display = '';
+      rBtn.style.display = '';
       updateNetworkLineColors();
     });
-
-    resetBtn.addEventListener('click', function (e) {
-      e.preventDefault();
+    rBtn.addEventListener('click', () => {
       globalLineColor = null;
       localStorage.removeItem('globalLineColor');
-      colorInput.value = '#000000';
-      resetBtn.style.display = 'none';
+      cInp.value = '#3b82f6';
+      rBtn.style.display = 'none';
       updateNetworkLineColors();
     });
+    l5.appendChild(colorRow);
 
-    priWeightInput.addEventListener('input', function (e) {
-      primaryLineWeight = parseInt(e.target.value);
-      priWeightDisplay.textContent = primaryLineWeight;
-      localStorage.setItem('primaryLineWeight', primaryLineWeight);
+    // Thickness Sliders
+    l5.appendChild(createSliderRow('Primary Weight', primaryLineWeight, 1, 10, (val) => {
+      primaryLineWeight = val;
+      localStorage.setItem('primaryLineWeight', val);
       updateNetworkLineWeights();
-    });
-
-    secWeightInput.addEventListener('input', function (e) {
-      secondaryLineWeight = parseInt(e.target.value);
-      secWeightDisplay.textContent = secondaryLineWeight;
-      localStorage.setItem('secondaryLineWeight', secondaryLineWeight);
+    }));
+    l5.appendChild(createSliderRow('Secondary Weight', secondaryLineWeight, 1, 10, (val) => {
+      secondaryLineWeight = val;
+      localStorage.setItem('secondaryLineWeight', val);
       updateNetworkLineWeights();
-    });
+    }));
 
-    phasingCb.addEventListener('change', function () {
-      usePhasingColor = this.checked;
-      localStorage.setItem('usePhasingColor', usePhasingColor);
+    // Phasing Toggle
+    const { row: phaseRow } = createToggleRow('Color by Phasing', usePhasingColor, (chk) => {
+      usePhasingColor = chk;
+      localStorage.setItem('usePhasingColor', chk);
       updateNetworkLineColors();
     });
+    const help = document.createElement('span');
+    help.className = 'msp-help-icon';
+    help.textContent = '?';
+    help.title = 'Color lines by phase:\nA=Brown, B=Black, C=Gray, Multi=Purple';
+    phaseRow.appendChild(help);
+    l5.appendChild(phaseRow);
+    body.appendChild(s5);
 
-    // Assemble
-    body.appendChild(baseSection);
-    body.appendChild(layerSection);
-    body.appendChild(feederSection);
-    body.appendChild(phaseSection);
-    body.appendChild(vizSection);
     container.appendChild(header);
     container.appendChild(body);
-
     return container;
   };
 
@@ -1295,11 +1125,9 @@ document.addEventListener('DOMContentLoaded', function () {
     // Manually trigger onAdd to generate the settings UI
     const controlUI = mapSettingsControl.onAdd(map);
     // Ensure it's NOT added to the map's control layer
-    // And append the body to our sidebar container
     const body = controlUI.querySelector('.msp-body');
     if (body) {
-      body.style.display = 'block';
-      body.style.maxHeight = 'none'; // Let sidebar handle scroll
+      body.classList.add('msp-sidebar-enhanced');
       sidebarContainer.appendChild(body);
     }
   }
