@@ -9,11 +9,12 @@ class PostImporter(BaseImporter):
     model_class = Post
     header_mappings = {
         'pole_number': ['Post ID', 'post_id', 'Pole ID', 'pole_id', 'pole_number', 'Pole Number', 'post_id', 'Post ID'],
+        'pole_num': ['pole_num', 'Pole Num', 'POLE_NUM', 'sequence_number'],
         'name': ['name', 'Name', 'Post Name'],
         'feeder': ['feeder', 'Feeder'],
         'phasing': ['phasing', 'Phasing'],
-        'lat': ['latitude', 'Latitude', 'lat'],
-        'lng': ['longitude', 'Longitude', 'lon', 'long'],
+        'lat': ['latitude', 'Latitude', 'lat', 'Lat', 'latitue'],
+        'lng': ['longitude', 'Longitude', 'lon', 'long', 'Long', 'longitute', 'longtitude', 'longtiude'],
         
         # Primary Line Technical Fields
         'configuration': ['Configuration', 'config'],
@@ -90,6 +91,12 @@ class PostImporter(BaseImporter):
                 
                 post.pri_conductor_size = self.get_val(row, 'pri_conductor_size')
                 
+                # Set pole_num for sequential sequence logic
+                p_num_val = self.get_val(row, 'pole_num')
+                if p_num_val is not None:
+                    try: post.pole_num = int(float(str(p_num_val).strip()))
+                    except: pass
+
                 for f in [
                     'length_meters', 'spacing_d12', 'spacing_d23', 'spacing_d13', 'spacing_d1n',
                     'spacing_d2n', 'spacing_d3n', 'spacing_dc1_c2', 'height_h1', 'height_h2',

@@ -1,5 +1,8 @@
+import os
+import csv
+import re
 from services.importers.base_importer import BaseImporter, sanitize_float
-from models import DistributionLineSegment, SecondaryLineSegment, SecondaryServiceDrop, LineConnection, BusNode
+from models import Post, DistributionLineSegment, SecondaryLineSegment, SecondaryServiceDrop, LineConnection, BusNode
 from extensions import db
 
 class PrimaryLineImporter(BaseImporter):
@@ -33,33 +36,111 @@ class PrimaryLineImporter(BaseImporter):
         'height_h3': ['Height H3 (meters)', 'Height H3   (meters)'],
         'height_hn': ['Height Hn (meters)', 'Height Hn   (meters)'],
         'earth_resistivity': ['Earth Resistivity (Ohm-meter)', 'earth_resistivity'],
-        'latitude': ['latitude', 'Lat', 'lat'],
-        'longitude': ['longitude', 'Long', 'lon', 'lng'],
+        'latitude': ['latitude', 'Lat', 'lat', 'latitue', 'Latitude'],
+        'longitude': ['longitude', 'Long', 'lon', 'lng', 'longitute', 'longtitude', 'longtiude', 'Longitude'],
         'feeder': ['Feeder', 'feeder']
     }
     
     
+    def _normalize_bus_id(self, bus_id):
+        """Strip redundant leading zeros from IDs (e.g., P00000001 -> P1, P1-007 -> P1-7)"""
+        if not bus_id: return ""
+        # Handle lateral segments
+        parts = str(bus_id).strip().upper().split('-')
+        norm_parts = []
+        for part in parts:
+            if part.startswith('P'):
+                # Strip P, then strip leading zeros, then put P back
+                core = part[1:].lstrip('0')
+                if not core: core = '0' # Handle P000
+                norm_parts.append(f"P{core}")
+            else:
+                core = part.lstrip('0')
+                if not core: core = '0'
+                norm_parts.append(core)
+        return '-'.join(norm_parts)
+
+    def _parse_pole_suffix(self, bus_id):
+        """Extract sequence number from IDs like P1 (1) or P1-7 (7)"""
+        norm_id = self._normalize_bus_id(bus_id)
+        if not norm_id: return 0
+        match = re.search(r'-(\d+)$', norm_id)
+        if match:
+            return int(match.group(1))
+        # Highway pole check
+        match = re.search(r'P(\d+)$', norm_id, re.I)
+        if match:
+            return int(match.group(1))
+        return 0
+
+    def _load_pole_pool(self, filename):
+        pool = []
+        # Look in the same directory as the samples provided by the user
+        base_path = os.path.join('data', 'samples', 'csv_data')
+        file_path = os.path.join(base_path, filename)
+        if not os.path.exists(file_path):
+            return []
+        try:
+            with open(file_path, 'r', encoding='utf-8-sig') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    pool.append(row)
+        except Exception:
+            pass
+        return pool
+
     def process_rows(self, reader):
+        # We need to read all rows into memory to find feeders for cleanup 
+        # and because BaseImporter.get_reader() doesn't support resetting the stream easily.
+        rows = list(reader)
+        if not rows: return
+
+        # Cleanup old data for found feeders in this file
+        feeders = {self.get_val(row, 'feeder') for row in rows if self.get_val(row, 'feeder')}
+        for f in feeders:
+            if f:
+                # Delete existing segments and connections for this feeder to ensure a clean re-import
+                self.model_class.query.filter_by(feeder=f).delete()
+                LineConnection.query.filter_by(feeder=f).delete()
+        db.session.commit()
+        
+        # Load Pool Data for coordinate lookups
+        self.highway_pool = {int(float(p['pole_num'])): p for p in self._load_pole_pool('polesf1.csv') if p.get('pole_num')}
+        self.lateral_pool = self._load_pole_pool('polef1lateral.csv')
+        
+        # Cache for created/existing nodes to avoid repeated queries
+        node_cache = {str(bn.bus_id).strip(): (bn.lat, bn.lng) for bn in BusNode.query.all()}
+        
+        # Session-level cache for connections and nodes to avoid UniqueConstraint errors
+        conn_session_cache = set()
+        node_session_cache = set()
+        
+        # Track existing segments for statistics
         existing_segments = {str(s.segment_id).strip().upper(): s for s in DistributionLineSegment.query.all() if s.segment_id}
         
-        for row in reader:
+        for row in rows:
             seg_id = self.get_val(row, 'segment_id')
             if not seg_id: continue
             
-            clean_id = str(seg_id).strip().upper()
-            seg = existing_segments.get(clean_id)
-            if not seg:
-                seg = DistributionLineSegment(segment_id=clean_id)
-                db.session.add(seg)
-                existing_segments[clean_id] = seg
+            seg = self.model_class()
+            seg.segment_id = str(seg_id).strip().upper()
+            
+            existing = existing_segments.get(seg.segment_id)
+            if not existing:
                 self.stats['created'] += 1
             else:
                 self.stats['updated'] += 1
                 
-            seg.from_bus_id = self.get_val(row, 'from_bus_id')
-            seg.to_bus_id = self.get_val(row, 'to_bus_id')
+            from_bus_raw = self.get_val(row, 'from_bus_id')
+            to_bus_raw = self.get_val(row, 'to_bus_id')
+            from_bus = self._normalize_bus_id(from_bus_raw)
+            to_bus = self._normalize_bus_id(to_bus_raw)
+
+            seg.from_bus_id = from_bus
+            seg.to_bus_id = to_bus
             seg.phasing = self.get_val(row, 'phasing')
             seg.length_meters = sanitize_float(self.get_val(row, 'length_meters'))
+            seg.feeder = self.get_val(row, 'feeder')
             
             # Technical fields
             for f in [
@@ -78,39 +159,125 @@ class PrimaryLineImporter(BaseImporter):
             
             seg.upload_id = self.current_upload_id
             
-            # Save coordinates if available
-            seg.latitude = sanitize_float(self.get_val(row, 'latitude'))
-            seg.longitude = sanitize_float(self.get_val(row, 'longitude'))
+            # COORDINATE & CONNECTION LOGIC
+            if not from_bus or not to_bus: 
+                db.session.add(seg)
+                continue
             
-            # Synchronize with BusNode to ensure map geometry can be generated.
-            # In distribution line files, the coordinates typically belong to the 'to_bus'.
-            if seg.to_bus_id and seg.latitude and seg.longitude:
-                bus_id = str(seg.to_bus_id).strip()
-                bus_node = BusNode.query.filter_by(bus_id=bus_id).first()
-                if not bus_node:
-                    bus_node = BusNode(bus_id=bus_id)
-                    db.session.add(bus_node)
-                
-                # Update coordinates
-                bus_node.lat = seg.latitude
-                bus_node.lng = seg.longitude
-                
-                # Also set feeder if available from segment or column
-                feeder = self.get_val(row, 'feeder')
-                if feeder:
-                    bus_node.feeder = feeder
+            s_from = self._parse_pole_suffix(from_bus)
+            s_to = self._parse_pole_suffix(to_bus)
             
-            if seg.from_bus_id and seg.to_bus_id:
-                conn = LineConnection.query.filter_by(from_bus=seg.from_bus_id, to_bus=seg.to_bus_id, connection_type='Primary_to_Primary').first()
-                if not conn:
-                    new_conn = LineConnection(
-                        from_bus=seg.from_bus_id, 
-                        to_bus=seg.to_bus_id, 
-                        connection_type='Primary_to_Primary', 
-                        phasing=seg.phasing,
-                        feeder=self.get_val(row, 'feeder')
-                    )
-                    db.session.add(new_conn)
+            # CASE SELECTION
+            from_dash = '-' in from_bus
+            to_dash = '-' in to_bus
+            expanded = False
+            
+            if not from_dash and not to_dash:
+                # 1. PURE HIGHWAY (P1 -> P9)
+                expanded = True
+                if s_from < s_to: rng = range(s_from, s_to + 1)
+                else: rng = range(s_from, s_to - 1, -1)
+                
+                prev_bus = None
+                for i in rng:
+                    curr_bus = self._normalize_bus_id(f"P{i}")
+                    if curr_bus not in node_cache and curr_bus not in node_session_cache:
+                        p_data = self.highway_pool.get(i)
+                        if p_data:
+                            try:
+                                bn_lat, bn_lng = float(p_data['latitude']), float(p_data['longitude'])
+                                node_cache[curr_bus] = (bn_lat, bn_lng)
+                                # Create BusNode if not exists in DB
+                                if not BusNode.query.filter_by(bus_id=curr_bus).first():
+                                    db.session.add(BusNode(bus_id=curr_bus, lat=bn_lat, lng=bn_lng, feeder=seg.feeder))
+                                node_session_cache.add(curr_bus)
+                            except (ValueError, TypeError, KeyError):
+                                pass
+                    
+                    if curr_bus in node_cache:
+                        if prev_bus:
+                            # Link
+                            conn_key = tuple(sorted([prev_bus, curr_bus]))
+                            if conn_key not in conn_session_cache:
+                                if not LineConnection.query.filter_by(from_bus=prev_bus, to_bus=curr_bus, connection_type='Primary_to_Primary').first():
+                                    db.session.add(LineConnection(from_bus=prev_bus, to_bus=curr_bus, connection_type='Primary_to_Primary', phasing=seg.phasing, feeder=seg.feeder))
+                                conn_session_cache.add(conn_key)
+                        prev_bus = curr_bus
+            
+            elif (not from_dash and to_dash) or (from_dash and to_dash and to_bus.startswith(from_bus)):
+                # 2. LATERAL BRANCH (P16 -> P16-13 or P1-19 -> P1-19-10)
+                expanded = True
+                if not from_dash:
+                    num_to_add = s_to
+                    naming_base = 0
+                elif to_bus.startswith(from_bus):
+                    num_to_add = s_to
+                    naming_base = s_from
+                else:
+                    num_to_add = s_to - s_from if s_to > s_from else 1
+                    naming_base = s_from
+                
+                if num_to_add < 1: num_to_add = 1
+                
+                prev_bus = from_bus
+                for i in range(1, num_to_add + 1):
+                    if i == num_to_add: curr_bus = to_bus
+                    else:
+                        prefix = from_bus.split('-')[0]
+                        curr_bus = f"{prefix}-{naming_base + i}"
+                    
+                    if curr_bus not in node_cache and curr_bus not in node_session_cache:
+                        prev_coords = node_cache.get(prev_bus)
+                        if prev_coords and self.lateral_pool:
+                            p_lat, p_lng = prev_coords
+                            best_idx = -1
+                            min_dist = float('inf')
+                            for idx, lp in enumerate(self.lateral_pool):
+                                try:
+                                    lp_lat, lp_lng = float(lp['latitude']), float(lp['longitude'])
+                                    dist_sq = (lp_lat - p_lat)**2 + (lp_lng - p_lng)**2
+                                    if dist_sq < min_dist:
+                                        min_dist = dist_sq
+                                        best_idx = idx
+                                except (ValueError, TypeError, KeyError):
+                                    continue
+                            
+                            # Threshold check (500m)
+                            if best_idx != -1 and min_dist < 0.000025:
+                                p_data = self.lateral_pool.pop(best_idx)
+                                bn_lat, bn_lng = float(p_data['latitude']), float(p_data['longitude'])
+                                node_cache[curr_bus] = (bn_lat, bn_lng)
+                                if not BusNode.query.filter_by(bus_id=curr_bus).first():
+                                    db.session.add(BusNode(bus_id=curr_bus, lat=bn_lat, lng=bn_lng, feeder=seg.feeder))
+                                node_session_cache.add(curr_bus)
+                    
+                    if curr_bus in node_cache:
+                        conn_key = tuple(sorted([prev_bus, curr_bus]))
+                        if conn_key not in conn_session_cache:
+                            if not LineConnection.query.filter_by(from_bus=prev_bus, to_bus=curr_bus, connection_type='Primary_to_Primary').first():
+                                db.session.add(LineConnection(from_bus=prev_bus, to_bus=curr_bus, connection_type='Primary_to_Primary', phasing=seg.phasing, feeder=seg.feeder))
+                            conn_session_cache.add(conn_key)
+                        prev_bus = curr_bus
+                    else: break
+            
+            else:
+                # 3. DIRECT TAP / CROSS-CONNECTION
+                # SAFETY: Prevent loops back to the origin pole in the same branch
+                root_from = from_bus.split('-')[0] if '-' in from_bus else from_bus
+                root_to = to_bus.split('-')[0] if '-' in to_bus else to_bus
+                is_loop = (from_bus and to_bus and root_from == root_to)
+                
+                if from_bus in node_cache and to_bus in node_cache and not is_loop:
+                    conn_key = tuple(sorted([from_bus, to_bus]))
+                    if conn_key not in conn_session_cache:
+                        if not LineConnection.query.filter_by(from_bus=from_bus, to_bus=to_bus, connection_type='Primary_to_Primary').first():
+                            db.session.add(LineConnection(from_bus=from_bus, to_bus=to_bus, connection_type='Primary_to_Primary', phasing=seg.phasing, feeder=seg.feeder))
+                        conn_session_cache.add(conn_key)
+            
+            # Only save the logical segment IF it wasn't expanded into a physical chain
+            # This avoids 'double lines' on the map.
+            if not expanded:
+                db.session.add(seg)
 
 class SecondaryLineImporter(BaseImporter):
     file_type = 'secondary_lines'
