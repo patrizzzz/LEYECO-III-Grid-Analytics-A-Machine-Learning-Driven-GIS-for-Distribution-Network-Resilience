@@ -6,6 +6,7 @@ class Post(db.Model):
     """Electrical distribution pole/post with complete infrastructure data"""
     id = db.Column(db.Integer, primary_key=True)
     pole_number = db.Column(db.String(32), unique=True, nullable=True, index=True)
+    pole_num = db.Column(db.Integer, index=True, nullable=True)
     
     # Alias pole_number to post_id for naming consistency
     @property
@@ -80,6 +81,7 @@ class Post(db.Model):
     geom = db.Column(Geometry('POINT', srid=4326))
     
     status = db.Column(db.String(64))
+    feeder = db.Column(db.String(64), index=True)
     upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -94,6 +96,7 @@ class Post(db.Model):
             'id': self.id,
             'post_id': self.pole_number or str(self.id),
             'pole_number': self.pole_number, # Keep for backward compatibility
+            'pole_num': self.pole_num,
             'name': self.name,
             'lat': self.lat,
             'lng': self.lng,
@@ -222,6 +225,7 @@ class DistributionLineSegment(db.Model):
     latitude = db.Column(db.Float)
     longitude = db.Column(db.Float)
     geom = db.Column(Geometry('LINESTRING', srid=4326))
+    feeder = db.Column(db.String(64), index=True)
     upload_id = db.Column(db.Integer, db.ForeignKey('upload_history.id'), index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

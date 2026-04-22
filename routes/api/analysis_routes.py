@@ -355,6 +355,60 @@ def api_ml_transformer_risk():
         }), 200
     except Exception as e: return jsonify({'error': str(e), 'predictions': []}), 500
 
+@analysis_api_bp.route('/ml/load-distribution', methods=['GET'])
+def api_ml_load_distribution():
+    """
+    Parse load_curve.csv and return multi-line dataset for the load curve chart.
+    """
+    try:
+        csv_path = Path(current_app.root_path) / 'data' / 'samples' / 'csv_data' / 'load_curve.csv'
+        if not csv_path.exists():
+            return jsonify({'error': 'Load curve data file not found'}), 404
+        
+        datasets = []
+        hourly_totals = [0.0] * 24
+        count = 0
+        
+        with csv_path.open('r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                label = row.get('Customer Type', 'Unknown')
+                data = []
+                for h in range(1, 25):
+                    val = float(row.get(f'Hour {h}', 0))
+                    data.append(val)
+                    hourly_totals[h-1] += val
+                
+                datasets.append({
+                    'label': label,
+                    'description': row.get('Description', ''),
+                    'data': data
+                })
+                count += 1
+        
+        if count == 0:
+            return jsonify({'error': 'No data found in load curve file'}), 500
+            
+        # Calculate System Statistics (Average of all types)
+        # Assuming values in CSV are 0-1 range (load factor)
+        avg_system_load = [round((val / count) * 100, 1) for val in hourly_totals]
+        
+        peak = max(avg_system_load)
+        low = min(avg_system_load)
+        mean = round(sum(avg_system_load) / len(avg_system_load), 1)
+        
+        return jsonify({
+            'labels': [f'H{h}' for h in range(1, 25)], # Labels H1 to H24
+            'datasets': datasets,
+            'summary': {
+                'avg': f'{mean}%',
+                'peak': f'{peak}%',
+                'low': f'{low}%'
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @analysis_api_bp.route('/ml/transformer-load-stress', methods=['GET'])
 def api_transformer_load_stress_route():
     try:
