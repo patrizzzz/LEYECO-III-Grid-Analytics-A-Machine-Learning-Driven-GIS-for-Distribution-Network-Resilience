@@ -45,6 +45,19 @@ def api_posts_bulk_import():
         return jsonify(stats), 200
     return jsonify({'error': 'File processing failed'}), 500
 
+@import_api_bp.route('/lateral-poles/bulk-import', methods=['POST'])
+@admin_required
+def api_lateral_poles_bulk_import():
+    from services.importers.asset_importer import LateralPoleImporter
+    if 'file' not in request.files: return jsonify({'error': 'No file part'}), 400
+    file = request.files['file']
+    if file.filename == '': return jsonify({'error': 'No selected file'}), 400
+    if file:
+        stats = LateralPoleImporter(file).run()
+        if 'error' in stats: return jsonify(stats), 500
+        return jsonify(stats), 200
+    return jsonify({'error': 'File processing failed'}), 500
+
 @import_api_bp.route('/primary-lines/bulk-import', methods=['POST'])
 @admin_required
 def api_primary_lines_bulk_import():

@@ -48,7 +48,7 @@ def get_paginated_posts(in_ph, page, per_page):
         
         total = query.count()
         db_posts = query.order_by(Post.id.asc()).offset((page - 1) * per_page).limit(per_page).all()
-        posts = [{"id": p.id, "name": p.name, "lat": p.lat, "lng": p.lng, "status": p.status, "kva_rating": p.kva_rating, "pole_number": p.pole_number, "feeder": p.feeder, "primary_bus_id": p.primary_bus_id, "has_transformer": p.has_transformer, "transformer_bus_id": p.transformer_bus_id} for p in db_posts]
+        posts = [{"id": p.id, "name": p.name, "lat": p.lat, "lng": p.lng, "status": p.status, "kva_rating": p.kva_rating, "pole_number": p.pole_number, "pole_num": p.pole_num, "feeder": p.feeder, "primary_bus_id": p.primary_bus_id, "has_transformer": p.has_transformer, "transformer_bus_id": p.transformer_bus_id} for p in db_posts]
         
         total_pages = (total + per_page - 1) // per_page
         
