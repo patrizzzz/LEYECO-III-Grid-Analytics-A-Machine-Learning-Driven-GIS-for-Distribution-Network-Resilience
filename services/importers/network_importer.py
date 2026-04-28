@@ -112,8 +112,6 @@ class PrimaryLineImporter(BaseImporter):
                 # Delete existing segments and connections for this feeder to ensure a clean re-import
                 self.model_class.query.filter_by(feeder=f).delete()
                 LineConnection.query.filter_by(feeder=f).delete()
-        db.session.commit()
-        
         # Load Pool Data for coordinate lookups from Database
         all_posts = Post.query.all()
         # Mapping for highway poles (imported via 'posts' file type)
@@ -158,6 +156,8 @@ class PrimaryLineImporter(BaseImporter):
             seg.phasing = self.get_val(row, 'phasing')
             seg.length_meters = sanitize_float(self.get_val(row, 'length_meters'))
             seg.feeder = self.get_val(row, 'feeder')
+            seg.latitude = sanitize_float(self.get_val(row, 'latitude'))
+            seg.longitude = sanitize_float(self.get_val(row, 'longitude'))
             
             # Technical fields
             for f in [
@@ -189,7 +189,11 @@ class PrimaryLineImporter(BaseImporter):
             to_dash = '-' in to_bus
             expanded = False
             
-            if not from_dash and not to_dash:
+            # ONLY expand if it looks like a numeric pole sequence (starts with P or has numeric suffix)
+            # This prevents plain IDs like BUS_A from being expanded into P0 sequences.
+            is_numeric_sequence = (from_bus.startswith('P') or to_bus.startswith('P'))
+            
+            if not from_dash and not to_dash and is_numeric_sequence:
                 # 1. PURE HIGHWAY (P1 -> P9)
                 expanded = True
                 if s_from < s_to: rng = range(s_from, s_to + 1)
@@ -319,6 +323,19 @@ class PrimaryLineImporter(BaseImporter):
             # This avoids 'double lines' on the map.
             if not expanded:
                 db.session.add(seg)
+                
+                # ENRICHMENT: Ensure BusNodes exist for endpoints of unexpanded segments if coordinates are present
+                # This is required by test_primary_line_coordinates and general data consistency.
+                if seg.latitude and seg.longitude:
+                    # Update/Create BusNode for the 'to' bus with the provided coordinates
+                    bn = BusNode.query.filter_by(bus_id=to_bus).first()
+                    if not bn:
+                        bn = BusNode(bus_id=to_bus, lat=seg.latitude, lng=seg.longitude, feeder=seg.feeder)
+                        db.session.add(bn)
+                    else:
+                        bn.lat = seg.latitude
+                        bn.lng = seg.longitude
+                        if not bn.feeder: bn.feeder = seg.feeder
 
 class SecondaryLineImporter(BaseImporter):
     file_type = 'secondary_lines'
