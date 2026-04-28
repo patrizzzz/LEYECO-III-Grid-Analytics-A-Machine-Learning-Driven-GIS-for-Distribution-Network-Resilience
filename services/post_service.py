@@ -124,10 +124,32 @@ def get_post_detail(post_id):
         'primary_bus_id', 'sec_structure', 'sec_conductor_size', 'sec_type',
         'conductor_type', 'sec_bus_id', 'common_sole', 'transformer_bus_id',
         'transformer_phasing', 'grounding_rod', 'l2_wire_type', 'l1_wire_type',
+        'system_grounding_type', 'length_meters', 'conductor_unit', 'conductor_strands',
+        'neutral_wire_type', 'neutral_wire_size', 'neutral_wire_unit', 'neutral_wire_strands',
+        'spacing_d12', 'spacing_d23', 'spacing_d13', 'spacing_d1n', 'spacing_d2n', 'spacing_d3n',
+        'spacing_dc1_c2', 'height_h1', 'height_h2', 'height_h3', 'height_hn', 'earth_resistivity',
         'created_at', 'updated_at'
     ]
     for f in extra_fields:
         post_dict[f] = getattr(p, f, None)
+
+    # Enrich with BusNode data (Bus ID, Nominal Voltage, Feeder)
+    from models import BusNode
+    # Try exact pole_number match first
+    bus_node = None
+    if p.pole_number:
+        bus_node = BusNode.query.filter_by(bus_id=p.pole_number).first()
+    
+    # Fallback: look for ANY bus node linked to this post ID
+    if not bus_node:
+        bus_node = BusNode.query.filter_by(pole_id=p.id).first()
+        
+    if bus_node:
+        post_dict['bus_id'] = bus_node.bus_id
+        post_dict['nominal_voltage'] = bus_node.nominal_voltage
+        post_dict['bus_description'] = bus_node.bus_description
+        if not post_dict.get('feeder'):
+            post_dict['feeder'] = bus_node.feeder
     
     # Enrich with Stress Analysis Data
     try:

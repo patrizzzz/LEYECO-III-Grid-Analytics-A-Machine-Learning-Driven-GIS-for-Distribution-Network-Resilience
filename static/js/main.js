@@ -2277,6 +2277,10 @@ document.addEventListener('DOMContentLoaded', function () {
   var _primaryLineOverheadModal = null;
   var PRIMARY_LINE_OVERHEAD_FIELDS = [
     { key: 'length_meters', label: 'Length (m)' },
+    { key: 'bus_id', label: 'Bus ID' },
+    { key: 'bus_description', label: 'Description' },
+    { key: 'nominal_voltage', label: 'Nominal voltage (kV)' },
+    { key: 'feeder', label: 'Feeder' },
     { key: 'conductor_type', label: 'Conductor type' },
     { key: 'conductor_size', label: 'Conductor size' },
     { key: 'conductor_unit', label: 'Conductor unit' },

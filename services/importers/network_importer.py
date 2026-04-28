@@ -73,6 +73,31 @@ class PrimaryLineImporter(BaseImporter):
             return int(match.group(1))
         return 0
 
+    def _apply_segment_stats_to_post(self, seg, post):
+        """Propagate technical metadata from line segment to the physical pole."""
+        if not seg or not post: return
+        
+        # Mapping for string/config fields
+        fields = [
+            'configuration', 'system_grounding_type', 'conductor_type',
+            'conductor_unit', 'conductor_strands', 'neutral_wire_type',
+            'neutral_wire_size', 'neutral_wire_unit', 'neutral_wire_strands',
+            'phasing'
+        ]
+        for f in fields:
+            setattr(post, f, getattr(seg, f))
+            
+        post.pri_conductor_size = seg.conductor_size
+        
+        # Mapping for numeric/spacing fields
+        num_fields = [
+            'spacing_d12', 'spacing_d23', 'spacing_d13', 'spacing_d1n',
+            'spacing_d2n', 'spacing_d3n', 'spacing_dc1_c2', 'height_h1',
+            'height_h2', 'height_h3', 'height_hn', 'earth_resistivity'
+        ]
+        for f in num_fields:
+            setattr(post, f, getattr(seg, f))
+
     def process_rows(self, reader):
         from models import UploadHistory
         # We need to read all rows into memory to find feeders for cleanup 
@@ -90,14 +115,15 @@ class PrimaryLineImporter(BaseImporter):
         db.session.commit()
         
         # Load Pool Data for coordinate lookups from Database
-        highway_posts = Post.query.join(UploadHistory).filter(UploadHistory.file_type == 'posts').all()
-        self.highway_pool = {}
-        for p in highway_posts:
-            if p.pole_num is not None:
-                self.highway_pool[p.pole_num] = {'latitude': p.lat, 'longitude': p.lng}
-                
+        all_posts = Post.query.all()
+        # Mapping for highway poles (imported via 'posts' file type)
+        self.highway_post_map = {p.pole_num: p for p in all_posts if p.pole_num is not None}
+        # Mapping for already named lateral poles
+        self.named_post_map = {p.pole_number: p for p in all_posts if p.pole_number}
+        
+        self.highway_pool = {p.pole_num: {'latitude': p.lat, 'longitude': p.lng} for p in all_posts if p.pole_num is not None}
         lateral_posts = Post.query.join(UploadHistory).filter(UploadHistory.file_type == 'lateral_poles').all()
-        self.lateral_pool = [{'post_id': p.id, 'latitude': p.lat, 'longitude': p.lng} for p in lateral_posts]
+        self.lateral_pool = [{'post_id': p.id, 'latitude': p.lat, 'longitude': p.lng, 'record': p} for p in lateral_posts]
         
         # Cache for created/existing nodes to avoid repeated queries
         node_cache = {str(bn.bus_id).strip(): (bn.lat, bn.lng) for bn in BusNode.query.all()}
@@ -172,6 +198,10 @@ class PrimaryLineImporter(BaseImporter):
                 prev_bus = None
                 for i in rng:
                     curr_bus = self._normalize_bus_id(f"P{i}")
+                    # Update Post technical data
+                    hp = self.highway_post_map.get(i)
+                    if hp: self._apply_segment_stats_to_post(seg, hp)
+
                     if curr_bus not in node_cache and curr_bus not in node_session_cache:
                         p_data = self.highway_pool.get(i)
                         if p_data:
@@ -201,6 +231,11 @@ class PrimaryLineImporter(BaseImporter):
                 root_from = from_bus.split('-')[0] if '-' in from_bus else from_bus
                 root_to = to_bus.split('-')[0] if '-' in to_bus else to_bus
                 
+                # Apply to root post if it exists
+                root_num = self._parse_pole_suffix(root_from)
+                hp = self.highway_post_map.get(root_num)
+                if hp: self._apply_segment_stats_to_post(seg, hp)
+
                 if not from_dash:
                     num_to_add = s_to
                     naming_base = 0
@@ -220,15 +255,19 @@ class PrimaryLineImporter(BaseImporter):
                         prefix = from_bus.split('-')[0]
                         curr_bus = f"{prefix}-{naming_base + i}"
                     
+                    # Update Post technical data if already exists
+                    lp = self.named_post_map.get(curr_bus)
+                    if lp: self._apply_segment_stats_to_post(seg, lp)
+
                     if curr_bus not in node_cache and curr_bus not in node_session_cache:
                         prev_coords = node_cache.get(prev_bus)
                         if prev_coords and self.lateral_pool:
                             p_lat, p_lng = prev_coords
                             best_idx = -1
                             min_dist = float('inf')
-                            for idx, lp in enumerate(self.lateral_pool):
+                            for idx, lp_data in enumerate(self.lateral_pool):
                                 try:
-                                    lp_lat, lp_lng = float(lp['latitude']), float(lp['longitude'])
+                                    lp_lat, lp_lng = float(lp_data['latitude']), float(lp_data['longitude'])
                                     dist_sq = (lp_lat - p_lat)**2 + (lp_lng - p_lng)**2
                                     if dist_sq < min_dist:
                                         min_dist = dist_sq
@@ -243,10 +282,11 @@ class PrimaryLineImporter(BaseImporter):
                                 node_cache[curr_bus] = (bn_lat, bn_lng)
                                 
                                 # Update the underlying Post record so UI shows the correct Pole Number
-                                post_record = Post.query.get(p_data['post_id'])
+                                post_record = p_data.get('record') or Post.query.get(p_data['post_id'])
                                 if post_record:
                                     post_record.pole_number = curr_bus
                                     post_record.name = f"Pole {curr_bus.replace('P00000000', '')}"
+                                    self._apply_segment_stats_to_post(seg, post_record)
                                     
                                 if not BusNode.query.filter_by(bus_id=curr_bus).first():
                                     db.session.add(BusNode(bus_id=curr_bus, lat=bn_lat, lng=bn_lng, feeder=seg.feeder))
