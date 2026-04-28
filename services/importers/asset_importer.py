@@ -125,6 +125,10 @@ class PostImporter(BaseImporter):
             current_app.logger.warning(f"Bulk naming failed: {e}")
             # ... and so on
 
+class LateralPoleImporter(PostImporter):
+    file_type = 'lateral_poles'
+
+
 class BusNodeImporter(BaseImporter):
     file_type = 'bus_nodes'
     model_class = BusNode

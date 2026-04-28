@@ -443,6 +443,31 @@
       </div>
     </div>
 
+    <!-- Lateral Poles -->
+    <div class="res-upload-panel" id="panel-lateral-poles">
+      <div class="res-upload-panel-header">
+        <h3>📍 Lateral Poles (Step 1.5)</h3>
+        <button class="res-panel-close" aria-label="Close">✕</button>
+      </div>
+      <div class="res-upload-panel-body">
+        <div class="upload-card" style="border: 2px solid #10b981;">
+          <div class="upload-card-desc">
+            Upload lateral pole locations. <strong>Required for primary line routing.</strong>
+            Required: <code>latitude</code>, <code>longitude</code>.
+          </div>
+          <div class="upload-card-history">
+            <div id="history-lateral_poles" style="display:none;"></div>
+          </div>
+          <input type="file" id="upload-lateral-poles-file" accept=".csv,.xlsx,.xls" class="file-input">
+          <div class="upload-card-actions">
+            <button class="btn-upload-main" id="upload-lateral-poles-btn" data-form="lateral-poles">⬆ Upload</button>
+            <button class="btn-sample" data-sample="lateral-poles">📥 Sample</button>
+          </div>
+          <div id="upload-lateral-poles-status" class="status-msg"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Bus Nodes -->
     <div class="res-upload-panel" id="panel-bus-nodes">
       <div class="res-upload-panel-header">
@@ -975,6 +1000,10 @@
         filename: 'sample_posts.csv',
         data: 'Pole Number,Lat,Lon,Status,Feeder,Phasing\nP0000000001,11.2398,124.7570,Active,Feeder 1,ABC\nP0000000002,11.2412,124.7583,Active,Feeder 1,A\nP0000000003,11.2425,124.7595,Building/Ongoing,Feeder 2,BC\n'
       },
+      'lateral-poles': {
+        filename: 'sample_lateral_poles.csv',
+        data: 'Lat,Lon\n11.2399,124.7571\n11.2413,124.7584\n'
+      },
       'transformers': {
         filename: 'sample_transformers.csv',
         data: 'From Primary Bus ID,To Secondary Bus ID,kVA Rating,Primary Voltage (kV),Secondary Voltage (kV),Primary Phasing,Secondary Phasing,Installation Type,Connection Type\nP0000000001-T1,P0000000001-S1,25,13.2,0.24,ABC,ABC,Overhead,WYE-WYE\nP0000000002-T1,P0000000002-S1,10,13.2,0.24,A,A,Overhead,DELTA-WYE\n'
@@ -1034,6 +1063,7 @@
     var UPLOAD_MAP = {
       'bus-nodes': { file: 'upload-bus-nodes-file', btn: 'upload-bus-nodes-btn', status: 'upload-bus-nodes-status', url: '/api/bus-nodes/bulk-import' },
       'posts': { file: 'upload-posts-file', btn: 'upload-posts-btn', status: 'upload-posts-status', url: '/api/posts/bulk-import' },
+      'lateral-poles': { file: 'upload-lateral-poles-file', btn: 'upload-lateral-poles-btn', status: 'upload-lateral-poles-status', url: '/api/lateral-poles/bulk-import' },
       'primary-lines': { file: 'upload-primary-lines-file', btn: 'upload-primary-lines-btn', status: 'upload-primary-lines-status', url: '/api/primary-lines/bulk-import' },
       'transformers': { file: 'upload-transformers-file', btn: 'upload-transformers-btn', status: 'upload-transformers-status', url: '/api/transformers/bulk-import' },
       'secondary-lines': { file: 'upload-secondary-lines-file', btn: 'upload-secondary-lines-btn', status: 'upload-secondary-lines-status', url: '/api/secondary-lines/bulk-import' },
@@ -1111,6 +1141,7 @@
         var map = {
           'history-bus_nodes': data.bus_nodes,
           'history-posts': data.posts,
+          'history-lateral_poles': data.lateral_poles,
           'history-primary_lines': data.primary_lines,
           'history-transformers': data.transformers,
           'history-secondary_lines': data.secondary_lines,

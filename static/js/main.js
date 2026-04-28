@@ -545,41 +545,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   }
 
-  function updateMunicipalityLabels() {
-    const zoom = map.getZoom();
-    const threshold = 13;
-
-    if (zoom < threshold) {
-      // Zoomed Out: Show centered municipality labels
-      if (!map.hasLayer(muniLabelsLayer)) map.addLayer(muniLabelsLayer);
-      
-      // Hide all individual barangay tooltips
-      municipalityLayer.eachLayer(function(layer) {
-        layer.unbindTooltip();
-      });
-    } else {
-      // Zoomed In: Show ALL Barangay names, hide centered muni labels
-      if (map.hasLayer(muniLabelsLayer)) map.removeLayer(muniLabelsLayer);
-
-      municipalityLayer.eachLayer(function(layer) {
-        const brgyName = layer._brgyName;
-        layer.unbindTooltip();
-        if (brgyName) {
-          layer.bindTooltip(brgyName, {
-            permanent: true,
-            direction: 'center',
-            className: 'municipality-label brgy-label',
-            opacity: 0.8
-          });
-        }
-      });
-    }
-  }
-
   // Ensure labels update whenever data is added or map is zoomed
   municipalityLayer.on('add', () => {
     calculateMunicipalityCenters();
-    updateMunicipalityLabels();
   });
 
   // Ensure municipalityLayer is physically at the bottom of the map's panes if needed,
@@ -1409,12 +1377,12 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   function loadMunicipalities() {
-    // Fetching the pre-filtered Barangay boundaries (Level 3) for the 9 target municipalities
-    fetch('/static/data/barangay-boundaries.json')
+    // Fetching the pre-filtered Municipality boundaries (Level 2) to reduce lag
+    fetch('/static/data/municipality-boundaries.json')
       .then(r => {
         if (!r.ok) {
             if (r.status === 404) {
-                console.warn('Barangay GeoJSON not found at /static/data/barangay-boundaries.json. Skipping boundaries.');
+                console.warn('Municipality GeoJSON not found at /static/data/municipality-boundaries.json. Skipping boundaries.');
             } else {
                 throw new Error('Fetch failed: ' + r.status);
             }
@@ -1424,13 +1392,21 @@ document.addEventListener('DOMContentLoaded', function () {
       })
       .then(data => {
         if (!data) return;
+        
+        // Filter to only the 9 LEYECO III municipalities
+        const targetMunis = ['capoocan', 'carigara', 'barugo', 'san miguel', 'tunga', 'alangalang', 'jaro', 'santa fe', 'pastrana'];
+        data.features = data.features.filter(f => {
+            const name = (f.properties.NAME_2 || f.properties.name || '').toLowerCase();
+            return targetMunis.some(t => name.includes(t));
+        });
+
         municipalityLayer.addData(data);
         calculateMunicipalityCenters(); // Recalculate centers after data load
-        updateMunicipalityLabels(); // Refresh labels after data load
-        console.log('Barangay boundaries loaded.');
+        if (!map.hasLayer(muniLabelsLayer)) map.addLayer(muniLabelsLayer); // Always show muni labels
+        console.log('Municipality boundaries loaded.');
       })
       .catch(err => {
-        console.warn('Graceful skip: Barangay boundary loading failed:', err.message);
+        console.warn('Graceful skip: Municipality boundary loading failed:', err.message);
       });
   }
 
@@ -1548,9 +1524,6 @@ document.addEventListener('DOMContentLoaded', function () {
         const zoom = map.getZoom();
         console.log('Map Zoom Level:', zoom);
         
-        // Update Municipality/Barangay labels based on zoom
-        updateMunicipalityLabels();
-
         applyZoomVisibility();
     }, 300);
   });
@@ -1614,7 +1587,21 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Tooltip handling
-    const tooltipText = `ID: ${p.id}` + (isTransformer ? ' (Transformer)' : '');
+    let cleanPole = p.pole_number;
+    
+    if (!cleanPole && (p.pole_num || p.pole_num === 0)) {
+        cleanPole = p.pole_num.toString();
+    } else if (!cleanPole && p.name) {
+        cleanPole = p.name.replace(/^Pole\s+/i, '');
+    } else if (!cleanPole) {
+        cleanPole = `ID: ${p.id}`;
+    }
+    
+    if (typeof cleanPole === 'string' && cleanPole.match(/^P0+/)) {
+        cleanPole = cleanPole.replace(/^P0+/, '');
+    }
+    
+    const tooltipText = `Pole: ${cleanPole}` + (isTransformer ? ' (Transformer)' : '');
     marker.bindTooltip(tooltipText, { permanent: false, direction: 'top' });
     marker.addTo(layer);
     _allPostMarkers.push(marker);
@@ -2290,6 +2277,10 @@ document.addEventListener('DOMContentLoaded', function () {
   var _primaryLineOverheadModal = null;
   var PRIMARY_LINE_OVERHEAD_FIELDS = [
     { key: 'length_meters', label: 'Length (m)' },
+    { key: 'bus_id', label: 'Bus ID' },
+    { key: 'bus_description', label: 'Description' },
+    { key: 'nominal_voltage', label: 'Nominal voltage (kV)' },
+    { key: 'feeder', label: 'Feeder' },
     { key: 'conductor_type', label: 'Conductor type' },
     { key: 'conductor_size', label: 'Conductor size' },
     { key: 'conductor_unit', label: 'Conductor unit' },
