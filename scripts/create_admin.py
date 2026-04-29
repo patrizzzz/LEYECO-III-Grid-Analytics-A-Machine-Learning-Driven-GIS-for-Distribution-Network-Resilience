@@ -11,7 +11,7 @@ from models import User
 
 def create_admin():
     username = "admin"
-    password = "admin123"
+    password = "admin"
     
     with app.app_context():
         # Check if user already exists

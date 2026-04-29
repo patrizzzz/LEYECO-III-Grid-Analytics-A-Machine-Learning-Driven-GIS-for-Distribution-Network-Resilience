@@ -820,7 +820,31 @@
             </select>
           </div>
 
-          <button id="export-network-image-btn" class="btn-export-image">Download Network Image (PNG)</button>
+          <div class="export-field">
+            <label for="export-line-type">Line Type</label>
+            <select id="export-line-type">
+              <option value="both">Both (Primary & Secondary)</option>
+              <option value="primary">Primary Only</option>
+              <option value="secondary">Secondary Only</option>
+            </select>
+          </div>
+
+          <div class="export-field" style="flex-direction: row; align-items: center; gap: 8px; margin-top: 4px;">
+            <input type="checkbox" id="export-show-nodes" style="width: 16px; height: 16px;">
+            <label for="export-show-nodes" style="margin: 0;">Show Node Points</label>
+          </div>
+
+          <div class="export-field" style="flex-direction: row; align-items: center; gap: 8px;">
+            <input type="checkbox" id="export-show-labels" style="width: 16px; height: 16px;">
+            <label for="export-show-labels" style="margin: 0;">Show Pole Labels</label>
+          </div>
+
+          <div class="export-field" style="flex-direction: row; align-items: center; gap: 8px;">
+            <input type="checkbox" id="export-show-header" checked style="width: 16px; height: 16px;">
+            <label for="export-show-header" style="margin: 0;">Show Header & Stats</label>
+          </div>
+
+          <button id="export-network-image-btn" class="btn-export-image" style="margin-top: 8px;">Download Network Image (PNG)</button>
           <div id="export-network-image-status" class="status-msg"></div>
         </div>
       </div>
@@ -1368,7 +1392,7 @@
         });
     }
 
-    function drawNetworkExportImage(payload, width, height, labelText) {
+    function drawNetworkExportImage(payload, width, height, labelText, options) {
       const lines = Array.isArray(payload.lines) ? payload.lines : [];
       const posts = Array.isArray(payload.posts) ? payload.posts : [];
       const municipalityBoundary = Array.isArray(payload.municipality_boundary) ? payload.municipality_boundary : [];
@@ -1377,29 +1401,14 @@
       lines.forEach(function (line) {
         if (Number.isFinite(line.lat1) && Number.isFinite(line.lng1)) allPoints.push([line.lat1, line.lng1]);
         if (Number.isFinite(line.lat2) && Number.isFinite(line.lng2)) allPoints.push([line.lat2, line.lng2]);
+        if (Array.isArray(line.path_latlngs)) {
+          line.path_latlngs.forEach(function(pt) {
+            if (Number.isFinite(pt[0]) && Number.isFinite(pt[1])) allPoints.push([pt[0], pt[1]]);
+          });
+        }
       });
       posts.forEach(function (p) {
         if (Number.isFinite(p.lat) && Number.isFinite(p.lng)) allPoints.push([p.lat, p.lng]);
-      });
-      municipalityBoundary.forEach(function (geom) {
-        const gType = geom && geom.type;
-        const coords = geom && geom.coordinates;
-        if (!coords) return;
-        if (gType === 'Polygon') {
-          coords.forEach(function (ring) {
-            ring.forEach(function (pt) {
-              if (Array.isArray(pt) && Number.isFinite(pt[1]) && Number.isFinite(pt[0])) allPoints.push([pt[1], pt[0]]);
-            });
-          });
-        } else if (gType === 'MultiPolygon') {
-          coords.forEach(function (poly) {
-            poly.forEach(function (ring) {
-              ring.forEach(function (pt) {
-                if (Array.isArray(pt) && Number.isFinite(pt[1]) && Number.isFinite(pt[0])) allPoints.push([pt[1], pt[0]]);
-              });
-            });
-          });
-        }
       });
 
       if (allPoints.length < 2) {
@@ -1424,23 +1433,13 @@
       canvas.height = height;
       const ctx = canvas.getContext('2d');
 
-      ctx.fillStyle = '#e9f0f5';
+      const showNodes = options && options.showNodes;
+      const showLabels = options && options.showLabels;
+      const showHeader = options && (options.showHeader !== undefined ? options.showHeader : true);
+
+      ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, width, height);
-      // Add subtle "map-like" texture so export is not plain white.
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.20)';
-      ctx.lineWidth = 1;
-      for (let x = 0; x < width; x += 120) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < height; y += 120) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
-      }
+      // Removed background grid texture for a cleaner, schematic look as requested.
 
       const margin = 60;
       const innerW = width - (margin * 2);
@@ -1448,9 +1447,24 @@
       const lngSpan = Math.max(maxLng - minLng, 1e-9);
       const latSpan = Math.max(maxLat - minLat, 1e-9);
 
+      const avgLat = (minLat + maxLat) / 2;
+      const cosLat = Math.cos(avgLat * Math.PI / 180);
+      const geoW = lngSpan * cosLat;
+      const geoH = latSpan;
+      
+      const scaleX = innerW / geoW;
+      const scaleY = innerH / geoH;
+      const scale = Math.min(scaleX, scaleY);
+      
+      const finalInnerW = geoW * scale;
+      const finalInnerH = geoH * scale;
+      
+      const offsetX = margin + (innerW - finalInnerW) / 2;
+      const offsetY = margin + (innerH - finalInnerH) / 2;
+
       function project(lat, lng) {
-        const x = margin + ((lng - minLng) / lngSpan) * innerW;
-        const y = margin + (1 - ((lat - minLat) / latSpan)) * innerH;
+        const x = offsetX + (lng - minLng) * cosLat * scale;
+        const y = offsetY + (1 - (lat - minLat) / latSpan) * finalInnerH;
         return [x, y];
       }
 
@@ -1594,10 +1608,10 @@
         ctx.restore();
       }
 
-      // Draw selected municipality boundary (outer perimeter only).
-      if (municipalityBoundary.length) {
-        drawMunicipalityOuterBoundary(municipalityBoundary);
-      }
+      // Disabled municipality boundary/fill for cleaner infrastructure-only view.
+      // if (municipalityBoundary.length) {
+      //   drawMunicipalityOuterBoundary(municipalityBoundary);
+      // }
 
       // Draw line casing first to improve readability.
       ctx.lineJoin = 'round';
@@ -1605,57 +1619,105 @@
       ctx.strokeStyle = 'rgba(15, 23, 42, 0.45)';
       ctx.globalAlpha = 1;
       lines.forEach(function (line) {
-        if (!Number.isFinite(line.lat1) || !Number.isFinite(line.lng1) || !Number.isFinite(line.lat2) || !Number.isFinite(line.lng2)) return;
-        const p1 = project(line.lat1, line.lng1);
-        const p2 = project(line.lat2, line.lng2);
+        const path = Array.isArray(line.path_latlngs) ? line.path_latlngs : null;
+        if (!path && (!Number.isFinite(line.lat1) || !Number.isFinite(line.lng1) || !Number.isFinite(line.lat2) || !Number.isFinite(line.lng2))) return;
+        
         const w = getExportLineWeight(line);
-        ctx.beginPath();
-        ctx.moveTo(p1[0], p1[1]);
-        ctx.lineTo(p2[0], p2[1]);
         ctx.lineWidth = w + Math.max(1.1, width / 2200);
+        ctx.beginPath();
+        
+        if (path && path.length >= 2) {
+          path.forEach(function(pt, idx) {
+            const p = project(pt[0], pt[1]);
+            if (idx === 0) ctx.moveTo(p[0], p[1]);
+            else ctx.lineTo(p[0], p[1]);
+          });
+        } else {
+          const p1 = project(line.lat1, line.lng1);
+          const p2 = project(line.lat2, line.lng2);
+          ctx.moveTo(p1[0], p1[1]);
+          ctx.lineTo(p2[0], p2[1]);
+        }
         ctx.stroke();
       });
 
       // Draw colored lines on top with same map color rules.
       lines.forEach(function (line) {
-        if (!Number.isFinite(line.lat1) || !Number.isFinite(line.lng1) || !Number.isFinite(line.lat2) || !Number.isFinite(line.lng2)) return;
-        const p1 = project(line.lat1, line.lng1);
-        const p2 = project(line.lat2, line.lng2);
+        const path = Array.isArray(line.path_latlngs) ? line.path_latlngs : null;
+        if (!path && (!Number.isFinite(line.lat1) || !Number.isFinite(line.lng1) || !Number.isFinite(line.lat2) || !Number.isFinite(line.lng2))) return;
+        
         ctx.strokeStyle = getExportLineColor(line);
         ctx.lineWidth = getExportLineWeight(line);
         ctx.beginPath();
-        ctx.moveTo(p1[0], p1[1]);
-        ctx.lineTo(p2[0], p2[1]);
+        
+        if (path && path.length >= 2) {
+          path.forEach(function(pt, idx) {
+            const p = project(pt[0], pt[1]);
+            if (idx === 0) ctx.moveTo(p[0], p[1]);
+            else ctx.lineTo(p[0], p[1]);
+          });
+        } else {
+          const p1 = project(line.lat1, line.lng1);
+          const p2 = project(line.lat2, line.lng2);
+          ctx.moveTo(p1[0], p1[1]);
+          ctx.lineTo(p2[0], p2[1]);
+        }
         ctx.stroke();
       });
 
-      // Draw poles as small points for context
-      ctx.fillStyle = '#111827';
-      ctx.globalAlpha = 0.75;
-      const pointRadius = Math.max(1.4, width / 1600);
-      posts.forEach(function (p) {
-        if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return;
-        const point = project(p.lat, p.lng);
-        ctx.beginPath();
-        ctx.arc(point[0], point[1], pointRadius, 0, Math.PI * 2);
-        ctx.fill();
-      });
+      // Draw nodes (poles) only if enabled.
+      if (showNodes || showLabels) {
+        ctx.fillStyle = '#9333ea'; 
+        ctx.globalAlpha = 1;
+        const pointRadius = Math.max(2.5, width / 1000);
+        const fontSize = Math.max(10, width / 160);
+        ctx.font = '600 ' + fontSize + 'px Segoe UI, Roboto, Arial, sans-serif';
+        ctx.textAlign = 'center';
+
+        posts.forEach(function (p) {
+          if (!Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return;
+          const point = project(p.lat, p.lng);
+          
+          if (showNodes) {
+            ctx.beginPath();
+            ctx.arc(point[0], point[1], pointRadius, 0, Math.PI * 2);
+            ctx.fill();
+          }
+
+          if (showLabels) {
+            const label = (p.pole_number || p.post_id || '').toString();
+            if (label) {
+              ctx.save();
+              ctx.fillStyle = '#1e293b';
+              ctx.fillText(label, point[0], point[1] - (pointRadius + 4));
+              ctx.restore();
+            }
+          }
+        });
+      }
       ctx.globalAlpha = 1;
 
       // Header and metadata
-      ctx.fillStyle = '#0f172a';
-      ctx.font = '700 28px Segoe UI, Arial, sans-serif';
-      ctx.fillText('LEYECO Network Export', margin, 38);
-      ctx.font = '500 16px Segoe UI, Arial, sans-serif';
-      ctx.fillStyle = '#334155';
-      ctx.fillText(labelText, margin, 62);
-      ctx.fillText('Lines: ' + lines.length + '   Poles: ' + posts.length, margin, 84);
+      if (showHeader) {
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '700 28px Segoe UI, Arial, sans-serif';
+        ctx.fillText('LEYECO Network Export', margin, 38);
+        ctx.font = '500 16px Segoe UI, Arial, sans-serif';
+        ctx.fillStyle = '#334155';
+        ctx.fillText(labelText, margin, 62);
+        ctx.fillText('Lines: ' + lines.length + '   Poles: ' + posts.length, margin, 84);
+      }
 
       return canvas;
     }
 
+    const exportLineTypeEl = document.getElementById('export-line-type');
+    const exportShowNodesEl = document.getElementById('export-show-nodes');
+    const exportShowLabelsEl = document.getElementById('export-show-labels');
+    const exportShowHeaderEl = document.getElementById('export-show-header');
+
     function runNetworkImageExport() {
-      if (!exportFilterTypeEl || !exportFilterValueEl || !exportImageSizeEl || !exportImageBtn) return;
+      if (!exportFilterTypeEl || !exportFilterValueEl || !exportImageSizeEl || !exportImageBtn || !exportLineTypeEl) return;
       const filterType = exportFilterTypeEl.value;
       const filterValue = exportFilterValueEl.value;
       if (!filterValue) {
@@ -1673,7 +1735,8 @@
       const qs = new URLSearchParams({
         filter_type: filterType,
         filter_value: filterValue,
-        include_posts: '1'
+        include_posts: '1',
+        line_type: exportLineTypeEl.value
       });
 
       fetch('/api/export/network/data?' + qs.toString())
@@ -1682,7 +1745,11 @@
           if (payload.error) throw new Error(payload.error);
           setExportStatus('Rendering image...', '#0369a1');
           const label = (filterType === 'feeder' ? 'Feeder: ' : 'Municipality: ') + filterValue;
-          const canvas = drawNetworkExportImage(payload, width, height, label);
+          const canvas = drawNetworkExportImage(payload, width, height, label, {
+            showNodes: exportShowNodesEl ? exportShowNodesEl.checked : false,
+            showLabels: exportShowLabelsEl ? exportShowLabelsEl.checked : false,
+            showHeader: exportShowHeaderEl ? exportShowHeaderEl.checked : true
+          });
           const safeValue = String(filterValue).replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'network';
           const filename = 'network_' + filterType + '_' + safeValue + '_' + width + 'x' + height + '.png';
           canvas.toBlob(function (blob) {

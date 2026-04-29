@@ -249,9 +249,10 @@ def export_network_data():
         posts_out = [p.to_dict() for p in posts] if include_posts else []
 
         # Build bus-id lookup from selected posts to keep only relevant lines.
+        # This includes all bus ID variants for the poles found in the selected feeder/municipality.
         selected_bus_ids = set()
         for p in posts:
-            for bus_val in (p.pole_number, p.primary_bus_id, p.sec_bus_id, p.transformer_bus_id):
+            for bus_val in (p.pole_number, p.primary_bus_id, getattr(p, 'sec_bus_id', None), p.transformer_bus_id):
                 val = (bus_val or '').strip()
                 if val:
                     selected_bus_ids.add(val)
@@ -260,19 +261,40 @@ def export_network_data():
         lines = data.get('lines', []) if isinstance(data, dict) else []
         filtered_lines = []
 
-        if filter_type == 'feeder':
-            target = filter_value.lower()
-            for line in lines:
-                line_feeder = (line.get('feeder') or '').strip().lower()
-                if line_feeder == target:
-                    filtered_lines.append(line)
-        else:
-            # Municipality filter: keep lines connected to selected posts by bus id.
-            for line in lines:
-                from_bus = (line.get('from_bus') or '').strip()
-                to_bus = (line.get('to_bus') or '').strip()
-                if (from_bus and from_bus in selected_bus_ids) or (to_bus and to_bus in selected_bus_ids):
-                    filtered_lines.append(line)
+        # Filter lines: keep segments where at least one end is connected to our selected set of buses.
+        # This handles segments that might be missing explicit technical feeder data but are part of the path.
+        target_feeder = filter_value.lower() if filter_type == 'feeder' else None
+        
+        for line in lines:
+            from_bus = (line.get('from_bus') or '').strip()
+            to_bus = (line.get('to_bus') or '').strip()
+            line_feeder = (line.get('feeder') or '').strip().lower()
+
+            # Inclusion rules:
+            # 1. Explicit feeder match (for lines that have the attribute)
+            # 2. Connection to a selected bus (for 'healing' gaps and municipality matches)
+            is_match = False
+            if target_feeder and line_feeder == target_feeder:
+                is_match = True
+            elif (from_bus and from_bus in selected_bus_ids) or (to_bus and to_bus in selected_bus_ids):
+                is_match = True
+            
+            if is_match:
+                filtered_lines.append(line)
+
+        line_type = request.args.get('line_type', 'both').lower()
+        if line_type != 'both':
+            final_lines = []
+            for line in filtered_lines:
+                conn_type = (line.get('connection_type') or '').lower()
+                is_sec = 'secondary' in conn_type
+                
+                if line_type == 'primary' and is_sec:
+                    continue
+                if line_type == 'secondary' and not is_sec:
+                    continue
+                final_lines.append(line)
+            filtered_lines = final_lines
 
         municipality_boundary = []
         if filter_type == 'municipality':
