@@ -818,6 +818,86 @@ def get_network_geometry(app):
             except Exception as e:
                 app.logger.warning("Loading BusNode coords failed: %s", e)
 
+            # 1b. Bridge short-form bus IDs (P0, P16-1) with long-form BusNode feeder data
+            #     Short-ID BusNodes have coordinates but no feeder.
+            #     Long-ID BusNodes (P00000000, P00000016-1) have feeder data but no coordinates.
+            #     This step queries all BusNodes with feeder regardless of coords, normalizes
+            #     both IDs to the same format, and copies feeder to the short-ID entries.
+            try:
+                import re as _re
+                def _normalize_bus_id(bus_id):
+                    """Convert P16-1 → P00000016-1, P0 → P00000000 etc."""
+                    m = _re.match(r'^P(\d+)(-.+)?$', bus_id, _re.IGNORECASE)
+                    if m:
+                        num = m.group(1).lstrip('0') or '0'
+                        suffix = m.group(2) or ''
+                        return f"P{int(num):08d}{suffix}"
+                    return None
+
+                # Query ALL BusNodes that have feeder (whether or not they have coords)
+                feeder_bns = db.session.query(BusNode.bus_id, BusNode.feeder).filter(
+                    BusNode.feeder.isnot(None)
+                ).all()
+
+                # Build lookup: normalized_id -> feeder
+                norm_feeder_lookup = {}
+                for bid, feeder in feeder_bns:
+                    norm = _normalize_bus_id(bid)
+                    if norm and feeder:
+                        norm_feeder_lookup[norm] = feeder
+                    # Also store the raw ID for direct matches
+                    norm_feeder_lookup[bid] = feeder
+
+                # Propagate feeder to all coord-having entries that lack feeder
+                for bid in list(bus_to_coord.keys()):
+                    if not bus_to_coord[bid].get('feeder'):
+                        # Try direct match first
+                        feeder = norm_feeder_lookup.get(bid)
+                        if not feeder:
+                            # Try normalized match
+                            norm = _normalize_bus_id(bid)
+                            if norm:
+                                feeder = norm_feeder_lookup.get(norm)
+                        if feeder:
+                            bus_to_coord[bid]['feeder'] = feeder
+            except Exception as e:
+                app.logger.warning("Feeder bridging (short/long bus ID) failed: %s", e)
+
+            # 1c. Topology-based feeder propagation (Healing)
+            #     Some segments lack technical feeder data in both Post and BusNode tables.
+            #     If they are physically connected to a known feeder path, they should inherit it.
+            try:
+                from collections import deque
+                
+                # Build undirected adjacency from LineConnection to find physical neighbors
+                # We do this BEFORE the main line building loop to heal the coord lookup.
+                from models import LineConnection
+                phys_adj = defaultdict(set)
+                for conn in db.session.query(LineConnection.from_bus, LineConnection.to_bus).all():
+                    fb = (conn.from_bus or "").strip()
+                    tb = (conn.to_bus or "").strip()
+                    if fb and tb:
+                        phys_adj[fb].add(tb)
+                        phys_adj[tb].add(fb)
+                
+                # BFS to propagate feeder from known nodes to unknown neighbors
+                # Start with all nodes that already have a feeder
+                queue = deque()
+                for bid, coord in bus_to_coord.items():
+                    if coord.get('feeder'):
+                        queue.append(bid)
+                
+                while queue:
+                    current = queue.popleft()
+                    current_feeder = bus_to_coord[current]['feeder']
+                    
+                    for neighbor in phys_adj.get(current, []):
+                        if neighbor in bus_to_coord and not bus_to_coord[neighbor].get('feeder'):
+                            bus_to_coord[neighbor]['feeder'] = current_feeder
+                            queue.append(neighbor)
+            except Exception as e:
+                app.logger.warning("Topology-based feeder propagation failed: %s", e)
+
             # 2. Complement with Post data (for secondary buses and legacy records)
             posts = db.session.query(Post).all()
             for p in posts:
@@ -837,6 +917,13 @@ def get_network_geometry(app):
                         b_key = str(bus_val).strip()
                         if b_key not in bus_to_coord:
                             bus_to_coord[b_key] = coord
+                        else:
+                            # Propagate feeder/circuit from Post if BusNode was missing them
+                            existing = bus_to_coord[b_key]
+                            if not existing.get("feeder") and coord.get("feeder"):
+                                existing["feeder"] = coord["feeder"]
+                            if not existing.get("circuit") and coord.get("circuit"):
+                                existing["circuit"] = coord["circuit"]
                 
                 key = (coord["lat"], coord["lng"], coord.get("pole_number"))
                 if key not in seen_node:
@@ -1044,9 +1131,7 @@ def get_network_geometry(app):
             # 5. Line connections (from_bus → to_bus)
             try:
                 from models import LineConnection
-                for conn in db.session.query(LineConnection).filter(
-                    LineConnection.connection_type.notin_(['Primary_to_Transformer', 'Transformer_to_Secondary'])
-                ).all():
+                for conn in db.session.query(LineConnection).all():
                     _add_edge(
                         lines, bus_to_coord, conn.from_bus, conn.to_bus,
                         conn.connection_type or "Line_Connection",
