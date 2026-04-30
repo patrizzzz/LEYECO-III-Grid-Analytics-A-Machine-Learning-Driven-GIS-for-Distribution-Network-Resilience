@@ -267,10 +267,33 @@ class TransformerImporter(BaseImporter):
             
             # Integrated Healing Logic with context
             linked_post = LinkageService.fuzzy_match_transformer_to_post(tx, context=context)
-            if linked_post:
+            if linked_post and linked_post.lat and linked_post.lng and linked_post.lat != 0.0 and linked_post.lng != 0.0:
                 linked_post.has_transformer = True
                 linked_post.kva_rating = tx.kva_rating
                 linked_post.transformer_bus_id = tx.from_primary_bus_id or tx.to_secondary_bus_id
+                
+                # AUTO-HEAL: Update the BusNode linkage to point to THIS visible post
+                target_bus = tx.from_primary_bus_id or tx.to_secondary_bus_id
+                if target_bus:
+                    from services.linkage_service import normalize_id
+                    norm_target = normalize_id(target_bus)
+                    
+                    # Extra safety: Ensure we aren't mapping a lateral ID to a highway pole
+                    is_lateral_tx = '-' in str(target_bus)
+                    pole_id_str = str(linked_post.pole_number or linked_post.primary_bus_id or "")
+                    is_lateral_pole = '-' in pole_id_str
+                    
+                    if is_lateral_tx and not is_lateral_pole:
+                        # Skip auto-heal for this mismatch to prevent pollution
+                        pass
+                    else:
+                        # Find any existing bus nodes for this ID and point them to the linked_post
+                        for bn in context.bus_nodes:
+                            if normalize_id(bn.bus_id) == norm_target:
+                                if bn.pole_id != linked_post.id:
+                                    bn.pole_id = linked_post.id
+                                    bn.pole_number = linked_post.pole_number
+                                    db.session.add(bn)
 
             count += 1
             if count % batch_size == 0:

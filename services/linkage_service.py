@@ -24,13 +24,14 @@ def normalize_id(id_str):
 class LinkageContext:
     """Helper to cache lookup maps for fuzzy matching to avoid repeated O(P) work."""
     def __init__(self, posts=None, bus_nodes=None):
-        posts = posts or []
-        bus_nodes = bus_nodes or []
-        self.post_by_id = {str(p.id): p for p in posts}
+        self.posts = posts or []
+        self.bus_nodes = bus_nodes or []
+        self.post_by_id = {str(p.id): p for p in self.posts}
         # Use normalized IDs for lookup maps
-        self.post_by_pole = {normalize_id(p.pole_number): p for p in posts if p.pole_number}
-        self.post_by_bus = {normalize_id(p.primary_bus_id): p for p in posts if p.primary_bus_id}
-        self.bus_node_map = {normalize_id(bn.bus_id): bn.pole_id for bn in bus_nodes if bn.bus_id and bn.pole_id}
+        self.post_by_pole = {normalize_id(p.pole_number): p for p in self.posts if p.pole_number}
+        self.post_by_bus = {normalize_id(p.primary_bus_id): p for p in self.posts if p.primary_bus_id}
+        self.post_by_seq = {str(p.pole_num): p for p in self.posts if p.pole_num is not None}
+        self.bus_node_map = {normalize_id(bn.bus_id): bn.pole_id for bn in self.bus_nodes if bn.bus_id and bn.pole_id}
 
 class LinkageService:
     """Consolidated topology reconciliation logic from legacy heal scripts."""
@@ -45,11 +46,13 @@ class LinkageService:
             post_by_id = context.post_by_id
             post_by_pole = context.post_by_pole
             post_by_bus = context.post_by_bus
+            post_by_seq = getattr(context, 'post_by_seq', {})
             bus_node_map = context.bus_node_map
         else:
             post_by_id = {str(p.id): p for p in posts or []}
             post_by_pole = {normalize_id(p.pole_number): p for p in posts or [] if p.pole_number}
             post_by_bus = {normalize_id(p.primary_bus_id): p for p in posts or [] if p.primary_bus_id}
+            post_by_seq = {str(p.pole_num): p for p in posts or [] if getattr(p, 'pole_num', None) is not None}
             bus_node_map = {normalize_id(k): v for k, v in (bus_node_map or {}).items()}
         
         # Collect all likely bus attributes across different asset models
@@ -62,36 +65,64 @@ class LinkageService:
         for bus_id in buses_to_check:
             if not bus_id: continue
             norm_id = normalize_id(bus_id)
+            has_dash = '-' in str(bus_id)
             
-            # 1. Explicit BusNode Mapping (Priority)
+            # 1. Direct match on pole_number or primary_bus_id (Priority)
+            p = post_by_bus.get(norm_id) or post_by_pole.get(norm_id)
+            
+            # VALIDATION: If the asset has a dash, the pole MUST also have a dash in its identifier
+            # or primary bus ID to be considered a valid match.
+            if p and has_dash:
+                pole_id_str = str(p.pole_number or p.primary_bus_id or "")
+                if '-' not in pole_id_str:
+                    p = None # Reject highway pole for lateral asset
+            
+            if p: return p
+
+            # 2. Explicit BusNode Mapping (Fallback)
             if bus_node_map and norm_id in bus_node_map:
                 target_post_id = str(bus_node_map[norm_id])
                 p = post_by_id.get(target_post_id)
-                if p: return p
-
-            # 2. Direct match on pole_number or primary_bus_id
-            p = post_by_bus.get(norm_id) or post_by_pole.get(norm_id)
-            if p: return p
                 
-            # 3. Regex variants (Fuzzy fallback)
-            # Only if direct match fails, try stripping punctuation or common prefixes
-            parts = [part for part in re.split(r'[^a-zA-Z0-9]', bus_id) if part]
-            candidates = set()
-            if len(parts) > 1:
-                last = parts[-1].upper()
-                candidates.add(normalize_id(last))
-                m = re.match(r'^(\d+)[A-Z]*$', last)
-                if m: candidates.add(normalize_id(m.group(1)))
-                candidates.add(normalize_id(parts[0]))
-            else:
-                m = re.search(r'\d+', bus_id)
-                if m:
-                    num = m.group(0)
-                    candidates.add(normalize_id(num))
-            
-            for c in candidates:
-                p = post_by_bus.get(c) or post_by_pole.get(c)
+                # VALIDATION: Same dash consistency check for BusNode mappings
+                if p and has_dash:
+                    pole_id_str = str(p.pole_number or p.primary_bus_id or "")
+                    if '-' not in pole_id_str:
+                        p = None
+                
                 if p: return p
+            
+            # 2.5 Strip 'P' prefix and leading zeros (e.g. P0000000016-13 -> 16-13)
+            # CRITICAL: We only allow the numeric fallback (post_by_seq) if there is NO dash.
+            m = re.match(r'^P0*([0-9].*)$', bus_id.upper())
+            if m:
+                g1 = m.group(1)
+                stripped_norm = normalize_id(g1)
+                
+                # Check direct maps with stripped ID
+                p = post_by_bus.get(stripped_norm) or post_by_pole.get(stripped_norm)
+                
+                # Dash consistency check for stripped match
+                if p and has_dash:
+                    pole_id_str = str(p.pole_number or p.primary_bus_id or "")
+                    if '-' not in pole_id_str:
+                        p = None
+                
+                if p: return p
+                
+                # 3. Numeric Fallback (post_by_seq) - ONLY for non-lateral IDs
+                if not has_dash:
+                    try:
+                        seq_val = int(g1)
+                        # Align P<N> with Num <N> (e.g., P34 -> Pole 35 which is Num 34)
+                        adj_seq = str(seq_val)
+                        p = context.post_by_seq.get(adj_seq)
+                        if p: return p
+                    except (ValueError, TypeError):
+                        p = context.post_by_seq.get(g1)
+                        if p: return p
+                    
+            # 4. Fuzzy fallback removed to enforce strict data matching
                     
         return None
 
@@ -114,7 +145,7 @@ class LinkageService:
         # Reconcile Transformers
         for t in transformers:
             p = cls.fuzzy_match_asset_to_post(t, context=context)
-            if p:
+            if p and p.lat and p.lng and p.lat != 0.0 and p.lng != 0.0:
                 p.has_transformer = True
                 p.kva_rating = t.kva_rating
                 p.transformer_bus_id = t.from_primary_bus_id or t.to_secondary_bus_id
