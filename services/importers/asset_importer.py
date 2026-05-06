@@ -8,7 +8,7 @@ class PostImporter(BaseImporter):
     file_type = 'posts'
     model_class = Post
     header_mappings = {
-        'pole_number': ['pole id number', 'Post ID', 'post_id', 'Pole ID', 'pole_id', 'pole_number', 'Pole Number', 'Post No', 'Pole No', 'ID', 'id', 'Name', 'name'],
+        'pole_number': ['pole id number', 'Post ID', 'post_id', 'Pole ID', 'pole_id', 'pole_number', 'Pole Number', 'Post No', 'Pole No', 'ID', 'id'],
         'pole_num': ['pole_num', 'Pole Num', 'POLE_NUM', 'sequence_number', 'No.', 'no'],
         'name': ['name', 'Name', 'Post Name'],
         'feeder': ['feeder', 'Feeder'],
