@@ -471,3 +471,24 @@ def api_simulate_outage():
         impact = calculate_outage_impact(start_bus)
         return jsonify(impact), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
+
+@analysis_api_bp.route('/network/predicted-lines', methods=['GET'])
+def api_predicted_lines():
+    """
+    Endpoint to retrieve predicted nearest-neighbor connections for orphaned posts.
+    """
+    try:
+        from services.network_geometry_db import get_predicted_lines
+        lines = get_predicted_lines(current_app)
+        return jsonify({
+            'status': 'success',
+            'count': len(lines),
+            'lines': lines
+        }), 200
+    except Exception as e:
+        current_app.logger.error(f"Failed to fetch predicted lines: {e}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e),
+            'lines': []
+        }), 500
