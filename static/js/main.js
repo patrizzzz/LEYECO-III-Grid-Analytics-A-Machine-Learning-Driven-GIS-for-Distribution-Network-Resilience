@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', function () {
             </div>
             <div class="popup-connect-actions" style="margin-top:4px;">
                 <button class="btn btn-outline btn-trace-downstream" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">⚡ Trace Downstream</button>
+                <button class="btn btn-outline btn-trace-substation" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}" style="border-color: #0ea5e9; color: #0ea5e9;">🏢 Trace from Substation</button>
                 <button class="btn btn-outline btn-outage-sim" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">🔴 Outage Simulation</button>
             </div>
             <div class="popup-connections-inner" style="margin-top:10px; font-size:0.85rem;"></div>
@@ -338,6 +339,70 @@ document.addEventListener('DOMContentLoaded', function () {
                 showNoticeModal('Error', 'Trace failed: ' + (err.message || err));
             });
       };
+      
+      const subBtn = container.querySelector('.btn-trace-substation');
+      if (subBtn) subBtn.onclick = () => {
+          const busId = subBtn.dataset.pole || subBtn.dataset.bus || subBtn.dataset.transformerBus;
+          if (!busId) { showNoticeModal('Info', 'No bus ID available'); return; }
+          
+          subBtn.textContent = '🔍 Locating Substation...';
+          subBtn.disabled = true;
+
+          // Step 1: Find the feeder head
+          fetch('/api/network/feeder-head?id=' + encodeURIComponent(busId))
+            .then(r => r.json())
+            .then(headRes => {
+                if (headRes.error) {
+                    subBtn.textContent = '🏢 Trace from Substation';
+                    subBtn.disabled = false;
+                    showNoticeModal('Error', 'Could not locate substation for this feeder: ' + headRes.error);
+                    return;
+                }
+
+                const headId = headRes.feeder_head;
+                subBtn.textContent = '⚡ Tracing from ' + headId + '...';
+
+                // Step 2: Trigger trace from the resolved head
+                return fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(headId) + '&direction=downstream');
+            })
+            .then(r => r ? r.json() : null)
+            .then(result => {
+                if (!result) return;
+                subBtn.textContent = '🏢 Trace from Substation';
+                subBtn.disabled = false;
+
+                if (result.error) { showNoticeModal('Error', result.error); return; }
+                
+                const buses = result.visited_buses || [];
+                const startBus = result.start_bus || busId;
+
+                let html = '<div class="trace-summary-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">';
+                html += '<div style="width:40px; height:40px; border-radius:10px; background:#e0f2fe; color:#0ea5e9; display:flex; align-items:center; justify-content:center; font-size:20px;">🏢</div>';
+                html += '<div><div style="font-weight:700; font-size:16px;">Full Feeder Trace</div><div style="font-size:12px; color:#64748b;">Substation Root: ' + startBus + '</div></div></div>';
+                
+                html += '<div style="display:grid; grid-template-columns: 1fr; gap:10px; margin-bottom:16px;">';
+                html += '<div style="padding:16px; background:var(--surface-secondary); border-radius:8px; border:1px solid var(--border);">';
+                html += '<div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Total Downstream Nodes</div>';
+                html += '<div style="font-size:24px; font-weight:700; color:#0ea5e9;">' + buses.length + '</div>';
+                html += '</div></div>';
+
+                if (buses.length > 0) {
+                    html += '<div style="font-weight:600; font-size:13px; margin-bottom:8px;">Network Backbone Nodes</div>';
+                    html += '<div style="max-height:180px; overflow-y:auto; font-size:12px; background:var(--surface-secondary); padding:10px; border-radius:8px; font-family:var(--font-mono); line-height:1.6;">';
+                    buses.forEach(function (b, idx) { 
+                        html += '<span style="color:#64748b;">' + (idx+1).toString().padStart(2, '0') + '. </span>' + b + '<br>'; 
+                    });
+                    html += '</div>';
+                }
+                
+                showNoticeModal('Full Feeder Trace Result', html);
+                visualizeNetworkAnalysis('trace', result, startBus);
+            })
+            .catch(err => {
+                subBtn.textContent = '🏢 Trace from Substation';
+                subBtn.disabled = false;
+                showNoticeModal('Error', 'Full feeder trace failed: ' + (err.message || err));
+            });
 
       // 8. Network Analysis (Outage)
       const outBtn = container.querySelector('.btn-outage-sim');
