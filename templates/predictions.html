@@ -1440,9 +1440,8 @@
 
 
             window.navigateToMap = async function (tid) {
-                // Show a brief loading state if needed, but redirection is usually fast
                 try {
-                    const resp = await fetch('/api/transformer-location/' + encodeURIComponent(tid));
+                    const resp = await fetch('/api/transformers/find/' + encodeURIComponent(tid));
                     const loc = await resp.json();
                     if (loc.lat && loc.lng) {
                         let url = '/map?lat=' + loc.lat + '&lng=' + loc.lng;
