@@ -8,8 +8,8 @@ class PostImporter(BaseImporter):
     file_type = 'posts'
     model_class = Post
     header_mappings = {
-        'pole_number': ['Post ID', 'post_id', 'Pole ID', 'pole_id', 'pole_number', 'Pole Number', 'post_id', 'Post ID'],
-        'pole_num': ['pole_num', 'Pole Num', 'POLE_NUM', 'sequence_number'],
+        'pole_number': ['pole id number', 'Post ID', 'post_id', 'Pole ID', 'pole_id', 'pole_number', 'Pole Number', 'Post No', 'Pole No', 'ID', 'id', 'Name', 'name'],
+        'pole_num': ['pole_num', 'Pole Num', 'POLE_NUM', 'sequence_number', 'No.', 'no'],
         'name': ['name', 'Name', 'Post Name'],
         'feeder': ['feeder', 'Feeder'],
         'phasing': ['phasing', 'Phasing'],
@@ -66,6 +66,10 @@ class PostImporter(BaseImporter):
             if not post:
                 # Create new post
                 post = Post(pole_number=pole_num)
+                # Ensure primary_bus_id is set to the pole_number by default for matching
+                if not post.primary_bus_id:
+                    post.primary_bus_id = pole_num
+                
                 db.session.add(post)
                 if pole_num:
                     existing_posts[str(pole_num).strip().lower()] = post

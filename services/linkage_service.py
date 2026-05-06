@@ -32,6 +32,15 @@ class LinkageContext:
         self.post_by_bus = {normalize_id(p.primary_bus_id): p for p in self.posts if p.primary_bus_id}
         self.post_by_seq = {str(p.pole_num): p for p in self.posts if p.pole_num is not None}
         self.bus_node_map = {normalize_id(bn.bus_id): bn.pole_id for bn in self.bus_nodes if bn.bus_id and bn.pole_id}
+        # Absolute numeric lookup: extracts the pure integer from pole_number (e.g. "P116" -> "116").
+        # This ensures P0000000116 always resolves to the pole physically labelled 116, not a
+        # DB-sequence offset. Used as the authoritative fallback in Step 3.
+        self.post_by_pole_num = {}
+        for p in self.posts:
+            if p.pole_number:
+                m = re.match(r'^[A-Za-z]*0*(\d+)', str(p.pole_number))
+                if m:
+                    self.post_by_pole_num[m.group(1)] = p
 
 class LinkageService:
     """Consolidated topology reconciliation logic from legacy heal scripts."""
@@ -65,7 +74,9 @@ class LinkageService:
         for bus_id in buses_to_check:
             if not bus_id: continue
             norm_id = normalize_id(bus_id)
-            has_dash = '-' in str(bus_id)
+            # Check for dash in Bus ID OR the asset's own ID (e.g. transformer_id)
+            asset_id = str(getattr(asset, 'transformer_id', '') or getattr(asset, 'regulator_id', '') or '')
+            has_dash = '-' in str(bus_id) or '-' in asset_id
             
             # 1. Direct match on pole_number or primary_bus_id (Priority)
             p = post_by_bus.get(norm_id) or post_by_pole.get(norm_id)
@@ -110,13 +121,22 @@ class LinkageService:
                 
                 if p: return p
                 
-                # 3. Numeric Fallback (post_by_seq) - ONLY for non-lateral IDs
+                # 3. Absolute Numeric Fallback - ONLY for non-lateral IDs.
+                # Extracts the raw integer from the bus ID (e.g. "116" from "P0000000116")
+                # and looks up the pole whose pole_number physically contains that same number.
+                # This is more reliable than post_by_seq which uses an unrelated DB integer.
                 if not has_dash:
                     try:
-                        seq_val = int(g1)
-                        # Align P<N> with Num <N> (e.g., P34 -> Pole 35 which is Num 34)
-                        adj_seq = str(seq_val)
-                        p = context.post_by_seq.get(adj_seq)
+                        # Extract only the leading numeric part (e.g. "94" from "94A")
+                        numeric_match = re.search(r'^(\d+)', g1)
+                        if numeric_match:
+                            num_str = str(int(numeric_match.group(1)))
+                            pole_num_map = getattr(context, 'post_by_pole_num', {})
+                            p = pole_num_map.get(num_str)
+                            if p: return p
+                        
+                        # Fallback to the full string match in sequence map
+                        p = context.post_by_seq.get(g1)
                         if p: return p
                     except (ValueError, TypeError):
                         p = context.post_by_seq.get(g1)
@@ -141,8 +161,14 @@ class LinkageService:
         
         context = LinkageContext(posts=posts, bus_nodes=bus_nodes)
         
+        # 0. Reset all existing assignments to prevent "ghost" assets on wrong poles
+        for p in posts:
+            p.has_transformer = False
+            p.kva_rating = None
+            p.transformer_bus_id = None
+
         count = 0
-        # Reconcile Transformers
+        # 1. Reconcile Transformers
         for t in transformers:
             p = cls.fuzzy_match_asset_to_post(t, context=context)
             if p and p.lat and p.lng and p.lat != 0.0 and p.lng != 0.0:

@@ -92,7 +92,7 @@ document.addEventListener('DOMContentLoaded', function () {
     inspectorContent.innerHTML = `
       <div class="inspector-view-layer">
         <div class="inspector-header">
-          <h3 style="margin:0; font-size:1.1rem; color:var(--text-primary);">Asset Inspector</h3>
+          <h3 style="margin:0; font-size:1.1rem; color:var(--text-primary);">Asset Inspector (DB ID: ${p.id})</h3>
           <button id="close-inspector-inner" class="btn-icon" style="background:var(--surface-secondary);border-radius:50%;">✕</button>
         </div>
         <div class="inspector-body">
@@ -456,7 +456,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const targetLng = window._targetLng;
     const targetPostId = window._targetPostId;
     if (Number.isFinite(targetLat) && Number.isFinite(targetLng)) {
-      map.setView([targetLat, targetLng], 15); // Zoom to level 15 for post location
+      map.setView([targetLat, targetLng], 18); // Zoom to level 18 for precise transformer/post location
     }
 
     // Default to OSM
@@ -478,6 +478,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const primaryLinesLayer = L.layerGroup().addTo(map);
   const secondaryLinesLayer = L.layerGroup();
   const networkLinesLayer = L.layerGroup().addTo(map);
+  const predictedLinesLayer = L.layerGroup();
   const municipalityLayer = L.geoJSON(null, {
     style: function(feature) {
       const muniName = feature.properties.NAME_2 || feature.properties.name || 'Unknown';
@@ -601,7 +602,8 @@ document.addEventListener('DOMContentLoaded', function () {
     'LatLongData (raw)': latlongLayer,
     'Primary Lines': primaryLinesLayer,
     'Secondary Lines': secondaryLinesLayer,
-    'Network Lines (DB)': networkLinesLayer
+    'Network Lines (DB)': networkLinesLayer,
+    'Predicted Lines': predictedLinesLayer
   };
 
   // Track whether each line layer overlay is enabled by the user (Layers section checkboxes)
@@ -615,6 +617,8 @@ document.addEventListener('DOMContentLoaded', function () {
   // --- Global Line Weight State (separate per line type) ---
   let primaryLineWeight = parseInt(localStorage.getItem('primaryLineWeight')) || 2;
   let secondaryLineWeight = parseInt(localStorage.getItem('secondaryLineWeight')) || 1;
+  let predictedLineColor = localStorage.getItem('predictedLineColor') || '#a855f7';
+  let predictedLineWeight = parseInt(localStorage.getItem('predictedLineWeight')) || 2;
 
   // Helper function to get weight per connection type
   function getLineWeight(connType) {
@@ -679,7 +683,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const f = p.feeder || '';
       const isFeederMatch = showAllFeeds || activeFeeders.has(f);
       
-      const isTrans = p.has_transformer === true || (p.kva_rating != null && p.kva_rating > 0);
+      const isTrans = p.has_transformer === true;
       let isTypeMatch = false;
       if (isTrans && showTransformers) isTypeMatch = true;
       if (!isTrans && showPoles) isTypeMatch = true;
@@ -934,7 +938,8 @@ document.addEventListener('DOMContentLoaded', function () {
       'LatLongData (raw)': false,
       'Primary Lines': true,
       'Secondary Lines': true,
-      'Network Lines (DB)': true
+      'Network Lines (DB)': true,
+      'Predicted Lines': true
     };
 
     Object.keys(overlays).forEach(name => {
@@ -1056,6 +1061,31 @@ document.addEventListener('DOMContentLoaded', function () {
       updateNetworkLineColors();
     });
     l5.appendChild(colorRow);
+    
+    // Predicted Color Picker
+    const predColorRow = document.createElement('div');
+    predColorRow.className = 'msp-color-row';
+    predColorRow.innerHTML = `
+      <span class="msp-range-label">Predicted Line Color</span>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <input type="color" class="msp-color-input" value="${predictedLineColor}">
+        <button class="msp-reset-btn" title="Reset">✕</button>
+      </div>
+    `;
+    const pcInp = predColorRow.querySelector('.msp-color-input');
+    const prBtn = predColorRow.querySelector('.msp-reset-btn');
+    pcInp.addEventListener('input', (e) => {
+      predictedLineColor = e.target.value;
+      localStorage.setItem('predictedLineColor', predictedLineColor);
+      updatePredictedLinesStyle();
+    });
+    prBtn.addEventListener('click', () => {
+      predictedLineColor = '#a855f7';
+      localStorage.setItem('predictedLineColor', predictedLineColor);
+      pcInp.value = '#a855f7';
+      updatePredictedLinesStyle();
+    });
+    l5.appendChild(predColorRow);
 
     // Thickness Sliders
     l5.appendChild(createSliderRow('Primary Weight', primaryLineWeight, 1, 10, (val) => {
@@ -1067,6 +1097,11 @@ document.addEventListener('DOMContentLoaded', function () {
       secondaryLineWeight = val;
       localStorage.setItem('secondaryLineWeight', val);
       updateNetworkLineWeights();
+    }));
+    l5.appendChild(createSliderRow('Predicted Weight', predictedLineWeight, 1, 10, (val) => {
+      predictedLineWeight = val;
+      localStorage.setItem('predictedLineWeight', val);
+      updatePredictedLinesStyle();
     }));
 
     // Phasing Toggle
@@ -1553,6 +1588,17 @@ document.addEventListener('DOMContentLoaded', function () {
     secondaryLinesLayer.eachLayer(updateWeight);
   }
 
+  function updatePredictedLinesStyle() {
+    predictedLinesLayer.eachLayer(layer => {
+      if (layer instanceof L.Polyline) {
+        layer.setStyle({
+          color: predictedLineColor,
+          weight: predictedLineWeight
+        });
+      }
+    });
+  }
+
   function haversine(lat1, lon1, lat2, lon2) {
     const R = 6371000; // meters
     const toRad = (deg) => deg * Math.PI / 180;
@@ -1734,19 +1780,45 @@ document.addEventListener('DOMContentLoaded', function () {
         // If a target post id was provided via URL params, center/fly to it and open inspector
         try {
           const targetId = window._targetPostId;
+          const tLat = window._targetLat;
+          const tLng = window._targetLng;
+
           if (targetId) {
             const tid = parseInt(targetId, 10);
             console.log('Targeting post ID:', tid);
             setTimeout(function () {
               const marker = postMarkers[tid];
               if (marker && marker.getLatLng) {
-                try { map.flyTo(marker.getLatLng(), 17); } catch (e) { map.setView(marker.getLatLng(), 17); }
-                // Trigger click to open both popup AND the sidebar inspector
+                try { map.flyTo(marker.getLatLng(), 18); } catch (e) { map.setView(marker.getLatLng(), 18); }
                 marker.fire('click');
               } else {
                 console.warn('Target marker not found:', tid);
               }
-            }, 500); // Slightly longer delay to ensure layer is fully ready
+            }, 500);
+          } else if (Number.isFinite(tLat) && Number.isFinite(tLng)) {
+            // If we have coordinates but no explicit post ID, try to find the nearest marker within 3 meters
+            console.log('Targeting coordinates without ID. Searching for nearest post...', tLat, tLng);
+            setTimeout(function () {
+                let nearest = null;
+                let minDist = 3.0; // Max search radius: 3 meters
+
+                _allPostMarkers.forEach(m => {
+                    if (!m.getLatLng) return;
+                    const dist = map.distance([tLat, tLng], m.getLatLng());
+                    if (dist < minDist) {
+                        minDist = dist;
+                        nearest = m;
+                    }
+                });
+
+                if (nearest) {
+                    console.log('Auto-selected nearest post:', nearest._postData.id, 'Distance:', minDist.toFixed(2), 'm');
+                    try { map.flyTo(nearest.getLatLng(), 18); } catch (e) { map.setView(nearest.getLatLng(), 18); }
+                    nearest.fire('click');
+                } else {
+                    console.log('No posts found within 3m of target coordinates.');
+                }
+            }, 600);
           }
         } catch (e) { console.error('Error in target post handling:', e); }
       })
@@ -2137,12 +2209,61 @@ document.addEventListener('DOMContentLoaded', function () {
       .catch(function (err) { console.warn('Network geometry load failed:', err); });
   }
 
+  function loadPredictedLines() {
+    fetch('/api/network/predicted-lines')
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'success' && data.lines) {
+          predictedLinesLayer.clearLayers();
+          data.lines.forEach(line => {
+            const poly = L.polyline([[line.lat1, line.lng1], [line.lat2, line.lng2]], {
+              color: predictedLineColor, 
+              weight: predictedLineWeight,
+              opacity: 0.8,
+              renderer: mainCanvas
+            });
+            
+            const popup = `
+              <div class="asset-popup">
+                <div class="popup-header" style="border-bottom: 1px solid rgba(168, 85, 247, 0.2); margin-bottom: 8px; padding-bottom: 4px;">
+                  <h4 style="margin: 0; color: #a855f7; display: flex; align-items: center; gap: 8px;">
+                    <svg style="width:16px;height:16px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    Predicted Line
+                  </h4>
+                </div>
+                <div class="popup-kv-pair">
+                  <div class="popup-kv-label">From Pole:</div>
+                  <div class="popup-kv-value">${line.from_pole}</div>
+                </div>
+                <div class="popup-kv-pair">
+                  <div class="popup-kv-label">To Grid Pole:</div>
+                  <div class="popup-kv-value">${line.to_pole}</div>
+                </div>
+                <div class="popup-kv-pair">
+                  <div class="popup-kv-label">Predicted Distance:</div>
+                  <div class="popup-kv-value">${line.distance_m} m</div>
+                </div>
+                <div class="popup-note" style="background: rgba(168, 85, 247, 0.05); border-left: 2px solid #a855f7; margin-top: 10px; padding: 6px;">
+                  This is an inferred connection based on proximity to the existing network.
+                </div>
+              </div>
+            `;
+            poly.bindPopup(popup);
+            poly.addTo(predictedLinesLayer);
+          });
+          console.log('Loaded ' + data.count + ' predicted lines.');
+        }
+      })
+      .catch(err => console.warn('Failed to load predicted lines:', err));
+  }
+
 
   // Load connections after posts are loaded
   setTimeout(function () {
     console.log('Calling loadLineConnections after posts...');
     loadLineConnections();
     loadNetworkGeometry();
+    loadPredictedLines();
     loadMunicipalities(); // Call municipality load
   }, 500);
 
@@ -3168,6 +3289,7 @@ document.addEventListener('DOMContentLoaded', function () {
           <div class="search-mode-selector" style="display:flex; align-items:center; border-right: 1px solid var(--border); padding-right: 8px; margin-right: 8px;">
             <select id="search-mode-select" style="background:transparent; border:none; font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); cursor:pointer; outline:none; padding: 4px 0;">
               <option value="customer" selected>Customer</option>
+              <option value="poles">Poles</option>
               <option value="coord">Coordinates</option>
               <option value="connection">Connection</option>
             </select>
@@ -3345,10 +3467,12 @@ document.addEventListener('DOMContentLoaded', function () {
         var mode = modeSelect.value;
         customerSearchInput.placeholder =
           mode === 'customer'
-            ? 'Customer ID…'
-            : (mode === 'coord'
+            ? 'Customer ID...'
+            : (mode === 'poles'
+                ? 'Pole #, Name or Bus ID...'
+                : (mode === 'coord'
                 ? 'Lat, Lng (e.g. 14.5, 120.9)'
-                : 'From or To bus (e.g. P0000000108 or 0108→0110)');
+                : 'From or To bus (e.g. P0000000108 or 0108→0110)'));
         customerSearchInput.value = '';
         customerSearchSuggestions.classList.remove('active');
         updateSearchClearButtonVisibility();
@@ -3363,6 +3487,46 @@ document.addEventListener('DOMContentLoaded', function () {
 
     if (!query || query.length < 1) {
       customerSearchSuggestions.classList.remove('active');
+      return;
+    }
+
+    if (mode === 'poles') {
+      customerSearchTimeout = setTimeout(() => {
+        fetch(`/api/posts/search?q=${encodeURIComponent(query)}`)
+          .then(r => r.json())
+          .then(data => {
+            customerSearchSuggestions.innerHTML = '';
+            if (data && data.length > 0) {
+              data.forEach(p => {
+                const item = document.createElement('div');
+                item.className = 'customer-search-item';
+                item.innerHTML = `
+                  <div class="customer-search-item-id">📍 ${p.pole_number || '#' + p.id}</div>
+                  <div class="customer-search-item-name">${p.name || ''} ${p.primary_bus_id ? '(' + p.primary_bus_id + ')' : ''}</div>
+                  <div class="customer-search-item-meta" style="font-size:0.7rem; color:var(--text-secondary);">${p.feeder || 'No Feeder'}</div>
+                `;
+                item.onclick = () => {
+                  customerSearchInput.value = p.pole_number || p.name || '#' + p.id;
+                  customerSearchSuggestions.classList.remove('active');
+                  map.flyTo([p.lat, p.lng], 19);
+                  openPostInInspector(p);
+                  
+                  // Show highlight
+                  if (customerSearchHighlight) map.removeLayer(customerSearchHighlight);
+                  customerSearchHighlight = L.circleMarker([p.lat, p.lng], {
+                    radius: 20, color: '#a855f7', weight: 3, fillOpacity: 0.1
+                  }).addTo(map);
+                  setTimeout(() => { if (customerSearchHighlight) map.removeLayer(customerSearchHighlight); }, 5000);
+                };
+                customerSearchSuggestions.appendChild(item);
+              });
+              customerSearchSuggestions.classList.add('active');
+            } else {
+              customerSearchSuggestions.innerHTML = '<div class="customer-search-item"><div class="customer-search-item-id">No poles found</div></div>';
+              customerSearchSuggestions.classList.add('active');
+            }
+          });
+      }, 300);
       return;
     }
 

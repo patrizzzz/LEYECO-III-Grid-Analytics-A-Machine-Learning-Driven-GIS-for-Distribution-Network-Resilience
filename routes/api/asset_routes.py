@@ -11,7 +11,7 @@ from models import (
 )
 from services.post_service import (
     create_post, get_paginated_posts, get_post_detail as svc_get_post_detail, 
-    update_post, delete_post
+    update_post, delete_post, search_posts
 )
 
 asset_api_bp = Blueprint('asset_api', __name__)
@@ -39,6 +39,17 @@ def api_posts():
         return jsonify(result)
     except Exception as e:
         return jsonify({"data": [], "error": str(e)}), 500
+
+@asset_api_bp.route('/posts/search', methods=['GET'])
+def api_posts_search():
+    q = request.args.get('q', '')
+    if not q:
+        return jsonify([])
+    try:
+        results = search_posts(q)
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @asset_api_bp.route('/posts/nearest', methods=['GET'])
 def api_posts_nearest():
@@ -222,11 +233,23 @@ def api_transformers_by_bus(bus_id):
         candidates = DistributionTransformer.query.filter(DistributionTransformer.from_primary_bus_id.in_(lookup_ids) | DistributionTransformer.from_primary_bus_id.endswith(bus_id)).all()
         def match_bus_id(query_id, db_id, allowed_list):
             if not db_id: return False
+            
+            # Strict Lateral Check: If query is main-line (no dash), 
+            # it cannot match a lateral asset (has dash).
+            query_is_lateral = '-' in str(query_id)
+            db_is_lateral = '-' in str(db_id)
+            if not query_is_lateral and db_is_lateral:
+                return False
+
             if db_id in allowed_list: return True
             if not db_id.endswith(query_id): return False
             prefix = db_id[:-len(query_id)]
             return prefix == "" or (prefix.startswith("P") and prefix[1:].replace("0", "") == "")
+            
         transformers = [t for t in candidates if match_bus_id(bus_id, t.from_primary_bus_id, lookup_ids)]
+        # Final safety filter on the transformer ID itself
+        if '-' not in str(bus_id):
+            transformers = [t for t in transformers if '-' not in (t.transformer_id or '')]
         return jsonify({'bus_id': bus_id, 'count': len(transformers), 'transformers': [t.to_dict() for t in transformers]}), 200
     except Exception as e:
         return jsonify({'error': str(e), 'bus_id': bus_id}), 500

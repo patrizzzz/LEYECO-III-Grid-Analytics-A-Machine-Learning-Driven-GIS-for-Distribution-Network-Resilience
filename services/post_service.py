@@ -211,3 +211,28 @@ def delete_post(post_id):
     db.session.delete(p)
     db.session.commit()
     return True
+
+def search_posts(query_str, limit=10):
+    """Search for posts by pole_number, name, or primary_bus_id."""
+    if not query_str:
+        return []
+        
+    search = f"%{query_str}%"
+    results = Post.query.filter(
+        (Post.pole_number.ilike(search)) |
+        (Post.name.ilike(search)) |
+        (Post.primary_bus_id.ilike(search))
+    ).limit(limit).all()
+    
+    return [
+        {
+            "id": p.id,
+            "pole_number": p.pole_number,
+            "name": p.name,
+            "lat": p.lat,
+            "lng": p.lng,
+            "feeder": p.feeder,
+            "primary_bus_id": p.primary_bus_id
+        }
+        for p in results
+    ]

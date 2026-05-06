@@ -1565,3 +1565,127 @@ def trace_upstream_bfs(app, start_bus_ids):
                 queue.append(neighbor)
 
     return visited_set
+
+
+def get_predicted_lines(app):
+    """
+    Identifies orphaned posts (no lines) and predicts connections using a Prim's-style
+    nearest-neighbor algorithm. This forms continuous chains rather than single links.
+    Returns a list of line dicts.
+    """
+    from models import Post, DistributionLineSegment, SecondaryLineSegment, LineConnection
+    from extensions import db
+    import math
+    
+    with app.app_context():
+        # 1. Collect all bus IDs that are already part of existing line segments/connections.
+        connected_bus_ids = set()
+        
+        # Primary distribution lines
+        segments = db.session.query(DistributionLineSegment.from_bus_id, DistributionLineSegment.to_bus_id).all()
+        for f, t in segments:
+            if f: connected_bus_ids.add(str(f).strip())
+            if t: connected_bus_ids.add(str(t).strip())
+            
+        # Secondary distribution lines
+        sec_segments = db.session.query(SecondaryLineSegment.from_bus_id, SecondaryLineSegment.to_bus_id).all()
+        for f, t in sec_segments:
+            if f: connected_bus_ids.add(str(f).strip())
+            if t: connected_bus_ids.add(str(t).strip())
+            
+        # Explicit line connections (manual or imported)
+        conns = db.session.query(LineConnection.from_bus, LineConnection.to_bus).all()
+        for f, t in conns:
+            if f: connected_bus_ids.add(str(f).strip())
+            if t: connected_bus_ids.add(str(t).strip())
+
+        # 2. Retrieve all posts with valid coordinates and categorize them.
+        all_posts = db.session.query(Post).filter(Post.lat.isnot(None), Post.lng.isnot(None)).all()
+        
+        connected_posts = []
+        orphans = []
+        
+        for p in all_posts:
+            is_connected = False
+            variants = [p.pole_number, p.primary_bus_id, getattr(p, 'sec_bus_id', None), p.transformer_bus_id]
+            for bus_id in variants:
+                if bus_id and str(bus_id).strip() in connected_bus_ids:
+                    is_connected = True
+                    break
+            
+            node = {
+                "id": p.id,
+                "lat": float(p.lat),
+                "lng": float(p.lng),
+                "pole": p.pole_number or str(p.id)
+            }
+            if is_connected:
+                connected_posts.append(node)
+            else:
+                node["min_dist"] = float('inf')
+                node["best_root"] = None
+                orphans.append(node)
+        
+        predicted_lines = []
+        if not connected_posts or not orphans:
+            return predicted_lines
+
+        # 3. Optimized Prim's Algorithm
+        # Initial nearest-neighbor search for all orphans against the starting connected set
+        for orphan in orphans:
+            for root in connected_posts:
+                dist = _haversine_meters(orphan["lat"], orphan["lng"], root["lat"], root["lng"])
+                if dist is not None and dist < orphan["min_dist"]:
+                    orphan["min_dist"] = dist
+                    orphan["best_root"] = root
+        
+        # Threshold for a "valid" connection (150 meters)
+        # Most spans are 40-60m; 150m allows for some missing data points without making wild jumps.
+        MAX_JUMP = 150.0 
+        
+
+        # Build the tree greedily
+        while orphans:
+            # Find the orphan closest to the current "connected" tree
+            best_idx = -1
+            best_dist = float('inf')
+            for i, orphan in enumerate(orphans):
+                if orphan["min_dist"] < best_dist:
+                    best_dist = orphan["min_dist"]
+                    best_idx = i
+            
+            # If the closest orphan is still too far, start a new "island" 
+            # by picking the first orphan as a seed and continue.
+            if best_idx == -1 or best_dist > MAX_JUMP:
+                if not orphans: break
+                
+                # Start a new island from the first remaining orphan
+                new_seed = orphans.pop(0)
+                # This seed becomes a root for others, but it doesn't have an edge yet
+                new_root = new_seed
+            else:
+                # Add this orphan to the tree and record the line
+                new_root = orphans.pop(best_idx)
+                root_node = new_root["best_root"]
+                
+                predicted_lines.append({
+                    "lat1": new_root["lat"],
+                    "lng1": new_root["lng"],
+                    "lat2": root_node["lat"],
+                    "lng2": root_node["lng"],
+                    "from_pole": new_root["pole"],
+                    "to_pole": root_node["pole"],
+                    "distance_m": round(best_dist, 2),
+                    "connection_type": "Predicted (Network Extension)"
+                })
+            
+            # Update step: all remaining orphans check if this new root is closer than their current best
+            for orphan in orphans:
+                d = _haversine_meters(orphan["lat"], orphan["lng"], new_root["lat"], new_root["lng"])
+                if d is not None and d < orphan["min_dist"]:
+                    orphan["min_dist"] = d
+                    orphan["best_root"] = new_root
+        
+        return predicted_lines
+
+
