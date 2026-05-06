@@ -254,6 +254,43 @@ def api_transformers_by_bus(bus_id):
     except Exception as e:
         return jsonify({'error': str(e), 'bus_id': bus_id}), 500
 
+@asset_api_bp.route('/transformers/find/<path:tx_id>', methods=['GET'])
+def api_find_transformer(tx_id):
+    """Pinpoint the location (Post) of a specific Transformer ID."""
+    try:
+        # 1. Find the transformer record
+        tx = DistributionTransformer.query.filter_by(transformer_id=tx_id).first()
+        if not tx:
+            # Try fuzzy match if exact fails
+            tx = DistributionTransformer.query.filter(DistributionTransformer.transformer_id.ilike(f"%{tx_id}%")).first()
+        
+        if not tx:
+            return jsonify({'error': 'Transformer record not found'}), 404
+            
+        # 2. Find the post that handles this transformer's bus
+        # We look for matches on transformer_bus_id first, then primary_bus_id
+        bus = tx.from_primary_bus_id
+        post = Post.query.filter(
+            (Post.transformer_bus_id == bus) | 
+            (Post.primary_bus_id == bus) |
+            (Post.pole_number == bus)
+        ).first()
+        
+        if not post or not post.lat:
+            return jsonify({'error': 'Transformer found but not mapped to a physical pole', 'tx': tx.to_dict()}), 404
+            
+        return jsonify({
+            'success': True,
+            'post_id': post.id,
+            'pole_number': post.pole_number,
+            'lat': post.lat,
+            'lng': post.lng,
+            'transformer_id': tx.transformer_id,
+            'kva': tx.kva_rating
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @asset_api_bp.route('/distribution-lines', methods=['GET'])
 def api_distribution_lines():
     try:
