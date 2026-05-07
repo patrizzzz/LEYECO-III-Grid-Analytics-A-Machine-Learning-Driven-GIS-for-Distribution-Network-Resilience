@@ -463,6 +463,30 @@ def api_trace_feeder():
         current_app.logger.error(f"Trace feeder error: {traceback.format_exc()}")
         return jsonify({'error': str(e)}), 500
 
+@analysis_api_bp.route('/network/feeder-head', methods=['GET'])
+def api_get_feeder_head():
+    """Resolves the starting point (Substation/Pole 1) of a feeder."""
+    target_id = request.args.get('id')
+    if not target_id:
+        return jsonify({'error': 'Missing id parameter'}), 400
+    
+    try:
+        from services.topology_service import TopologyService
+        bus_id, lat, lng, feeder_name = TopologyService.find_feeder_head(target_id)
+        
+        if not bus_id:
+            return jsonify({'error': f'Could not resolve feeder head for {target_id}'}), 404
+            
+        return jsonify({
+            'status': 'success',
+            'bus_id': bus_id,
+            'lat': lat,
+            'lng': lng,
+            'feeder_name': feeder_name
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @analysis_api_bp.route('/network/simulate-outage', methods=['GET'])
 def api_simulate_outage():
     start_bus = request.args.get('start_bus')

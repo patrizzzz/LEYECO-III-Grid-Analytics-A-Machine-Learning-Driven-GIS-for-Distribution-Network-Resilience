@@ -333,9 +333,10 @@ class VoltageRegulatorImporter(BaseImporter):
 
     def process_rows(self, reader):
         from models import BusNode
+        from services.linkage_service import LinkageContext
         posts = Post.query.all()
         bus_nodes = BusNode.query.all()
-        context = LinkageService.LinkageContext(posts=posts, bus_nodes=bus_nodes) if hasattr(LinkageService, 'LinkageContext') else None
+        context = LinkageContext(posts=posts, bus_nodes=bus_nodes)
         
         existing = {str(r.regulator_id).strip().lower(): r for r in VoltageRegulator.query.all() if r.regulator_id}
         for row in reader:
@@ -406,9 +407,10 @@ class ShuntCapacitorImporter(BaseImporter):
 
     def process_rows(self, reader):
         from models import BusNode
+        from services.linkage_service import LinkageContext
         posts = Post.query.all()
         bus_nodes = BusNode.query.all()
-        context = LinkageService.LinkageContext(posts=posts, bus_nodes=bus_nodes) if hasattr(LinkageService, 'LinkageContext') else None
+        context = LinkageContext(posts=posts, bus_nodes=bus_nodes)
         
         existing = {str(r.capacitor_id).strip().lower(): r for r in ShuntCapacitor.query.all() if r.capacitor_id}
         for row in reader:
@@ -466,9 +468,10 @@ class ShuntInductorImporter(BaseImporter):
 
     def process_rows(self, reader):
         from models import BusNode
+        from services.linkage_service import LinkageContext
         posts = Post.query.all()
         bus_nodes = BusNode.query.all()
-        context = LinkageService.LinkageContext(posts=posts, bus_nodes=bus_nodes) if hasattr(LinkageService, 'LinkageContext') else None
+        context = LinkageContext(posts=posts, bus_nodes=bus_nodes)
         
         existing = {str(r.inductor_id).strip().lower(): r for r in ShuntInductor.query.all() if r.inductor_id}
         for row in reader:
@@ -529,9 +532,10 @@ class SeriesInductorImporter(BaseImporter):
 
     def process_rows(self, reader):
         from models import BusNode
+        from services.linkage_service import LinkageContext
         posts = Post.query.all()
         bus_nodes = BusNode.query.all()
-        context = LinkageService.LinkageContext(posts=posts, bus_nodes=bus_nodes) if hasattr(LinkageService, 'LinkageContext') else None
+        context = LinkageContext(posts=posts, bus_nodes=bus_nodes)
         
         existing = {str(r.inductor_id).strip().lower(): r for r in SeriesInductor.query.all() if r.inductor_id}
         for row in reader:

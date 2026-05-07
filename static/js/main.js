@@ -52,8 +52,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 <button class="btn btn-outline full-width-btn btn-show-connections" data-post-id="${p.id}">View Connected Lines</button>
             </div>
             <div class="popup-connect-actions" style="margin-top:4px;">
-                <button class="btn btn-outline btn-trace-downstream" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">⚡ Trace Downstream</button>
-                <button class="btn btn-outline btn-outage-sim" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">🔴 Outage Simulation</button>
+                 <button class="btn btn-outline btn-trace-downstream" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer_bus="${p.transformer_bus_id || ''}">⚡ Trace Downstream</button>
+                 <button class="btn btn-outline btn-outage-sim" data-post-id="${p.id}" data-pole="${p.pole_number || ''}" data-bus="${p.primary_bus_id || ''}" data-transformer-bus="${p.transformer_bus_id || ''}">🔴 Outage Simulation</button>
             </div>
             <div class="popup-connections-inner" style="margin-top:10px; font-size:0.85rem;"></div>
         </div>
@@ -302,19 +302,43 @@ document.addEventListener('DOMContentLoaded', function () {
       // 7. Network Analysis (Trace)
       const trBtn = container.querySelector('.btn-trace-downstream');
       if (trBtn) trBtn.onclick = () => {
-          const busId = trBtn.dataset.pole || trBtn.dataset.bus || trBtn.dataset.transformerBus;
+          const busId = trBtn.dataset.pole || trBtn.dataset.bus || trBtn.dataset.transformer_bus || trBtn.dataset.transformerBus;
           if (!busId) { showNoticeModal('Info', 'No bus ID available'); return; }
-          trBtn.textContent = '⏳ Tracing...';
-          fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream')
+          
+          trBtn.textContent = '🔍 Resolving Root...';
+          trBtn.disabled = true;
+
+          // Step 1: Find the feeder head (Pole 1)
+          fetch('/api/network/feeder-head?id=' + encodeURIComponent(busId))
             .then(r => r.json())
+            .then(headRes => {
+                if (headRes.error) {
+                    // Fallback to tracing from the current node if head resolution fails
+                    console.warn('Feeder head resolution failed, falling back to local trace:', headRes.error);
+                    trBtn.textContent = '⏳ Tracing (Local)...';
+                    return fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream');
+                }
+
+                const headId = headRes.feeder_head;
+                trBtn.textContent = '⚡ Tracing from ' + headId + '...';
+
+                // Step 2: Trigger trace from the resolved head
+                return fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(headId) + '&direction=downstream');
+            })
+            .then(r => r ? r.json() : null)
             .then(result => {
+                if (!result) return;
                 trBtn.textContent = '⚡ Trace Downstream';
+                trBtn.disabled = false;
+
                 if (result.error) { showNoticeModal('Error', result.error); return; }
                 
                 const buses = result.visited_buses || [];
+                const startBus = result.start_bus || busId;
+
                 let html = '<div class="trace-summary-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">';
                 html += '<div style="width:40px; height:40px; border-radius:10px; background:#e0f2fe; color:#0ea5e9; display:flex; align-items:center; justify-content:center; font-size:20px;">⚡</div>';
-                html += '<div><div style="font-weight:700; font-size:16px;">Trace Downstream</div><div style="font-size:12px; color:#64748b;">Starting Node: ' + busId + '</div></div></div>';
+                html += '<div><div style="font-weight:700; font-size:16px;">Downstream Trace</div><div style="font-size:12px; color:#64748b;">Source Node: ' + startBus + '</div></div></div>';
                 
                 html += '<div style="padding:16px; background:var(--surface-secondary); border-radius:8px; border:1px solid var(--border); margin-bottom:16px;">';
                 html += '<div style="font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Total Downstream Nodes</div>';
@@ -331,10 +355,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
                 
                 showNoticeModal('Trace Result', html);
-                visualizeNetworkAnalysis('trace', result, busId);
+                visualizeNetworkAnalysis('trace', result, startBus);
             })
             .catch(err => {
                 trBtn.textContent = '⚡ Trace Downstream';
+                trBtn.disabled = false;
                 showNoticeModal('Error', 'Trace failed: ' + (err.message || err));
             });
       };
