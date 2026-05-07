@@ -56,13 +56,23 @@ class LinkageService:
             post_by_pole = context.post_by_pole
             post_by_bus = context.post_by_bus
             post_by_seq = getattr(context, 'post_by_seq', {})
+            pole_num_map = getattr(context, 'post_by_pole_num', {})
             bus_node_map = context.bus_node_map
         else:
-            post_by_id = {str(p.id): p for p in posts or []}
-            post_by_pole = {normalize_id(p.pole_number): p for p in posts or [] if p.pole_number}
-            post_by_bus = {normalize_id(p.primary_bus_id): p for p in posts or [] if p.primary_bus_id}
-            post_by_seq = {str(p.pole_num): p for p in posts or [] if getattr(p, 'pole_num', None) is not None}
+            posts = posts or []
+            post_by_id = {str(p.id): p for p in posts}
+            post_by_pole = {normalize_id(p.pole_number): p for p in posts if p.pole_number}
+            post_by_bus = {normalize_id(p.primary_bus_id): p for p in posts if p.primary_bus_id}
+            post_by_seq = {str(p.pole_num): p for p in posts if getattr(p, 'pole_num', None) is not None}
             bus_node_map = {normalize_id(k): v for k, v in (bus_node_map or {}).items()}
+            
+            # Replicate pole_num_map logic from LinkageContext
+            pole_num_map = {}
+            for p in posts:
+                if p.pole_number:
+                    m = re.match(r'^[A-Za-z]*0*(\d+)', str(p.pole_number))
+                    if m:
+                        pole_num_map[m.group(1)] = p
         
         # Collect all likely bus attributes across different asset models
         buses_to_check = []
@@ -131,15 +141,14 @@ class LinkageService:
                         numeric_match = re.search(r'^(\d+)', g1)
                         if numeric_match:
                             num_str = str(int(numeric_match.group(1)))
-                            pole_num_map = getattr(context, 'post_by_pole_num', {})
                             p = pole_num_map.get(num_str)
                             if p: return p
                         
                         # Fallback to the full string match in sequence map
-                        p = context.post_by_seq.get(g1)
+                        p = post_by_seq.get(g1)
                         if p: return p
                     except (ValueError, TypeError):
-                        p = context.post_by_seq.get(g1)
+                        p = post_by_seq.get(g1)
                         if p: return p
                     
             # 4. Fuzzy fallback removed to enforce strict data matching
