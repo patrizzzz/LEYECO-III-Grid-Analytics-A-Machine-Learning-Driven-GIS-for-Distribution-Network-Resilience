@@ -283,7 +283,32 @@ def export_network_data():
                 filtered_lines.append(line)
 
         line_type = request.args.get('line_type', 'both').lower()
-        if line_type != 'both':
+        
+        # Determine if we need to fetch and include predicted lines
+        if line_type in ('predicted', 'all'):
+            from services.network_geometry_db import get_predicted_lines
+            predicted = get_predicted_lines(current_app)
+            
+            # Enrich posts for predicted lines
+            predicted_poles = set()
+            for l in predicted:
+                predicted_poles.add(l.get('from_pole'))
+                predicted_poles.add(l.get('to_pole'))
+            
+            all_known_poles = {p['post_id']: p for p in posts_out}
+            for pole in predicted_poles:
+                if pole and pole not in all_known_poles:
+                    p_obj = Post.query.filter((Post.pole_number == pole) | (Post.id == (int(pole) if pole.isdigit() else -1))).first()
+                    if p_obj:
+                        posts_out.append(p_obj.to_dict())
+
+            if line_type == 'predicted':
+                filtered_lines = predicted
+            else: # line_type == 'all'
+                filtered_lines.extend(predicted)
+        
+        # Apply filters for non-all/predicted cases
+        elif line_type != 'both':
             final_lines = []
             for line in filtered_lines:
                 conn_type = (line.get('connection_type') or '').lower()
@@ -457,7 +482,13 @@ def api_trace_feeder():
         else:
             # For 'both' direction, use undirected BFS with first candidate
             visited = trace_feeder_bfs(current_app, actual_start_bus[0])
-        return jsonify({'status': 'success', 'start_bus': actual_start_bus, 'count': len(visited), 'visited_buses': visited}), 200
+        return jsonify({
+            'status': 'success', 
+            'start_bus': actual_start_bus[0] if actual_start_bus else start_bus, 
+            'resolved_start_buses': actual_start_bus,
+            'count': len(visited), 
+            'visited_buses': visited
+        }), 200
     except Exception as e:
         import traceback
         current_app.logger.error(f"Trace feeder error: {traceback.format_exc()}")
@@ -480,6 +511,7 @@ def api_get_feeder_head():
         return jsonify({
             'status': 'success',
             'bus_id': bus_id,
+            'feeder_head': bus_id, # Alias for frontend compatibility
             'lat': lat,
             'lng': lng,
             'feeder_name': feeder_name

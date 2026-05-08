@@ -287,12 +287,15 @@
   }
 
   .export-field select {
+    width: 100%;
+    max-width: 100%;
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 8px 10px;
     font-size: 0.82rem;
     background: #fff;
     color: var(--text-primary);
+    box-sizing: border-box;
   }
 
   .btn-export-image {
@@ -319,6 +322,128 @@
   .btn-export-image:disabled {
     opacity: .55;
     cursor: not-allowed;
+  }
+
+  /* ── Export Preview Modal ── */
+  .preview-modal-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(8px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 24px;
+    animation: fadeIn .3s ease;
+  }
+
+  .preview-modal {
+    background: var(--surface);
+    width: 100%;
+    max-width: 1200px;
+    height: 90vh;
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .preview-modal-header {
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f8fafc;
+  }
+
+  .preview-modal-title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .preview-modal-body {
+    flex: 1;
+    overflow: auto;
+    padding: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f1f5f9;
+  }
+
+  .preview-image-container {
+    max-width: 100%;
+    max-height: 100%;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+    border-radius: 8px;
+    overflow: hidden;
+    background: white;
+    cursor: zoom-in;
+    transition: transform 0.2s ease;
+  }
+
+  .preview-image-container img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
+  .preview-modal-footer {
+    padding: 20px 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    background: #f8fafc;
+  }
+
+  .btn-preview-download {
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
+    color: white;
+    border-radius: 10px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    transition: all 0.2s;
+  }
+
+  .btn-preview-download:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+  }
+
+  .btn-preview-close {
+    padding: 12px 24px;
+    background: #e2e8f0;
+    color: #475569;
+    border-radius: 10px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .btn-preview-close:hover {
+    background: #cbd5e1;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   /* ── Danger Zone ── */
@@ -791,61 +916,78 @@
           </a>
         </div>
 
-        <div class="export-image-card">
-          <p style="margin:0;font-size:0.82rem;color:var(--text-secondary);line-height:1.5;">
-            Export a comprehensive network image (PNG) by feeder or municipality.
+        <div class="export-image-card" style="border: 1px solid #93c5fd; background: linear-gradient(to bottom, #eff6ff, #ffffff);">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+            <div style="width: 32px; height: 32px; background: #dbeafe; color: #2563eb; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem;">🖼️</div>
+            <h4 style="margin:0; font-size: 0.95rem; font-weight: 800; color: #1e3a8a;">Network Schematic Export</h4>
+          </div>
+          <p style="margin:0 0 8px 0; font-size:0.78rem; color:#64748b; line-height:1.4;">
+            Generate high-resolution PNG schematics of your distribution network.
           </p>
 
-          <div class="export-field">
-            <label for="export-filter-type">Filter by</label>
-            <select id="export-filter-type">
-              <option value="feeder">Feeder</option>
-              <option value="municipality">Municipality</option>
-            </select>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="export-field">
+              <label for="export-filter-type">Filter by</label>
+              <select id="export-filter-type">
+                <option value="feeder">Feeder</option>
+                <option value="municipality">Municipality</option>
+              </select>
+            </div>
+  
+            <div class="export-field">
+              <label for="export-filter-value">Filter value</label>
+              <select id="export-filter-value">
+                <option value="">Select value...</option>
+              </select>
+            </div>
           </div>
 
-          <div class="export-field">
-            <label for="export-filter-value">Filter value</label>
-            <select id="export-filter-value">
-              <option value="">Select value...</option>
-            </select>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="export-field">
+              <label for="export-image-size">Image size</label>
+              <select id="export-image-size">
+                <option value="1920x1080">HD (1920x1080)</option>
+                <option value="2560x1440">QHD (2k)</option>
+                <option value="3840x2160">4K (UHD)</option>
+              </select>
+            </div>
+  
+            <div class="export-field">
+              <label for="export-line-type">Line Type</label>
+              <select id="export-line-type">
+                <option value="both">Both (Pri & Sec)</option>
+                <option value="primary">Primary Only</option>
+                <option value="secondary">Secondary Only</option>
+                <option value="predicted">Predicted Lines Only</option>
+                <option value="all">All Types (Incl. Predicted)</option>
+              </select>
+            </div>
           </div>
 
-          <div class="export-field">
-            <label for="export-image-size">Image size</label>
-            <select id="export-image-size">
-              <option value="1920x1080">HD (1920 x 1080)</option>
-              <option value="2560x1440">QHD (2560 x 1440)</option>
-              <option value="3840x2160">4K (3840 x 2160)</option>
-            </select>
+          <div style="background: #f1f5f9; padding: 10px; border-radius: 8px; margin-top: 4px;">
+            <div style="font-size: 0.72rem; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 6px;">Visual Options</div>
+            <div style="display: grid; grid-template-columns: 1fr; gap: 6px;">
+              <div class="export-field" style="flex-direction: row; align-items: center; gap: 8px;">
+                <input type="checkbox" id="export-show-nodes" style="width: 16px; height: 16px; cursor: pointer;">
+                <label for="export-show-nodes" style="margin: 0; cursor: pointer; font-size: 0.8rem; font-weight: 600;">Show Node Points</label>
+              </div>
+    
+              <div class="export-field" style="flex-direction: row; align-items: center; gap: 8px;">
+                <input type="checkbox" id="export-show-labels" style="width: 16px; height: 16px; cursor: pointer;">
+                <label for="export-show-labels" style="margin: 0; cursor: pointer; font-size: 0.8rem; font-weight: 600;">Show Pole Labels</label>
+              </div>
+    
+              <div class="export-field" style="flex-direction: row; align-items: center; gap: 8px;">
+                <input type="checkbox" id="export-show-header" checked style="width: 16px; height: 16px; cursor: pointer;">
+                <label for="export-show-header" style="margin: 0; cursor: pointer; font-size: 0.8rem; font-weight: 600;">Show Header & Stats</label>
+              </div>
+            </div>
           </div>
 
-          <div class="export-field">
-            <label for="export-line-type">Line Type</label>
-            <select id="export-line-type">
-              <option value="both">Both (Primary & Secondary)</option>
-              <option value="primary">Primary Only</option>
-              <option value="secondary">Secondary Only</option>
-            </select>
-          </div>
-
-          <div class="export-field" style="flex-direction: row; align-items: center; gap: 8px; margin-top: 4px;">
-            <input type="checkbox" id="export-show-nodes" style="width: 16px; height: 16px;">
-            <label for="export-show-nodes" style="margin: 0;">Show Node Points</label>
-          </div>
-
-          <div class="export-field" style="flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" id="export-show-labels" style="width: 16px; height: 16px;">
-            <label for="export-show-labels" style="margin: 0;">Show Pole Labels</label>
-          </div>
-
-          <div class="export-field" style="flex-direction: row; align-items: center; gap: 8px;">
-            <input type="checkbox" id="export-show-header" checked style="width: 16px; height: 16px;">
-            <label for="export-show-header" style="margin: 0;">Show Header & Stats</label>
-          </div>
-
-          <button id="export-network-image-btn" class="btn-export-image" style="margin-top: 8px;">Download Network Image (PNG)</button>
-          <div id="export-network-image-status" class="status-msg"></div>
+          <button id="export-network-image-btn" class="btn-export-image" style="margin-top: 8px; padding: 12px; font-size: 0.9rem;">
+            <span>Preview & Download Image</span>
+          </button>
+          <div id="export-network-image-status" class="status-msg" style="text-align: center; margin-top: 4px;"></div>
         </div>
       </div>
     </div>
@@ -932,6 +1074,35 @@
       <button id="delete-upload-confirm" class="btn btn-danger"
         style="background:var(--danger);color:#fff;padding:10px 20px;border-radius:6px;font-weight:600;border:none;cursor:pointer;">Delete
         File</button>
+    </div>
+  </div>
+</div>
+
+<!-- Network Image Preview Modal -->
+<div id="export-preview-modal" class="preview-modal-overlay">
+  <div class="preview-modal">
+    <div class="preview-modal-header">
+      <h3 class="preview-modal-title">
+        <span style="font-size: 1.5rem;">🖼️</span> Export Preview
+      </h3>
+      <button class="res-panel-close" id="preview-modal-close" style="font-size: 1.5rem;">✕</button>
+    </div>
+    <div class="preview-modal-body">
+      <div id="preview-image-container" class="preview-image-container">
+        <!-- Canvas/Image will be injected here -->
+      </div>
+    </div>
+    <div class="preview-modal-footer">
+      <div id="preview-stats" style="margin-right: auto; font-size: 0.85rem; color: #64748b; font-weight: 600;">
+        <!-- Stats will be injected here -->
+      </div>
+      <button class="btn-preview-close" id="preview-close-btn">Cancel</button>
+      <button class="btn-preview-download" id="preview-download-btn">
+        <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+        </svg>
+        Download PNG
+      </button>
     </div>
   </div>
 </div>
@@ -1622,6 +1793,10 @@
         const path = Array.isArray(line.path_latlngs) ? line.path_latlngs : null;
         if (!path && (!Number.isFinite(line.lat1) || !Number.isFinite(line.lng1) || !Number.isFinite(line.lat2) || !Number.isFinite(line.lng2))) return;
         
+        const isPredicted = (line.connection_type || '').includes('Predicted');
+        if (isPredicted) ctx.setLineDash([5, 5]);
+        else ctx.setLineDash([]);
+
         const w = getExportLineWeight(line);
         ctx.lineWidth = w + Math.max(1.1, width / 2200);
         ctx.beginPath();
@@ -1640,12 +1815,17 @@
         }
         ctx.stroke();
       });
+      ctx.setLineDash([]);
 
       // Draw colored lines on top with same map color rules.
       lines.forEach(function (line) {
         const path = Array.isArray(line.path_latlngs) ? line.path_latlngs : null;
         if (!path && (!Number.isFinite(line.lat1) || !Number.isFinite(line.lng1) || !Number.isFinite(line.lat2) || !Number.isFinite(line.lng2))) return;
         
+        const isPredicted = (line.connection_type || '').includes('Predicted');
+        if (isPredicted) ctx.setLineDash([5, 5]);
+        else ctx.setLineDash([]);
+
         ctx.strokeStyle = getExportLineColor(line);
         ctx.lineWidth = getExportLineWeight(line);
         ctx.beginPath();
@@ -1664,6 +1844,7 @@
         }
         ctx.stroke();
       });
+      ctx.setLineDash([]);
 
       // Draw nodes (poles) only if enabled.
       if (showNodes || showLabels) {
@@ -1729,7 +1910,9 @@
       const width = parseInt(sizeParts[0], 10) || 1920;
       const height = parseInt(sizeParts[1], 10) || 1080;
 
+      const originalBtnText = exportImageBtn.innerHTML;
       exportImageBtn.disabled = true;
+      exportImageBtn.innerHTML = '<span class="res-spinner"></span> Generating...';
       setExportStatus('Preparing export data...', '#0369a1');
 
       const qs = new URLSearchParams({
@@ -1743,36 +1926,68 @@
         .then(function (r) { return r.json(); })
         .then(function (payload) {
           if (payload.error) throw new Error(payload.error);
-          setExportStatus('Rendering image...', '#0369a1');
+          setExportStatus('Rendering preview...', '#0369a1');
           const label = (filterType === 'feeder' ? 'Feeder: ' : 'Municipality: ') + filterValue;
           const canvas = drawNetworkExportImage(payload, width, height, label, {
             showNodes: exportShowNodesEl ? exportShowNodesEl.checked : false,
             showLabels: exportShowLabelsEl ? exportShowLabelsEl.checked : false,
             showHeader: exportShowHeaderEl ? exportShowHeaderEl.checked : true
           });
-          const safeValue = String(filterValue).replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'network';
-          const filename = 'network_' + filterType + '_' + safeValue + '_' + width + 'x' + height + '.png';
-          canvas.toBlob(function (blob) {
-            if (!blob) {
-              setExportStatus('Failed to generate image blob.', '#dc2626');
-              exportImageBtn.disabled = false;
-              return;
+          
+          // Show Preview Modal
+          const modal = document.getElementById('export-preview-modal');
+          const container = document.getElementById('preview-image-container');
+          const downloadBtn = document.getElementById('preview-download-btn');
+          const statsEl = document.getElementById('preview-stats');
+          
+          if (modal && container && downloadBtn) {
+            container.innerHTML = '';
+            
+            // Create high-res image from canvas for preview
+            const img = new Image();
+            img.src = canvas.toDataURL('image/png');
+            img.style.maxWidth = '100%';
+            img.style.height = 'auto';
+            container.appendChild(img);
+            
+            if (statsEl) {
+                statsEl.innerHTML = `Resolution: ${width}x${height} • Lines: ${payload.lines?.length || 0} • Poles: ${payload.posts?.length || 0}`;
             }
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-            setExportStatus('Export complete. Downloaded ' + filename, '#059669');
-            exportImageBtn.disabled = false;
-          }, 'image/png');
+
+            modal.style.display = 'flex';
+            
+            // Handle Download
+            downloadBtn.onclick = function() {
+                const safeValue = String(filterValue).replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'network';
+                const filename = 'network_' + filterType + '_' + safeValue + '_' + width + 'x' + height + '.png';
+                
+                const a = document.createElement('a');
+                a.href = img.src;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setExportStatus('Export complete.', '#059669');
+                modal.style.display = 'none';
+            };
+            
+            // Handle Close
+            const closeBtn = document.getElementById('preview-close-btn');
+            const closeIcon = document.getElementById('preview-modal-close');
+            const closeFn = () => { modal.style.display = 'none'; };
+            if (closeBtn) closeBtn.onclick = closeFn;
+            if (closeIcon) closeIcon.onclick = closeFn;
+            modal.onclick = (e) => { if (e.target === modal) closeFn(); };
+          }
+
+          setExportStatus('', '');
+          exportImageBtn.disabled = false;
+          exportImageBtn.innerHTML = originalBtnText;
         })
         .catch(function (err) {
           setExportStatus('Export failed: ' + err.message, '#dc2626');
           exportImageBtn.disabled = false;
+          exportImageBtn.innerHTML = originalBtnText;
         });
     }
 

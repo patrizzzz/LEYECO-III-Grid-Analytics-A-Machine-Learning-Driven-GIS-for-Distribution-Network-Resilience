@@ -319,7 +319,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     return fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream');
                 }
 
-                const headId = headRes.feeder_head;
+                const headId = headRes.bus_id;
                 trBtn.textContent = '⚡ Tracing from ' + headId + '...';
 
                 // Step 2: Trigger trace from the resolved head
@@ -334,7 +334,8 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (result.error) { showNoticeModal('Error', result.error); return; }
                 
                 const buses = result.visited_buses || [];
-                const startBus = result.start_bus || busId;
+                let startBus = result.start_bus || busId;
+                if (Array.isArray(startBus)) startBus = startBus[0];
 
                 let html = '<div class="trace-summary-header" style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">';
                 html += '<div style="width:40px; height:40px; border-radius:10px; background:#e0f2fe; color:#0ea5e9; display:flex; align-items:center; justify-content:center; font-size:20px;">⚡</div>';
