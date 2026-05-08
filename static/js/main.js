@@ -305,29 +305,13 @@ document.addEventListener('DOMContentLoaded', function () {
           const busId = trBtn.dataset.pole || trBtn.dataset.bus || trBtn.dataset.transformer_bus || trBtn.dataset.transformerBus;
           if (!busId) { showNoticeModal('Info', 'No bus ID available'); return; }
           
-          trBtn.textContent = '🔍 Resolving Root...';
+          trBtn.textContent = '⏳ Tracing Downstream...';
           trBtn.disabled = true;
 
-          // Step 1: Find the feeder head (Pole 1)
-          fetch('/api/network/feeder-head?id=' + encodeURIComponent(busId))
+          // Trigger trace strictly from the current node
+          fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream')
             .then(r => r.json())
-            .then(headRes => {
-                if (headRes.error) {
-                    // Fallback to tracing from the current node if head resolution fails
-                    console.warn('Feeder head resolution failed, falling back to local trace:', headRes.error);
-                    trBtn.textContent = '⏳ Tracing (Local)...';
-                    return fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(busId) + '&direction=downstream');
-                }
-
-                const headId = headRes.bus_id;
-                trBtn.textContent = '⚡ Tracing from ' + headId + '...';
-
-                // Step 2: Trigger trace from the resolved head
-                return fetch('/api/network/trace-feeder?start_bus=' + encodeURIComponent(headId) + '&direction=downstream');
-            })
-            .then(r => r ? r.json() : null)
             .then(result => {
-                if (!result) return;
                 trBtn.textContent = '⚡ Trace Downstream';
                 trBtn.disabled = false;
 
@@ -638,6 +622,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // --- Global Line Color State ---
   let globalLineColor = localStorage.getItem('globalLineColor') || null;
+  let primaryLineColor = localStorage.getItem('primaryLineColor') || null;
+  let secondaryLineColor = localStorage.getItem('secondaryLineColor') || null;
   let usePhasingColor = localStorage.getItem('usePhasingColor') === 'true' || false;
 
   // --- Global Line Weight State (separate per line type) ---
@@ -1065,7 +1051,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const colorRow = document.createElement('div');
     colorRow.className = 'msp-color-row';
     colorRow.innerHTML = `
-      <span class="msp-range-label">Line Color</span>
+      <span class="msp-range-label">Master Line Color</span>
       <div style="display: flex; gap: 8px; align-items: center;">
         <input type="color" class="msp-color-input" value="${globalLineColor || '#3b82f6'}">
         <button class="msp-reset-btn" title="Reset" style="${globalLineColor ? '' : 'none'}">✕</button>
@@ -1087,6 +1073,60 @@ document.addEventListener('DOMContentLoaded', function () {
       updateNetworkLineColors();
     });
     l5.appendChild(colorRow);
+
+    // Primary Color Picker
+    const primaryColorRow = document.createElement('div');
+    primaryColorRow.className = 'msp-color-row';
+    primaryColorRow.innerHTML = `
+      <span class="msp-range-label">Primary Line Color</span>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <input type="color" class="msp-color-input" value="${primaryLineColor || '#228B22'}">
+        <button class="msp-reset-btn" title="Reset" style="${primaryLineColor ? '' : 'none'}">✕</button>
+      </div>
+    `;
+    const pcInp_p = primaryColorRow.querySelector('.msp-color-input');
+    const prBtn_p = primaryColorRow.querySelector('.msp-reset-btn');
+    pcInp_p.addEventListener('input', (e) => {
+      primaryLineColor = e.target.value;
+      localStorage.setItem('primaryLineColor', primaryLineColor);
+      prBtn_p.style.display = '';
+      updateNetworkLineColors();
+    });
+    prBtn_p.addEventListener('click', () => {
+      primaryLineColor = null;
+      localStorage.removeItem('primaryLineColor');
+      pcInp_p.value = '#228B22';
+      prBtn_p.style.display = 'none';
+      updateNetworkLineColors();
+    });
+    l5.appendChild(primaryColorRow);
+
+    // Secondary Color Picker
+    const secondaryColorRow = document.createElement('div');
+    secondaryColorRow.className = 'msp-color-row';
+    secondaryColorRow.innerHTML = `
+      <span class="msp-range-label">Secondary Line Color</span>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <input type="color" class="msp-color-input" value="${secondaryLineColor || '#d63031'}">
+        <button class="msp-reset-btn" title="Reset" style="${secondaryLineColor ? '' : 'none'}">✕</button>
+      </div>
+    `;
+    const scInp_s = secondaryColorRow.querySelector('.msp-color-input');
+    const srBtn_s = secondaryColorRow.querySelector('.msp-reset-btn');
+    scInp_s.addEventListener('input', (e) => {
+      secondaryLineColor = e.target.value;
+      localStorage.setItem('secondaryLineColor', secondaryLineColor);
+      srBtn_s.style.display = '';
+      updateNetworkLineColors();
+    });
+    srBtn_s.addEventListener('click', () => {
+      secondaryLineColor = null;
+      localStorage.removeItem('secondaryLineColor');
+      scInp_s.value = '#d63031';
+      srBtn_s.style.display = 'none';
+      updateNetworkLineColors();
+    });
+    l5.appendChild(secondaryColorRow);
     
     // Predicted Color Picker
     const predColorRow = document.createElement('div');
@@ -1363,7 +1403,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   // Helper function to determine line color based on Circuit field and Map Layer
-  function getLineColor(circuit, phasing) {
+  function getLineColor(circuit, phasing, connType) {
     // 1. Phasing Color Mode (Philippine IEC Standard) - High Priority
     if (usePhasingColor && phasing) {
       const p = String(phasing).toUpperCase().trim();
@@ -1385,10 +1425,15 @@ document.addEventListener('DOMContentLoaded', function () {
       return '#666666';
     }
 
-    // 0. Global Override
+    // 2. Specific Type Overrides (User Defined)
+    const type = String(connType || '').toLowerCase();
+    if (type.includes('secondary') && secondaryLineColor) return secondaryLineColor;
+    if ((type.includes('primary') || type.includes('distribution')) && primaryLineColor) return primaryLineColor;
+
+    // 0. Global Override (Master override)
     if (globalLineColor) return globalLineColor;
 
-    // 2. Satellite Mode: Use bright/neon colors for visibility on dark imagery
+    // 3. Satellite Mode: Use bright/neon colors for visibility on dark imagery
     if (currentBaseLayer === 'Satellite') {
       if (!circuit) return '#dddddd';
       const normalizedCircuit = String(circuit).trim().toLowerCase();
@@ -1398,7 +1443,7 @@ document.addEventListener('DOMContentLoaded', function () {
       return '#dddddd';
     }
 
-    // 3. Standard / Terrain Mode: Use darker, standard colors
+    // 4. Standard / Terrain Mode: Use darker, standard colors
     if (!circuit) return '#999'; // Default gray
     const normalizedCircuit = String(circuit).trim().toLowerCase();
     if (normalizedCircuit === '3 phase') return '#228B22'; // Forest Green
@@ -1593,7 +1638,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function updateNetworkLineColors() {
     function updateLayer(layer) {
       if (layer instanceof L.Polyline) {
-        const color = getLineColor(layer.circuitType, layer.phasingType);
+        const color = getLineColor(layer.circuitType, layer.phasingType, layer._connType);
         layer.setStyle({ color: color });
       }
     }
@@ -1936,7 +1981,7 @@ document.addEventListener('DOMContentLoaded', function () {
           }
 
           // Determine line color
-          const lineColor = getLineColor(conn.circuit, conn.phasing);
+          const lineColor = getLineColor(conn.circuit, conn.phasing, connType);
           let lineWeight = getLineWeight(connType);
           let dashArray = null;
 
@@ -2135,7 +2180,7 @@ document.addEventListener('DOMContentLoaded', function () {
           var meta = pathObj.meta;
           if (points.length < 2) return;
           var connType = meta.connection_type || '';
-          var color = getLineColor(meta.circuit, meta.phasing);
+          var color = getLineColor(meta.circuit, meta.phasing, connType);
           var weight = getLineWeight(connType);
           var dash = null;
           
