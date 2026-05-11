@@ -2259,6 +2259,64 @@ document.addEventListener('DOMContentLoaded', function () {
           const isSecondary = connType.toLowerCase().includes('secondary');
           if (isSecondary) {
             poly.addTo(secondaryLinesLayer);
+
+            // Add small dot circles at each node/endpoint of secondary lines
+            points.forEach(function(pt, idx) {
+              // Map point index to bus ID
+              var busId;
+              if (idx === 0) busId = meta.from_bus;
+              else if (idx === points.length - 1) busId = meta.to_bus;
+              else busId = meta.from_bus + ' → ' + meta.to_bus;
+
+              var dot = L.circleMarker(pt, {
+                radius: 4,
+                color: '#1a73e8',
+                weight: 1.5,
+                fillColor: '#4fa3f7',
+                fillOpacity: 0.9,
+                opacity: 1,
+                renderer: mainCanvas
+              });
+              dot._connType = connType;
+              dot._busId = busId;
+
+              // Popup with bus ID info
+              var dotPopup = `<div class="popup-card">
+                <div class="popup-card-header">
+                  <h4 class="popup-card-title">⚡ Secondary Node</h4>
+                </div>
+                <div class="popup-card-body">
+                  <div class="popup-kv-grid">
+                    <div class="popup-kv-label">Bus ID:</div><div class="popup-kv-value" style="font-weight:600;color:#1a73e8;">${busId || '—'}</div>
+                    <div class="popup-kv-label">Feeder:</div><div class="popup-kv-value">${meta.feeder || '—'}</div>
+                    <div class="popup-kv-label">Circuit:</div><div class="popup-kv-value">${meta.circuit || '—'}</div>
+                    <div class="popup-kv-label">Phasing:</div><div class="popup-kv-value">${meta.phasing || '—'}</div>
+                  </div>
+                </div>
+              </div>`;
+              dot.bindPopup(dotPopup, { maxWidth: 280 });
+
+              // Also open popup on click via the secondary line modal if available
+              dot.on('click', function(e) {
+                L.DomEvent.stopPropagation(e);
+                if (busId && typeof showSecondaryLineModal === 'function') {
+                  fetch('/api/secondary-lines/by-bus/' + encodeURIComponent(busId))
+                    .then(function(r) { return r.json(); })
+                    .then(function(res) {
+                      if (res && (res.lines || res.segments)) {
+                        showSecondaryLineModal(res);
+                      } else {
+                        dot.openPopup();
+                      }
+                    })
+                    .catch(function() { dot.openPopup(); });
+                } else {
+                  dot.openPopup();
+                }
+              });
+
+              dot.addTo(secondaryLinesLayer);
+            });
           } else {
             poly.addTo(primaryLinesLayer);
           }

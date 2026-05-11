@@ -353,22 +353,84 @@ class SecondaryLineImporter(BaseImporter):
     }
     
     def process_rows(self, reader):
+        from services.topology_service import TopologyService
+        from models import BusNode, Post
+
+        # Optimization: Pre-load poles for fast coordinate lookup
+        # Map pole_num -> (lat, lng, id) and pole_number string -> (lat, lng, id)
+        all_posts = Post.query.all()
+        pole_map = {p.pole_num: (p.lat, p.lng, p.id) for p in all_posts if p.pole_num is not None}
+        pole_str_map = {str(p.pole_number).strip().upper(): (p.lat, p.lng, p.id) for p in all_posts if p.pole_number}
+
         existing_segments = {}
         for s in SecondaryLineSegment.query.all():
             if s.segment_id:
                 existing_segments[s.segment_id.strip().upper()] = s
+            # Composite key dedup
             existing_segments[(s.from_bus_id, s.to_bus_id, s.phasing)] = s
 
+        # Session-level node cache to avoid repeat DB checks
+        node_cache = {bn.bus_id: (bn.lat, bn.lng) for bn in BusNode.query.all()}
+
         for row in reader:
-            from_bus = self.get_val(row, 'from_bus_id')
-            to_bus = self.get_val(row, 'to_bus_id')
+            from_bus_raw = self.get_val(row, 'from_bus_id')
+            to_bus_raw = self.get_val(row, 'to_bus_id')
             phasing = self.get_val(row, 'phasing')
-            if not from_bus or not to_bus: continue
+            if not from_bus_raw or not to_bus_raw: continue
             
+            # 1. Normalize IDs using Smart ID logic
+            from_bus = TopologyService.normalize_secondary_id(from_bus_raw)
+            to_bus = TopologyService.normalize_secondary_id(to_bus_raw)
+            
+            # 2. ENRICHMENT: Apply 'Smart ID' Logic to find coordinates
+            for b_id in [from_bus, to_bus]:
+                if b_id not in node_cache:
+                    parsed = TopologyService.parse_secondary_bus_id(b_id)
+                    if parsed:
+                        # Search for physical pole candidates
+                        phys_id = parsed['physical_pole_id']
+                        pole_only = str(parsed['pole_num_only'])
+                        
+                        # BE STRICT: If there's a transformer/feeder part, don't fall back to simple numbers
+                        if parsed['transformer_id']:
+                            search_keys = [
+                                phys_id, 
+                                f"P{phys_id}", 
+                                f"S{phys_id}"
+                            ]
+                        else:
+                            # Only 1-part IDs (S000015) can match simple pole numbers
+                            search_keys = [
+                                pole_only, 
+                                f"P{pole_only}"
+                            ]
+                        
+                        coords = None
+                        p_id = None
+                        for k in search_keys:
+                            if k.upper() in pole_str_map:
+                                coords_data = pole_str_map[k.upper()]
+                                lat, lng, p_id = coords_data
+                                coords = (lat, lng)
+                                break
+                    
+                        if coords:
+                            lat, lng = coords
+                            bn = BusNode.query.filter_by(bus_id=b_id).first()
+                            if not bn:
+                                bn = BusNode(bus_id=b_id, lat=lat, lng=lng, pole_id=p_id)
+                                bn.pole_number = f"P{phys_id}"
+                                db.session.add(bn)
+                            else:
+                                bn.lat, bn.lng = lat, lng
+                                bn.pole_id = p_id
+                                bn.pole_number = f"P{phys_id}"
+                            node_cache[b_id] = (lat, lng)
+
+            # 3. Create or update the segment
             seg_id = self.get_val(row, 'segment_id')
             clean_seg_id = seg_id.strip().upper() if seg_id else None
 
-            # Try to find existing by segment_id first, then composite key
             seg = None
             if clean_seg_id:
                 seg = existing_segments.get(clean_seg_id)
@@ -385,6 +447,9 @@ class SecondaryLineImporter(BaseImporter):
                 existing_segments[(from_bus, to_bus, phasing)] = seg
                 self.stats['created'] += 1
             else:
+                seg.from_bus_id = from_bus
+                seg.to_bus_id = to_bus
+                seg.phasing = phasing
                 self.stats['updated'] += 1
             
             seg.length_meters = sanitize_float(self.get_val(row, 'length_meters'))
