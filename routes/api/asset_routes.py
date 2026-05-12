@@ -145,33 +145,102 @@ def api_post_detail(post_id):
 @asset_api_bp.route('/posts/<int:post_id>/connections', methods=['GET'])
 def api_post_connections(post_id):
     try:
+        from services.topology_service import TopologyService
         p = Post.query.get(post_id)
         if not p: return jsonify([]), 200
-        buses = {p.pole_number} if p.pole_number else set()
-        if p.pole_number and not str(p.pole_number).startswith('P'):
-            try: buses.add(f"P{str(p.pole_number).zfill(8)}")
-            except: pass
-        if p.primary_bus_id: buses.add(p.primary_bus_id)
-        if p.sec_bus_id: buses.add(p.sec_bus_id)
-        if p.transformer_bus_id: buses.add(p.transformer_bus_id)
         
-        # Use pole_id (FK) for more accurate matching, fallback to pole_number only if not Null
+        # Collect all possible bus IDs for this post
+        buses = set()
+        if p.pole_number:
+            buses.add(str(p.pole_number).strip())
+            # Handle standard P-prefix normalization
+            p_num = str(p.pole_number).strip()
+            if not p_num.startswith('P'):
+                buses.add(f"P{p_num}")
+                buses.add(f"P{p_num.zfill(8)}")
+            else:
+                # If already starts with P, try stripping zeros
+                core = p_num[1:].lstrip('0')
+                if core: buses.add(f"P{core}")
+        
+        if p.primary_bus_id: buses.add(str(p.primary_bus_id).strip())
+        if p.sec_bus_id: buses.add(str(p.sec_bus_id).strip())
+        if p.transformer_bus_id: buses.add(str(p.transformer_bus_id).strip())
+        
+        # Find any BusNodes that point to this pole
         if p.pole_number:
             bns = BusNode.query.filter((BusNode.pole_id == p.id) | (BusNode.pole_number == p.pole_number)).all()
         else:
             bns = BusNode.query.filter_by(pole_id=p.id).all()
         
-        for bn in bns: buses.add(bn.bus_id)
+        for bn in bns:
+            buses.add(str(bn.bus_id).strip())
+            # Normalize secondary IDs if applicable
+            norm_s = TopologyService.normalize_secondary_id(bn.bus_id)
+            if norm_s: buses.add(norm_s)
+        
         if not buses: return jsonify([]), 200
         bus_list = list(buses)
         connections = []
-        dist_lines = DistributionLineSegment.query.filter(DistributionLineSegment.from_bus_id.in_(bus_list) | DistributionLineSegment.to_bus_id.in_(bus_list)).all()
+        
+        # 1. Check DistributionLineSegment (Primary)
+        dist_lines = DistributionLineSegment.query.filter(
+            DistributionLineSegment.from_bus_id.in_(bus_list) | 
+            DistributionLineSegment.to_bus_id.in_(bus_list)
+        ).all()
         for l in dist_lines:
-            connections.append({'id': l.segment_id or f"DL-{l.id}", 'type': 'Primary', 'name': f"Segment {l.segment_id}", 'from_bus': l.from_bus_id, 'to_bus': l.to_bus_id, 'phase': l.phasing, 'total_length': l.length_meters})
-        sec_lines = SecondaryLineSegment.query.filter(SecondaryLineSegment.from_bus_id.in_(bus_list) | SecondaryLineSegment.to_bus_id.in_(bus_list)).all()
+            connections.append({
+                'id': l.segment_id or f"DL-{l.id}", 
+                'type': 'Primary', 
+                'name': f"Segment {l.segment_id}", 
+                'from_bus': l.from_bus_id, 
+                'to_bus': l.to_bus_id, 
+                'phase': l.phasing, 
+                'total_length': l.length_meters
+            })
+            
+        # 2. Check LineConnection (Primary expanded)
+        line_conns = LineConnection.query.filter(
+            LineConnection.from_bus.in_(bus_list) | 
+            LineConnection.to_bus.in_(bus_list)
+        ).all()
+        for c in line_conns:
+            connections.append({
+                'id': f"LC-{c.id}", 
+                'type': 'Connection', 
+                'name': f"{c.connection_type}", 
+                'from_bus': c.from_bus, 
+                'to_bus': c.to_bus, 
+                'phase': c.phasing, 
+                'total_length': None
+            })
+            
+        # 3. Check SecondaryLineSegment (Secondary)
+        sec_lines = SecondaryLineSegment.query.filter(
+            SecondaryLineSegment.from_bus_id.in_(bus_list) | 
+            SecondaryLineSegment.to_bus_id.in_(bus_list)
+        ).all()
         for l in sec_lines:
-            connections.append({'id': f"SL-{l.id}", 'type': 'Secondary', 'name': f"Sec Line #{l.id}", 'from_bus': l.from_bus_id, 'to_bus': l.to_bus_id, 'phase': l.phasing, 'total_length': l.length_meters})
-        return jsonify(connections)
+            connections.append({
+                'id': f"SL-{l.id}", 
+                'type': 'Secondary', 
+                'name': f"Sec Line #{l.id}", 
+                'from_bus': l.from_bus_id, 
+                'to_bus': l.to_bus_id, 
+                'phase': l.phasing, 
+                'total_length': l.length_meters
+            })
+            
+        # Deduplicate by (from_bus, to_bus) to avoid visual noise
+        unique_conns = []
+        seen = set()
+        for c in connections:
+            key = tuple(sorted([c['from_bus'], c['to_bus']]))
+            if key not in seen:
+                unique_conns.append(c)
+                seen.add(key)
+                
+        return jsonify(unique_conns)
     except Exception as e:
         current_app.logger.warning('Failed to fetch connections for post %s: %s', post_id, e)
         return jsonify([])
@@ -224,6 +293,35 @@ def api_bus_nodes_list():
         return jsonify({'data': [n.to_dict() for n in nodes], 'pagination': {'page': page, 'per_page': per_page, 'total': total, 'total_pages': (total + per_page - 1) // per_page}})
     except Exception as e:
         return jsonify({'error': str(e), 'data': []}), 500
+
+@asset_api_bp.route('/bus-nodes/<path:bus_id>/service-drops', methods=['GET'])
+def api_bus_node_service_drops(bus_id):
+    try:
+        from services.topology_service import TopologyService
+        norm_id = TopologyService.normalize_secondary_id(bus_id)
+        
+        # Find all service drops from this bus
+        drops = SecondaryServiceDrop.query.filter(
+            (SecondaryServiceDrop.from_bus_id == bus_id) |
+            (SecondaryServiceDrop.from_bus_id == norm_id)
+        ).all()
+        
+        results = []
+        for d in drops:
+            drop_dict = d.to_dict()
+            # Fetch customer name if possible
+            cust = Customer.query.filter_by(customer_id=d.to_customer_id).first()
+            drop_dict['customer_name'] = cust.name if cust else "Unknown Customer"
+            results.append(drop_dict)
+            
+        return jsonify({
+            'bus_id': bus_id,
+            'normalized_id': norm_id,
+            'count': len(results),
+            'service_drops': results
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @asset_api_bp.route('/transformers/by-bus/<bus_id>', methods=['GET'])
 def api_transformers_by_bus(bus_id):
