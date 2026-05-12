@@ -516,6 +516,10 @@ class ServiceDropImporter(BaseImporter):
             else:
                 self.stats['updated'] += 1
                 
+            # Normalize from_bus_id to match secondary line segments
+            from services.topology_service import TopologyService
+            from_bus = TopologyService.normalize_secondary_id(from_bus)
+            
             drop.from_bus_id = from_bus
             drop.to_customer_id = to_cust
             drop.phasing = self.get_val(row, 'phasing')

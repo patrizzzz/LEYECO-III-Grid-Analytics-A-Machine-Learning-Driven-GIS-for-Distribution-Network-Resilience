@@ -446,38 +446,60 @@ def get_service_drops_for_post(post_id):
     # 3. BFS downstream from each transformer's secondary bus
     all_drops = {}
     visited_sec_buses = set()
+    from services.topology_service import TopologyService
     
     for tx in transformers:
         sec_start = tx.to_secondary_bus_id
-        if not sec_start or sec_start in visited_sec_buses:
-            continue
-            
+        if not sec_start: continue
+        
+        # Start BFS
         queue = [sec_start]
-        visited_sec_buses.add(sec_start)
         
         while queue:
             curr = queue.pop(0)
+            norm_curr = TopologyService.normalize_secondary_id(curr)
             
-            # A. Check for service drops at this bus
-            drops = SecondaryServiceDrop.query.filter_by(from_bus_id=curr).all()
+            if norm_curr in visited_sec_buses: continue
+            visited_sec_buses.add(norm_curr)
+            
+            # A. Check for service drops at this bus (try both original and normalized)
+            drops = SecondaryServiceDrop.query.filter(
+                (SecondaryServiceDrop.from_bus_id == curr) |
+                (SecondaryServiceDrop.from_bus_id == norm_curr)
+            ).all()
             for d in drops:
                 all_drops[d.id] = d
             
             # B. Continue BFS through secondary lines
             lines = SecondaryLineSegment.query.filter(
                 (SecondaryLineSegment.from_bus_id == curr) |
-                (SecondaryLineSegment.to_bus_id == curr)
+                (SecondaryLineSegment.to_bus_id == curr) |
+                (SecondaryLineSegment.from_bus_id == norm_curr) |
+                (SecondaryLineSegment.to_bus_id == norm_curr)
             ).all()
             
             for line in lines:
-                nxt = line.from_bus_id if line.to_bus_id == curr else line.to_bus_id
-                if nxt and nxt not in visited_sec_buses:
-                    visited_sec_buses.add(nxt)
+                # Find the 'other' end of the line
+                end1 = line.from_bus_id
+                end2 = line.to_bus_id
+                
+                # Normalize both to check against current
+                n_end1 = TopologyService.normalize_secondary_id(end1)
+                n_end2 = TopologyService.normalize_secondary_id(end2)
+                
+                nxt = end1 if (n_end2 == norm_curr or end2 == curr) else end2
+                n_nxt = TopologyService.normalize_secondary_id(nxt)
+                
+                if n_nxt not in visited_sec_buses:
                     queue.append(nxt)
 
     # 4. Direct check for service drops linked to root buses
     for b_id in root_buses:
-        direct_drops = SecondaryServiceDrop.query.filter_by(from_bus_id=b_id).all()
+        norm_b = TopologyService.normalize_secondary_id(b_id)
+        direct_drops = SecondaryServiceDrop.query.filter(
+            (SecondaryServiceDrop.from_bus_id == b_id) |
+            (SecondaryServiceDrop.from_bus_id == norm_b)
+        ).all()
         for d in direct_drops:
             all_drops[d.id] = d
             
@@ -488,7 +510,11 @@ def find_customer_post_location(customer_id):
     Traces the electrical network to find a customer's connected post.
     Chain: Customer → SSD → [Secondary BFS] → Transformer → Post
     Returns dict with lat, lng, id, name if found, else None.
+    
+    Uses case-insensitive matching and handles common ID variations
+    (e.g. 'U' suffix on transformer IDs) to maximize resolution rate.
     """
+    from sqlalchemy import func
     from models import Post, DistributionTransformer, SecondaryLineSegment, SecondaryServiceDrop, BusNode
     
     # 1. Find the SecondaryServiceDrop for this customer
@@ -496,7 +522,49 @@ def find_customer_post_location(customer_id):
     if not ssd or not ssd.from_bus_id:
         return None
 
-    # 2. Helper to try finding a post by bus ID or normalized pole number
+    # 2. Helper: case-insensitive transformer lookup with 'U' suffix handling
+    def find_transformer_ci(bus_id):
+        """Find a DistributionTransformer by ID, case-insensitively, handling U suffix."""
+        if not bus_id:
+            return None
+        bid = str(bus_id).strip()
+        # Generate candidate IDs: original, with U, without U
+        candidates = [bid]
+        if bid.upper().endswith('U'):
+            candidates.append(bid[:-1])  # strip U
+        else:
+            candidates.append(bid + 'U')  # add U
+            candidates.append(bid + 'u')
+        
+        for cand in candidates:
+            dt = DistributionTransformer.query.filter(
+                func.lower(DistributionTransformer.transformer_id) == cand.lower()
+            ).first()
+            if dt:
+                return dt
+        return None
+
+    def find_transformer_by_secondary_ci(bus_id):
+        """Find a DistributionTransformer by its secondary bus ID, case-insensitively."""
+        if not bus_id:
+            return None
+        bid = str(bus_id).strip()
+        candidates = [bid]
+        if bid.upper().endswith('U'):
+            candidates.append(bid[:-1])
+        else:
+            candidates.append(bid + 'U')
+            candidates.append(bid + 'u')
+        
+        for cand in candidates:
+            dt = DistributionTransformer.query.filter(
+                func.lower(DistributionTransformer.to_secondary_bus_id) == cand.lower()
+            ).first()
+            if dt:
+                return dt
+        return None
+
+    # 3. Helper to try finding a post by bus ID or normalized pole number
     def get_post_by_bus_or_pole(bus_id):
         if not bus_id: return None
         bus_id = str(bus_id).strip()
@@ -505,8 +573,15 @@ def find_customer_post_location(customer_id):
         p = Post.query.filter((Post.primary_bus_id == bus_id) | (Post.pole_number == bus_id)).first()
         if p and p.lat and p.lng: return p
         
+        # Try case-insensitive match
+        p = Post.query.filter(
+            (func.lower(Post.primary_bus_id) == bus_id.lower()) |
+            (func.lower(Post.pole_number) == bus_id.lower())
+        ).first()
+        if p and p.lat and p.lng: return p
+        
         # Try finding via BusNode table (maps technical bus IDs to poles)
-        bn = BusNode.query.filter_by(bus_id=bus_id).first()
+        bn = BusNode.query.filter(func.lower(BusNode.bus_id) == bus_id.lower()).first()
         if bn:
             # First try direct foreign key if present
             if bn.pole_id:
@@ -518,15 +593,25 @@ def find_customer_post_location(customer_id):
                 if p and p.lat and p.lng: return p
             
         # Try finding via DistributionTransformer (if the ID itself is a transformer ID)
-        if bus_id.startswith('DT'):
-            dt = DistributionTransformer.query.filter_by(transformer_id=bus_id).first()
+        if bus_id.upper().startswith('DT'):
+            dt = find_transformer_ci(bus_id)
             if dt:
                 # Recursively look for the post linked to the transformer's primary side
                 return get_post_by_bus_or_pole(dt.from_primary_bus_id)
                 
         return None
 
-    # 3. Use high-performance SQL trace to find the upstream path
+    # 3b. Helper to get coordinates from BusNode when no Post is linked
+    def get_busnode_coords(bus_id):
+        """Fallback: return coords directly from BusNode if it has lat/lng."""
+        if not bus_id:
+            return None
+        bn = BusNode.query.filter(func.lower(BusNode.bus_id) == str(bus_id).strip().lower()).first()
+        if bn and bn.lat and bn.lng:
+            return {'lat': bn.lat, 'lng': bn.lng, 'id': bn.pole_id or bn.id, 'name': bn.bus_id}
+        return None
+
+    # 4. Use high-performance SQL trace to find the upstream path
     try:
         upstream_ids = TopologyService.trace_upstream_sql(ssd.from_bus_id.strip())
     except Exception as e:
@@ -540,19 +625,33 @@ def find_customer_post_location(customer_id):
         if post:
             return {'lat': post.lat, 'lng': post.lng, 'id': post.id, 'name': post.name}
             
-        # Check if the node is a secondary bus of a transformer
-        dt = DistributionTransformer.query.filter_by(to_secondary_bus_id=curr).first()
+        # Check if the node is a secondary bus of a transformer (case-insensitive)
+        dt = find_transformer_by_secondary_ci(curr)
         if dt:
             p_post = get_post_by_bus_or_pole(dt.from_primary_bus_id)
             if p_post:
                 return {'lat': p_post.lat, 'lng': p_post.lng, 'id': p_post.id, 'name': p_post.name}
+            # Fallback: use BusNode coords for the primary bus
+            bn_loc = get_busnode_coords(dt.from_primary_bus_id)
+            if bn_loc:
+                return bn_loc
                 
-        # Handle case where the transformer ID itself is in the trace (depends on how data was connected)
-        if curr.startswith('DT'):
-            dt = DistributionTransformer.query.filter_by(transformer_id=curr).first()
+        # Handle case where the transformer ID itself is in the trace
+        if curr.upper().startswith('DT'):
+            dt = find_transformer_ci(curr)
             if dt:
                 p_post = get_post_by_bus_or_pole(dt.from_primary_bus_id)
                 if p_post:
                     return {'lat': p_post.lat, 'lng': p_post.lng, 'id': p_post.id, 'name': p_post.name}
+                # Fallback: use BusNode coords for the primary bus
+                bn_loc = get_busnode_coords(dt.from_primary_bus_id)
+                if bn_loc:
+                    return bn_loc
+
+    # 5. Last resort: check if any upstream node has BusNode coordinates
+    for curr in upstream_ids:
+        bn_loc = get_busnode_coords(curr)
+        if bn_loc:
+            return bn_loc
 
     return None
