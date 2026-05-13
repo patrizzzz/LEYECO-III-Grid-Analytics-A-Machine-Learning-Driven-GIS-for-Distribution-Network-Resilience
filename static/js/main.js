@@ -3431,6 +3431,7 @@ document.addEventListener('DOMContentLoaded', function () {
             <select id="search-mode-select" style="background:transparent; border:none; font-size: 0.8rem; font-weight: 500; color: var(--text-secondary); cursor:pointer; outline:none; padding: 4px 0;">
               <option value="customer" selected>Customer</option>
               <option value="poles">Poles</option>
+              <option value="secondary_nodes">Secondary Nodes</option>
               <option value="coord">Coordinates</option>
               <option value="connection">Connection</option>
             </select>
@@ -3611,9 +3612,11 @@ document.addEventListener('DOMContentLoaded', function () {
         ? 'Customer ID...'
         : (mode === 'poles'
           ? 'Pole #, Name or Bus ID...'
-          : (mode === 'coord'
-            ? 'Lat, Lng (e.g. 14.5, 120.9)'
-            : 'From or To bus (e.g. P0000000108 or 0108→0110)'));
+          : (mode === 'secondary_nodes'
+            ? 'Bus ID, Description or Pole #...'
+            : (mode === 'coord'
+              ? 'Lat, Lng (e.g. 14.5, 120.9)'
+              : 'From or To bus (e.g. P0000000108 or 0108→0110)')));
     customerSearchInput.value = '';
     customerSearchSuggestions.classList.remove('active');
     updateSearchClearButtonVisibility();
@@ -3664,6 +3667,59 @@ document.addEventListener('DOMContentLoaded', function () {
               customerSearchSuggestions.classList.add('active');
             } else {
               customerSearchSuggestions.innerHTML = '<div class="customer-search-item"><div class="customer-search-item-id">No poles found</div></div>';
+              customerSearchSuggestions.classList.add('active');
+            }
+          });
+      }, 300);
+      return;
+    }
+
+    if (mode === 'secondary_nodes') {
+      customerSearchTimeout = setTimeout(() => {
+        fetch(`/api/bus-nodes/search?q=${encodeURIComponent(query)}`)
+          .then(r => r.json())
+          .then(data => {
+            customerSearchSuggestions.innerHTML = '';
+            if (data && data.length > 0) {
+              data.forEach(bn => {
+                const item = document.createElement('div');
+                item.className = 'customer-search-item';
+                item.innerHTML = `
+                  <div class="customer-search-item-id">🔵 ${bn.bus_id}</div>
+                  <div class="customer-search-item-name">${bn.bus_description || 'Secondary Node'}</div>
+                  <div class="customer-search-item-meta" style="font-size:0.7rem; color:var(--text-secondary);">Pole: ${bn.pole_number || 'Unknown'}</div>
+                `;
+                item.onclick = () => {
+                  customerSearchInput.value = bn.bus_id;
+                  customerSearchSuggestions.classList.remove('active');
+                  
+                  if (bn.lat && bn.lng) {
+                    map.flyTo([bn.lat, bn.lng], 19);
+                    if (customerSearchHighlight) map.removeLayer(customerSearchHighlight);
+                    customerSearchHighlight = L.circleMarker([bn.lat, bn.lng], {
+                      radius: 20, color: '#3b82f6', weight: 3, fillOpacity: 0.1
+                    }).addTo(map);
+                    setTimeout(() => { if (customerSearchHighlight) map.removeLayer(customerSearchHighlight); }, 5000);
+                  } else {
+                    showNoticeModal('Location Not Found', 'Coordinates are missing for this secondary node.');
+                  }
+                  
+                  let html = '<div class="info-card">';
+                  html += '<div class="info-card-header"><h4 class="info-card-title">Secondary Node Details</h4></div>';
+                  html += '<div class="kv-grid">';
+                  html += '<div class="kv-item"><div class="kv-label">Bus ID</div><div class="kv-value">' + bn.bus_id + '</div></div>';
+                  if (bn.bus_description) html += '<div class="kv-item"><div class="kv-label">Description</div><div class="kv-value">' + bn.bus_description + '</div></div>';
+                  if (bn.pole_number) html += '<div class="kv-item"><div class="kv-label">Pole Number</div><div class="kv-value">' + bn.pole_number + '</div></div>';
+                  if (bn.feeder) html += '<div class="kv-item"><div class="kv-label">Feeder</div><div class="kv-value">' + bn.feeder + '</div></div>';
+                  if (bn.nominal_voltage) html += '<div class="kv-item"><div class="kv-label">Nominal Voltage</div><div class="kv-value">' + bn.nominal_voltage + '</div></div>';
+                  html += '</div></div>';
+                  renderInInspector('Secondary Node: ' + bn.bus_id, html);
+                };
+                customerSearchSuggestions.appendChild(item);
+              });
+              customerSearchSuggestions.classList.add('active');
+            } else {
+              customerSearchSuggestions.innerHTML = '<div class="customer-search-item"><div class="customer-search-item-id">No nodes found</div></div>';
               customerSearchSuggestions.classList.add('active');
             }
           });
