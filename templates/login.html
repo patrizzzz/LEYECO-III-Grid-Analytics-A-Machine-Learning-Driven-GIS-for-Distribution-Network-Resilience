@@ -187,6 +187,33 @@
   }
 </style>
 
+{% if admin_exists is defined and not admin_exists %}
+<div class="error-banner" style="background: #e0f2fe; color: #0369a1; border-left-color: #0284c7;" role="alert">
+  <strong>Welcome!</strong> No administrator account exists yet. Create the initial admin account to get started.
+</div>
+
+<form method="post" action="/setup/create-admin" id="setup-form" novalidate>
+  <div class="form-group">
+    <label for="username" class="form-label">Admin Username</label>
+    <input id="username" name="username" type="text" class="form-input" required autocomplete="username"
+      placeholder="Choose a username" autofocus />
+  </div>
+
+  <div class="form-group password-group">
+    <label for="password" class="form-label">Admin Password</label>
+    <input id="password" name="password" type="password" class="form-input" autocomplete="new-password" required
+      placeholder="Choose a password" />
+  </div>
+
+  <button type="submit" class="submit-btn" style="background: linear-gradient(135deg, #10b981, #059669);">Create Admin & Login</button>
+  
+  <div class="footer-text">
+    This action is only available once. Subsequent accounts must be managed by this admin.
+  </div>
+</form>
+
+{% else %}
+
 {% if error %}
 <div class="error-banner" role="alert">{{ error }}</div>
 {% endif %}
@@ -231,6 +258,8 @@
     Internal LEYECO III system.<br>Accounts are managed by administrators.
   </div>
 </form>
+
+{% endif %}
 
 {% block scripts %}
 <script>

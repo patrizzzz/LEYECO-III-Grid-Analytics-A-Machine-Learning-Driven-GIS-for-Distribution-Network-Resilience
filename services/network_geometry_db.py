@@ -22,6 +22,8 @@ import heapq
 import json
 import math
 import re
+from .topology_service import TopologyService
+from .linkage_service import normalize_id
 from sqlalchemy import or_
 
 
@@ -390,8 +392,8 @@ def _add_edge(
             return # Skip duplicate
         processed_edges.add(edge_key)
 
-    a = bus_to_coord.get(from_bus)
-    b = bus_to_coord.get(to_bus)
+    a = bus_to_coord.get(normalize_id(from_bus))
+    b = bus_to_coord.get(normalize_id(to_bus))
     if not a or not b:
         return
 
@@ -802,7 +804,7 @@ def get_network_geometry(app):
                         "circuit": None, # BusNode doesn't have circuit yet
                         "pole_number": pole_no,
                     }
-                    bus_to_coord[bn.bus_id.strip()] = coord
+                    bus_to_coord[normalize_id(bn.bus_id)] = coord
                     key = (coord["lat"], coord["lng"], coord["pole_number"])
                     if key not in seen_node:
                         seen_node.add(key)
@@ -826,13 +828,7 @@ def get_network_geometry(app):
             try:
                 import re as _re
                 def _normalize_bus_id(bus_id):
-                    """Convert P16-1 → P00000016-1, P0 → P00000000 etc."""
-                    m = _re.match(r'^P(\d+)(-.+)?$', bus_id, _re.IGNORECASE)
-                    if m:
-                        num = m.group(1).lstrip('0') or '0'
-                        suffix = m.group(2) or ''
-                        return f"P{int(num):08d}{suffix}"
-                    return None
+                    return normalize_id(bus_id)
 
                 # Query ALL BusNodes that have feeder (whether or not they have coords)
                 feeder_bns = db.session.query(BusNode.bus_id, BusNode.feeder).filter(
@@ -912,9 +908,9 @@ def get_network_geometry(app):
                 }
                 for bus_attr in ("primary_bus_id", "sec_bus_id", "transformer_bus_id", "pole_number"):
                     bus_val = getattr(p, bus_attr, None)
-                    if bus_val and str(bus_val).strip():
+                    if bus_val and str(bus_val).strip() and str(bus_val).strip().upper() != 'NONE':
                         # Don't overwrite BusNode entries if they exist
-                        b_key = str(bus_val).strip()
+                        b_key = normalize_id(bus_val)
                         if b_key not in bus_to_coord:
                             bus_to_coord[b_key] = coord
                         else:
@@ -992,12 +988,27 @@ def get_network_geometry(app):
             except Exception as e:
                 app.logger.warning("Augmenting transformer coords failed: %s", e)
 
-            # 0b. Propagate coordinates through the secondary line topology.
-            # Transformer secondary buses have coords from step 0, but the
-            # downstream secondary bus IDs (S0001-0007-0001, etc.) do not.
-            # BFS from every secondary line bus that already has coords,
-            # tracking the incoming bearing so linear chains stay straight
-            # and only branch points fan out.
+            # 0b. Snap secondary nodes to physical pole coordinates using candidate mapping
+            # This ensures S16-13-11 snaps to P16-11 even if the coordinate for S16-13-11 is missing.
+            try:
+                for bus_id in list(sec_adj.keys()):
+                    if bus_id not in bus_to_coord:
+                        parsed = TopologyService.parse_secondary_bus_id(bus_id)
+                        if parsed and parsed.get('phys_candidates'):
+                            for cand in parsed['phys_candidates']:
+                                matched = False
+                                # Try original, P-prefix, and S-prefix for each candidate
+                                for prefix in ["", "P", "S"]:
+                                    lookup = f"{prefix}{cand}"
+                                    if lookup in bus_to_coord:
+                                        bus_to_coord[bus_id] = bus_to_coord[lookup].copy()
+                                        matched = True
+                                        break
+                                if matched: break
+            except Exception as e:
+                app.logger.warning("Secondary node snapping failed: %s", e)
+
+            # 0c. Propagate coordinates through the secondary line topology for remaining orphans.
             try:
                 from models import SecondaryLineSegment as _SLS
                 from collections import deque

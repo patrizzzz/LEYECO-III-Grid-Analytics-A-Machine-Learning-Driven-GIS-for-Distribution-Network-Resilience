@@ -543,67 +543,18 @@
 
     <!-- ═══ Upload Panels (overlay cards on the map) ═══ -->
 
-    <!-- Posts -->
-    <div class="res-upload-panel" id="panel-posts">
-      <div class="res-upload-panel-header">
-        <h3>📍 Poles / Physical Network (Step 1)</h3>
-        <button class="res-panel-close" aria-label="Close">✕</button>
-      </div>
-      <div class="res-upload-panel-body">
-        <div class="upload-card" style="border: 2px solid #10b981;">
-          <div class="upload-card-desc">
-            Upload physical pole locations. <strong>Source of all coordinates.</strong>
-            Required: <code>Pole Number</code>, <code>latitude</code>, <code>longitude</code>.
-          </div>
-          <div class="upload-card-history">
-            <div id="history-posts" style="display:none;"></div>
-          </div>
-          <input type="file" id="upload-posts-file" accept=".csv,.xlsx,.xls" class="file-input">
-          <div class="upload-card-actions">
-            <button class="btn-upload-main" id="upload-posts-btn" data-form="posts">⬆ Upload</button>
-            <button class="btn-sample" data-sample="posts">📥 Sample</button>
-          </div>
-          <div id="upload-posts-status" class="status-msg"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Lateral Poles -->
-    <div class="res-upload-panel" id="panel-lateral-poles">
-      <div class="res-upload-panel-header">
-        <h3>📍 Lateral Poles (Step 1.5)</h3>
-        <button class="res-panel-close" aria-label="Close">✕</button>
-      </div>
-      <div class="res-upload-panel-body">
-        <div class="upload-card" style="border: 2px solid #10b981;">
-          <div class="upload-card-desc">
-            Upload lateral pole locations. <strong>Required for primary line routing.</strong>
-            Required: <code>latitude</code>, <code>longitude</code>.
-          </div>
-          <div class="upload-card-history">
-            <div id="history-lateral_poles" style="display:none;"></div>
-          </div>
-          <input type="file" id="upload-lateral-poles-file" accept=".csv,.xlsx,.xls" class="file-input">
-          <div class="upload-card-actions">
-            <button class="btn-upload-main" id="upload-lateral-poles-btn" data-form="lateral-poles">⬆ Upload</button>
-            <button class="btn-sample" data-sample="lateral-poles">📥 Sample</button>
-          </div>
-          <div id="upload-lateral-poles-status" class="status-msg"></div>
-        </div>
-      </div>
-    </div>
 
     <!-- Bus Nodes -->
     <div class="res-upload-panel" id="panel-bus-nodes">
       <div class="res-upload-panel-header">
-        <h3>🗺️ Bus / Electrical Nodes (Step 2)</h3>
+        <h3>🗺️ Bus / Electrical Nodes (Step 1)</h3>
         <button class="res-panel-close" aria-label="Close">✕</button>
       </div>
       <div class="res-upload-panel-body">
-        <div class="upload-card">
+        <div class="upload-card" style="border: 2px solid var(--primary);">
           <div class="upload-card-desc">
-            Each row = one electrical bus. <strong>Coordinates from Pole ID.</strong>
-            Required: <code>Bus ID</code>, <code>Pole ID</code>, <code>Bus Description</code>, <code>feeder</code>.
+            Define all electrical nodes and their locations. <strong>This is the primary source of network coordinates.</strong>
+            Required: <code>Bus ID</code>, <code>Latitude</code>, <code>Longitude</code>.
           </div>
           <div class="upload-card-history">
             <div id="history-bus_nodes" style="display:none;"></div>
@@ -621,7 +572,7 @@
     <!-- Primary Lines -->
     <div class="res-upload-panel" id="panel-primary-lines">
       <div class="res-upload-panel-header">
-        <h3>📍 Primary Lines (Step 3)</h3>
+        <h3>📍 Primary Lines (Step 2)</h3>
         <button class="res-panel-close" aria-label="Close">✕</button>
       </div>
       <div class="res-upload-panel-body">
@@ -677,8 +628,8 @@
       <div class="res-upload-panel-body">
         <div class="upload-card">
           <div class="upload-card-desc">
-            Low voltage line segments. Required: <code>From Bus ID</code>, <code>To Bus ID</code>, <code>Length</code>,
-            <code>Phasing</code>.
+            Low voltage line segments. Required: <code>From Bus ID</code>, <code>To Bus ID</code>.
+            Optional: <code>Latitude</code>, <code>Longitude</code> (for 'To' node), <code>Length</code>, <code>Phasing</code>.
           </div>
           <div class="upload-card-history">
             <div id="history-secondary_lines" style="display:none;"></div>
@@ -1205,7 +1156,7 @@
       },
       'secondary-lines': {
         filename: 'sample_secondary_lines.csv',
-        data: 'From Bus ID,To Bus ID,Length (m),Phasing,Conductor Type,Conductor Size\nP0000000001-S1,P0000000001-S2,45.5,ABC,ACSR,3/0\nP0000000001-S2,P0000000001-S3,30.2,ABC,ACSR,3/0\n'
+        data: 'From Bus ID,To Bus ID,Length (m),Phasing,Conductor Type,Conductor Size,latitude,longitude\nP0000000001-S1,P0000000001-S2,45.5,ABC,ACSR,3/0,11.2399,124.7571\nP0000000001-S2,P0000000001-S3,30.2,ABC,ACSR,3/0,11.2413,124.7584\n'
       },
       'service-drops': {
         filename: 'sample_service_drops.csv',

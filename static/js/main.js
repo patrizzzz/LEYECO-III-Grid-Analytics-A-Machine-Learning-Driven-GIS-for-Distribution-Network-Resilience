@@ -11,6 +11,46 @@ document.addEventListener('DOMContentLoaded', function () {
     console.error('Map init:', msg);
   }
 
+  /** Main-line P-bus only: P0000000009 → "9". P-only-zeros (e.g. P000000000) → "00". Laterals (dash) → null. */
+  function highwayPoleDigitsFromBusId(s) {
+    if (s == null || s === '') return null;
+    const t = String(s).trim().toUpperCase();
+    if (t.indexOf('-') >= 0) return null;
+    if (/^P0+$/.test(t)) return '00';
+    const m = t.match(/^P0*(\d+)$/);
+    if (!m) return null;
+    return String(parseInt(m[1], 10));
+  }
+
+  /**
+   * Prefer primary_bus_id / padded pole_number over display name — names like "Pole 10" were often +1 vs P0000000009.
+   */
+  function poleDisplayLabelFromPost(p) {
+    if (!p) return '';
+    let d = highwayPoleDigitsFromBusId(p.primary_bus_id);
+    if (d !== null) return d;
+    d = highwayPoleDigitsFromBusId(p.pole_number);
+    if (d !== null) return d;
+    if (p.pole_num != null && p.pole_num !== '') {
+      const n = parseInt(String(p.pole_num), 10);
+      if (!isNaN(n)) return String(n);
+    }
+    const pn = p.pole_number && String(p.pole_number).trim();
+    if (pn && /^\d+$/.test(pn)) return String(parseInt(pn, 10));
+    const trimmedName = (p.name && String(p.name).trim()) ? String(p.name).trim() : '';
+    if (trimmedName) {
+      const stripped = trimmedName.replace(/^Pole\s+/i, '').trim();
+      return stripped || trimmedName;
+    }
+    return `ID: ${p.id}`;
+  }
+
+  function poleHeadingTitleFromPost(p) {
+    const label = poleDisplayLabelFromPost(p);
+    if (String(label).indexOf('ID:') === 0) return label;
+    return `Pole ${label}`;
+  }
+
   // Global helper for opening posts from outside (e.g. search)
   function openPostInInspector(p) {
     const inspectorContent = document.getElementById('inspector-content');
@@ -30,7 +70,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         <div id="General-${p.id}" class="tab-content" style="display: block;">
             <div class="popup-post-details">
-              <strong>${(p.name || 'Post ' + p.id).replace(/</g, '&lt;')}</strong><br>
+              <strong>${poleHeadingTitleFromPost(p).replace(/</g, '&lt;')}</strong><br>
               <div style="padding:10px;text-align:center;"><div class="spinner"></div> Loading details...</div>
             </div>
             <div class="popup-connect-actions" style="margin-bottom:4px;">
@@ -155,7 +195,7 @@ document.addEventListener('DOMContentLoaded', function () {
           if (vrData && vrData.kva_rating != null) kvaDisplay = vrData.kva_rating;
           else if (data.kva_rating != null) kvaDisplay = data.kva_rating;
 
-          let infoHtml = `<strong>${(data.name || 'Post ' + data.id).replace(/</g, '&lt;')}</strong><br>`;
+          let infoHtml = `<strong>${poleHeadingTitleFromPost(data).replace(/</g, '&lt;')}</strong><br>`;
           infoHtml += `ID: ${data.id}<br>`;
           infoHtml += `Post Code: ${data.post_id || data.pole_number || '—'}<br>`;
           infoHtml += `Status: ${data.status || 'N/A'}<br>`;
@@ -231,6 +271,100 @@ document.addEventListener('DOMContentLoaded', function () {
     bindInspectorButtons(inspectorContent);
   }
 
+  /** Align with services/linkage_service.normalize_id — same P-bus under different padding matches. */
+  function normalizeBusId(idStr) {
+    if (idStr == null || idStr === '') return '';
+    const s = String(idStr).trim().toUpperCase();
+    if (s.startsWith('S')) return s; // Engineering requires absolute S-IDs
+    const m = s.match(/^([A-Z]+)(\d+)(.*)$/);
+    if (!m) return s;
+    const numPart = m[2].replace(/^0+/, '') || '0';
+    return `${m[1]}${numPart}${m[3]}`;
+  }
+
+  /** Tap / spur buses use a dash (e.g. P00000001-19-10); highway poles do not (e.g. P0000000009). */
+  function isLateralPBusId(s) {
+    if (s == null || s === '') return false;
+    return String(s).trim().indexOf('-') >= 0;
+  }
+
+  /**
+   * Pick the transformer row for this post. Never guess transformers[0]: highway pole P9
+   * must not open a lateral (e.g. P…1-19-38) when primary_bus_id is P0000000009.
+   */
+  function pickDistributionTransformerForPost(transformers, post) {
+    if (!Array.isArray(transformers) || transformers.length === 0) return null;
+
+    const norm = (v) => (v != null && v !== '' ? String(v).trim() : '');
+    const upper = (v) => norm(v).toUpperCase();
+    const stripTrailingU = (s) => {
+      const x = upper(s);
+      return x.replace(/U$/i, '');
+    };
+
+    const postIsLateral = isLateralPBusId(post.primary_bus_id) || isLateralPBusId(post.pole_number);
+    const pool = transformers.filter((t) => {
+      const txLat = isLateralPBusId(t.from_primary_bus_id);
+      return txLat === postIsLateral;
+    });
+
+    function fromPrimaryMatchesBus(t, busRaw) {
+      const fp = norm(t.from_primary_bus_id);
+      if (!fp || !busRaw) return false;
+      const b = norm(busRaw);
+      return upper(fp) === upper(b) || normalizeBusId(fp) === normalizeBusId(b);
+    }
+
+    const postPriRaw = norm(post.primary_bus_id);
+    const postTx = upper(post.transformer_bus_id);
+    const postPoleRaw = norm(post.pole_number);
+
+    function pickOne(candidates) {
+      if (!candidates || candidates.length === 0) return null;
+      if (candidates.length === 1) return candidates[0];
+      if (postPriRaw) {
+        const ex = candidates.find((t) => upper(t.from_primary_bus_id) === upper(postPriRaw));
+        if (ex) return ex;
+      }
+      if (postPoleRaw) {
+        const ex = candidates.find((t) => upper(t.from_primary_bus_id) === upper(postPoleRaw));
+        if (ex) return ex;
+      }
+      return candidates[0];
+    }
+
+    if (postPriRaw) {
+      const primaryHits = pool.filter((t) => fromPrimaryMatchesBus(t, postPriRaw));
+      if (primaryHits.length > 0) return pickOne(primaryHits);
+      return null;
+    }
+
+    if (pool.length === 1) {
+      const t = pool[0];
+      if (postPoleRaw && !fromPrimaryMatchesBus(t, postPoleRaw)) return null;
+      return t;
+    }
+
+    if (postPoleRaw) {
+      const poleHits = pool.filter((t) => fromPrimaryMatchesBus(t, postPoleRaw));
+      if (poleHits.length > 0) return pickOne(poleHits);
+    }
+
+    if (postTx) {
+      const txCore = stripTrailingU(postTx);
+      const txHits = pool.filter((t) => {
+        const sec = upper(t.to_secondary_bus_id);
+        const tid = upper(t.transformer_id);
+        if (sec && (sec === postTx || stripTrailingU(sec) === txCore)) return true;
+        if (tid && (tid === postTx || stripTrailingU(tid) === txCore)) return true;
+        return false;
+      });
+      if (txHits.length > 0) return pickOne(txHits);
+    }
+
+    return null;
+  }
+
   function bindInspectorButtons(container) {
     // 1. Street View
     const svBtn = container.querySelector('.btn-street-view');
@@ -254,10 +388,17 @@ document.addEventListener('DOMContentLoaded', function () {
     const txBtn = container.querySelector('.distribution-transformer-btn');
     if (txBtn) txBtn.onclick = () => {
       fetch('/api/posts/' + txBtn.dataset.postId).then(r => r.json()).then(p => {
-        const bus = p.transformer_bus_id || p.primary_bus_id || p.pole_number;
+        const bus = p.primary_bus_id || p.transformer_bus_id || p.pole_number;
         fetch('/api/transformers/by-bus/' + encodeURIComponent(bus)).then(r => r.json()).then(t => {
-          if (t.transformers && t.transformers.length > 0) showDistributionTransformerModal(t.transformers[0]);
-          else showDistributionTransformerModal({ transformer_bus_id: bus });
+          const list = (t && t.transformers) ? t.transformers : [];
+          const picked = pickDistributionTransformerForPost(list, p);
+          if (picked) showDistributionTransformerModal(picked);
+          else if (list.length > 0) {
+            showNoticeModal(
+              'No matching transformer',
+              'None of the transformers returned for this lookup match this pole\'s primary bus ID. Open the post in Post Data and align Primary Bus ID with the transformer\'s From Primary Bus (e.g. P0000000009 for pole 9), then re-import or reconcile.'
+            );
+          } else showDistributionTransformerModal({ transformer_bus_id: bus });
         });
       });
     };
@@ -266,10 +407,12 @@ document.addEventListener('DOMContentLoaded', function () {
     const slBtn = container.querySelector('.secondary-lines-btn');
     if (slBtn) slBtn.onclick = () => {
       fetch('/api/posts/' + slBtn.dataset.postId).then(r => r.json()).then(p => {
-        const bus = p.transformer_bus_id || p.primary_bus_id || p.pole_number;
+        const bus = p.primary_bus_id || p.transformer_bus_id || p.pole_number;
         fetch('/api/transformers/by-bus/' + encodeURIComponent(bus)).then(r => r.json()).then(trRes => {
-          if (trRes.transformers && trRes.transformers.length > 0) {
-            const secBus = trRes.transformers[0].to_secondary_bus_id;
+          const list = (trRes && trRes.transformers) ? trRes.transformers : [];
+          const picked = pickDistributionTransformerForPost(list, p);
+          if (picked) {
+            const secBus = picked.to_secondary_bus_id;
             if (!secBus) { showNoticeModal('Info', 'Transformer has no secondary bus defined.'); return; }
             fetch('/api/secondary-lines/by-bus/' + encodeURIComponent(secBus)).then(r => r.json()).then(res => showSecondaryLineModal(res));
           } else {
@@ -1685,9 +1828,11 @@ document.addEventListener('DOMContentLoaded', function () {
     const lng = parseFloat(p.lng);
     if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
-    const isTransformer = p.has_transformer === true || (p.kva_rating != null && p.kva_rating > 0);
+    // Only DistributionTransformer linkage sets has_transformer; post.kva_rating alone must not show a DT icon.
+    const isTransformer = p.has_transformer === true;
     const iconToUse = isTransformer ? transformerPoleIcon : poleIcon;
-    const titleText = (p.name || `Post ${p.id}`) + (isTransformer ? ' (Transformer)' : '');
+    const poleLabel = poleDisplayLabelFromPost(p);
+    const titleText = (poleLabel.indexOf('ID:') === 0 ? poleLabel : `Pole ${poleLabel}`) + (isTransformer ? ' (Transformer)' : '');
     const marker = L.marker([lat, lng], { title: titleText, icon: iconToUse });
 
     // Store post data on marker
@@ -1703,22 +1848,8 @@ document.addEventListener('DOMContentLoaded', function () {
       busToPostMap[p.primary_bus_id] = p;
     }
 
-    // Tooltip handling
-    let cleanPole = p.pole_number;
-
-    if (!cleanPole && (p.pole_num || p.pole_num === 0)) {
-      cleanPole = p.pole_num.toString();
-    } else if (!cleanPole && p.name) {
-      cleanPole = p.name.replace(/^Pole\s+/i, '');
-    } else if (!cleanPole) {
-      cleanPole = `ID: ${p.id}`;
-    }
-
-    if (typeof cleanPole === 'string' && cleanPole.match(/^P0+/)) {
-      cleanPole = cleanPole.replace(/^P0+/, '');
-    }
-
-    const tooltipText = `Pole: ${cleanPole}` + (isTransformer ? ' (Transformer)' : '');
+    const tooltipCore = poleLabel.indexOf('ID:') === 0 ? poleLabel : `Pole: ${poleLabel}`;
+    const tooltipText = tooltipCore + (isTransformer ? ' (Transformer)' : '');
     marker.bindTooltip(tooltipText, { permanent: false, direction: 'top' });
     marker.addTo(layer);
     _allPostMarkers.push(marker);

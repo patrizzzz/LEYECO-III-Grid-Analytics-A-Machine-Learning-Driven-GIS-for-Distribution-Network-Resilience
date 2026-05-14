@@ -13,7 +13,7 @@ with app.app_context():
     print("Starting Bulk Reconciliation...")
     print("This will reset all transformer assignments and re-link them using the fixed numeric logic.")
     
-    count = LinkageService.run_bulk_reconciliation()
-    
-    print(f"Success! {count} transformers have been correctly linked to their physical poles.")
+    stats = LinkageService.run_bulk_reconciliation()
+    n = stats['linked_total'] if isinstance(stats, dict) else stats
+    print(f"Success! {n} transformers have been correctly linked to their physical poles.")
     print("Please refresh your map to see the changes.")

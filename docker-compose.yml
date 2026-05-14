@@ -3,14 +3,18 @@ version: '3.8'
 services:
   web:
     build: .
+    image: leyeco-web:latest
     ports:
       - "5000:5000"
     env_file:
       - .env
     volumes:
-      - .:/app
+      - ./instance:/app/instance
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./tmp:/app/tmp
     environment:
-      - FLASK_ENV=development
+      - FLASK_ENV=production
       - DATABASE_URL=${DATABASE_URL:-sqlite:///instance/app.db}
     restart: always
 
