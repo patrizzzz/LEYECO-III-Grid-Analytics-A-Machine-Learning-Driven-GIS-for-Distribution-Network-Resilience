@@ -294,6 +294,33 @@ def api_bus_nodes_list():
     except Exception as e:
         return jsonify({'error': str(e), 'data': []}), 500
 
+@asset_api_bp.route('/bus-nodes/search', methods=['GET'])
+def api_bus_nodes_search():
+    q = request.args.get('q', '')
+    if not q:
+        return jsonify([])
+    try:
+        from sqlalchemy import or_
+        term = f"%{q}%"
+        query = BusNode.query.filter(or_(
+            BusNode.bus_id.ilike(term),
+            BusNode.pole_number.ilike(term),
+            BusNode.bus_description.ilike(term)
+        )).limit(20)
+        
+        results = []
+        for bn in query.all():
+            bn_dict = bn.to_dict()
+            if not bn_dict.get('lat') and bn.pole_id:
+                post = Post.query.get(bn.pole_id)
+                if post:
+                    bn_dict['lat'] = post.lat
+                    bn_dict['lng'] = post.lng
+            results.append(bn_dict)
+        return jsonify(results)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @asset_api_bp.route('/bus-nodes/<path:bus_id>/service-drops', methods=['GET'])
 def api_bus_node_service_drops(bus_id):
     try:

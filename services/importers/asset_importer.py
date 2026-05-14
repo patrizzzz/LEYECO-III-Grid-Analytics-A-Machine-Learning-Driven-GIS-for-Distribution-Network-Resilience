@@ -2,7 +2,7 @@ from flask import current_app
 from services.importers.base_importer import BaseImporter, sanitize_float
 from models import Post, BusNode, DistributionTransformer, UploadHistory, VoltageRegulator, ShuntCapacitor, ShuntInductor, SeriesInductor
 from extensions import db
-from services.linkage_service import LinkageService
+from services.linkage_service import LinkageService, normalize_id
 
 class PostImporter(BaseImporter):
     file_type = 'posts'
@@ -141,7 +141,9 @@ class BusNodeImporter(BaseImporter):
         'pole_number': ['Pole Number', 'pole_number'],
         'pole_id': ['Pole ID', 'pole_id', 'post_id', 'Post ID'],
         'nominal_voltage': ['Nominal Voltage (kV)', 'Nominal Voltage', 'volt', 'voltage'],
-        'feeder': ['Feeder', 'feeder']
+        'feeder': ['Feeder', 'feeder'],
+        'lat': ['latitude', 'Latitude', 'lat', 'Lat'],
+        'lng': ['longitude', 'Longitude', 'lon', 'long', 'Long', 'lng', 'Lng']
     }
     
     def process_rows(self, reader):
@@ -158,12 +160,12 @@ class BusNodeImporter(BaseImporter):
             bus_id = self.get_val(row, 'bus_id')
             if not bus_id: continue
             
-            key = str(bus_id).strip().lower()
-            node = existing_nodes.get(key)
+            key = normalize_id(bus_id)
+            node = existing_nodes.get(key.lower())
             if not node:
-                node = BusNode(bus_id=bus_id)
+                node = BusNode(bus_id=key)
                 db.session.add(node)
-                existing_nodes[key] = node
+                existing_nodes[key.lower()] = node
                 self.stats['created'] += 1
             else:
                 self.stats['updated'] += 1
@@ -174,7 +176,11 @@ class BusNodeImporter(BaseImporter):
             node.feeder = self.get_val(row, 'feeder')
             node.upload_id = self.current_upload_id
             
-            # Inherit coordinates from Post
+            # COORDINATE ENHANCEMENT: Look for lat/lng in the bus data
+            lat_val = sanitize_float(self.get_val(row, 'lat'))
+            lng_val = sanitize_float(self.get_val(row, 'lng'))
+
+            # Inherit coordinates from Post or create a new Post
             p = None
             # 1. Try numeric ID first if provided
             raw_pole_id = self.get_val(row, 'pole_id')
@@ -188,13 +194,35 @@ class BusNodeImporter(BaseImporter):
                 except (ValueError, TypeError):
                     pass
             
-            # 2. Try string pole_number if ID link failed
-            if not p and node.pole_number:
-                p = post_by_pole.get(str(node.pole_number).strip().lower())
+            # 2. Try string pole_number or use bus_id as fallback if ID link failed
+            if not p:
+                search_pole = node.pole_number or bus_id
+                p = post_by_pole.get(str(search_pole).strip().lower())
                 if p:
                     node.pole_id = p.id
+                    node.pole_number = p.pole_number
 
+            # 3. AUTO-CREATE physical pole if lat/lng provided but no pole exists yet
+            if not p and lat_val is not None and lng_val is not None:
+                pole_id_to_use = node.pole_number or bus_id
+                p = Post(pole_number=pole_id_to_use)
+                p.name = f"Pole {pole_id_to_use}"
+                p.upload_id = self.current_upload_id
+                db.session.add(p)
+                # Add to local cache for subsequent rows in same file
+                post_by_pole[str(pole_id_to_use).strip().lower()] = p
+                self.stats['created_poles'] = self.stats.get('created_poles', 0) + 1
+
+            # 4. Update coordinates and link
             if p:
+                node.pole_id = p.id
+                node.pole_number = p.pole_number
+                
+                if lat_val is not None:
+                    p.lat = lat_val
+                if lng_val is not None:
+                    p.lng = lng_val
+                
                 node.lat, node.lng = p.lat, p.lng
                 if node.feeder:
                     p.feeder = node.feeder
@@ -274,7 +302,7 @@ class TransformerImporter(BaseImporter):
             if linked_post and linked_post.lat and linked_post.lng and linked_post.lat != 0.0 and linked_post.lng != 0.0:
                 linked_post.has_transformer = True
                 linked_post.kva_rating = tx.kva_rating
-                linked_post.transformer_bus_id = tx.from_primary_bus_id or tx.to_secondary_bus_id
+                linked_post.transformer_bus_id = tx.to_secondary_bus_id or tx.from_primary_bus_id
                 
                 # AUTO-HEAL: Update the BusNode linkage to point to THIS visible post
                 target_bus = tx.from_primary_bus_id or tx.to_secondary_bus_id

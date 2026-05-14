@@ -120,3 +120,32 @@ By default, the app uses an SQLite database `app.db`. SQLite is fine for develop
    flask db upgrade
    ```
 4. Perform an initial data migration using your CSVs as described in the README `Data Management` section.
+
+## 6. Docker Compose Deployment (Recommended)
+
+Docker Compose provides a self-contained, production-ready environment including the application server, PostgreSQL database, and pgAdmin.
+
+1.  **Configure Environment**:
+    - Copy `.env.example` to `.env`.
+    - Update `SECRET_KEY` and database credentials.
+    - Set `DB_HOST=db` for the internal Docker network.
+
+2.  **Build and Start**:
+    ```bash
+    docker-compose up --build -d
+    ```
+
+3.  **Database Migration**:
+    Initialize the database schema inside the container:
+    ```bash
+    docker-compose exec web flask db upgrade
+    ```
+
+4.  **Access the System**:
+    - **Web App**: http://localhost:5000
+    - **pgAdmin**: http://localhost:5050 (Login: admin@leyeco.com / admin)
+
+5.  **Stopping the System**:
+    ```bash
+    docker-compose down
+    ```

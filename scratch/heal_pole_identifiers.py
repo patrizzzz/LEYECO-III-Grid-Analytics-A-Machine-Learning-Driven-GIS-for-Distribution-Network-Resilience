@@ -32,5 +32,6 @@ with app.app_context():
     print(f"Updated {updated_count} poles with proper identification numbers.")
     
     print("\nNow running Bulk Reconciliation to fix transformer links...")
-    match_count = LinkageService.run_bulk_reconciliation()
-    print(f"Finished! {match_count} transformers are now correctly linked.")
+    stats = LinkageService.run_bulk_reconciliation()
+    n = stats['linked_total'] if isinstance(stats, dict) else stats
+    print(f"Finished! {n} transformers are now correctly linked.")

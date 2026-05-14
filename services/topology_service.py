@@ -10,55 +10,41 @@ class TopologyService:
     @staticmethod
     def parse_secondary_bus_id(bus_id):
         """
-        Parses a secondary bus ID based on the 'First-Last = Pole' convention.
-        Example: S16-13-11 -> Physical Pole 16-11 (Skips lateral 13)
+        Parses a secondary bus ID and identifies potential physical pole mappings.
+        S0016-0013-0011 -> 
+           - Full path: 16-13-11
+           - Simplified: 16-11 (First-Last rule for snapping to main/lateral poles)
         """
-        import re
         if not bus_id: return None
         s = str(bus_id).strip().upper()
         parts = s.split('-')
         
-        # 1. Extract the Transformer/Feeder part (First Segment)
-        first_segment = parts[0].replace('S', '').replace('DT', '').lstrip('0') or '0'
+        # Clean all segments
+        clean_parts = [p.replace('S', '').replace('DT', '').lstrip('0') or '0' for p in parts]
+        combined_id = "-".join(clean_parts)
         
-        # 2. Extract the Pole part (Last Segment)
-        last_segment = parts[-1].replace('S', '').replace('DT', '')
-        match = re.match(r'^(\d+)([a-zA-Z0-9]*)$', last_segment)
-        if not match: return None
-        
-        pole_num_str, suffix = match.groups()
-        pole_num = pole_num_str.lstrip('0') or '0'
-        
-        # 3. Construct the 'Combined' physical ID (e.g. 16-11)
-        combined_id = f"{first_segment}-{pole_num}"
-        if suffix:
-            combined_id += suffix
+        # Determine candidates for physical pole matching
+        # 1. Exact match (16-13-11)
+        # 2. Simplified match (16-11) - Common in LEYECO for secondary snapping
+        phys_candidates = [combined_id]
+        if len(clean_parts) > 2:
+            phys_candidates.append(f"{clean_parts[0]}-{clean_parts[-1]}")
             
         return {
-            'transformer_id': first_segment if len(parts) > 1 else None,
-            'pole_num_only': int(pole_num),
-            'suffix': suffix or '',
-            'physical_pole_id': combined_id, # e.g. "16-11"
-            'is_lateral': len(parts) > 2 or bool(suffix)
+            'transformer_id': "-".join(clean_parts[:-1]) if len(clean_parts) > 1 else None,
+            'pole_num_only': clean_parts[-1],
+            'physical_pole_id': combined_id,
+            'phys_candidates': phys_candidates,
+            'is_lateral': len(parts) > 2
         }
 
     @staticmethod
     def normalize_secondary_id(bus_id):
-        """Standardizes S-type IDs while preserving the correct segments."""
+        """Standardizes S-type IDs while preserving the exact padding as required by engineering."""
         if not bus_id: return ""
-        s = str(bus_id).strip().upper()
-        parts = s.split('-')
-        
-        # Normalize each segment
-        norm_parts = []
-        for i, p in enumerate(parts):
-            clean = p.lstrip('S0') or ('0' if p.isdigit() else p)
-            if i == 0 and s.startswith('S'):
-                norm_parts.append(f"S{clean}")
-            else:
-                norm_parts.append(clean)
-        
-        return "-".join(norm_parts)
+        # Simply standardize to upper case and stripped whitespace.
+        # This ensures S0001-0017-002B remains absolute.
+        return str(bus_id).strip().upper()
 
     @staticmethod
     def trace_downstream_sql(start_bus_id):

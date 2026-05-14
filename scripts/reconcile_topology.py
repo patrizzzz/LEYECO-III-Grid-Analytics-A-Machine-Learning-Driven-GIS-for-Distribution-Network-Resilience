@@ -40,9 +40,19 @@ def reconcile_topology():
         bus_nodes = BusNode.query.all()
         context = LinkageContext(posts=posts, bus_nodes=bus_nodes)
         
-        tx_count = LinkageService.run_bulk_reconciliation()
-        print(f"Linked {tx_count} transformers.")
-        
+        stats = LinkageService.run_bulk_reconciliation()
+        if isinstance(stats, dict):
+            print(
+                f"Transformer rows in DB: {stats['transformer_rows']}\n"
+                f"  Linked (main-line From Bus, no '-'): {stats['linked_mainline']}\n"
+                f"  Linked (lateral From Bus, has '-'): {stats['linked_lateral']}\n"
+                f"  Not linked to any post: {stats['not_linked']}\n"
+                f"  Total linked rows: {stats['linked_total']}\n"
+                f"Posts with transformer icon flag: {stats['posts_with_transformer']}"
+            )
+        else:
+            print(f"Linked {stats} transformers.")
+
         db.session.commit()
         print("=" * 80)
         print("RECONCILIATION COMPLETE")

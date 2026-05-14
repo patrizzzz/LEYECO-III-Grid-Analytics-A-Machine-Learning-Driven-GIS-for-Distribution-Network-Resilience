@@ -4,6 +4,7 @@ import re
 from services.importers.base_importer import BaseImporter, sanitize_float
 from models import Post, DistributionLineSegment, SecondaryLineSegment, SecondaryServiceDrop, LineConnection, BusNode
 from extensions import db
+from services.linkage_service import normalize_id
 
 class PrimaryLineImporter(BaseImporter):
     file_type = 'primary_lines'
@@ -43,22 +44,8 @@ class PrimaryLineImporter(BaseImporter):
     
     
     def _normalize_bus_id(self, bus_id):
-        """Strip redundant leading zeros from IDs (e.g., P00000001 -> P1, P1-007 -> P1-7)"""
-        if not bus_id: return ""
-        # Handle lateral segments
-        parts = str(bus_id).strip().upper().split('-')
-        norm_parts = []
-        for part in parts:
-            if part.startswith('P'):
-                # Strip P, then strip leading zeros, then put P back
-                core = part[1:].lstrip('0')
-                if not core: core = '0' # Handle P000
-                norm_parts.append(f"P{core}")
-            else:
-                core = part.lstrip('0')
-                if not core: core = '0'
-                norm_parts.append(core)
-        return '-'.join(norm_parts)
+        """Standardize ID without stripping leading zeros to preserve original format."""
+        return normalize_id(bus_id)
 
     def _parse_pole_suffix(self, bus_id):
         """Extract sequence number from IDs like P1 (1) or P1-7 (7)"""
@@ -196,12 +183,19 @@ class PrimaryLineImporter(BaseImporter):
             if not from_dash and not to_dash and is_numeric_sequence:
                 # 1. PURE HIGHWAY (P1 -> P9)
                 expanded = True
+                # Preserve original padding for expanded intermediate poles
+                padding = 0
+                match = re.search(r'P(\d+)', from_bus)
+                if match:
+                    padding = len(match.group(1))
+
                 if s_from < s_to: rng = range(s_from, s_to + 1)
                 else: rng = range(s_from, s_to - 1, -1)
                 
                 prev_bus = None
                 for i in rng:
-                    curr_bus = self._normalize_bus_id(f"P{i}")
+                    # Generate padded ID
+                    curr_bus = f"P{str(i).zfill(padding)}"
                     # Update Post technical data
                     hp = self.highway_post_map.get(i)
                     if hp: self._apply_segment_stats_to_post(seg, hp)
@@ -324,18 +318,30 @@ class PrimaryLineImporter(BaseImporter):
             if not expanded:
                 db.session.add(seg)
                 
-                # ENRICHMENT: Ensure BusNodes exist for endpoints of unexpanded segments if coordinates are present
-                # This is required by test_primary_line_coordinates and general data consistency.
+                # ENRICHMENT: Ensure BusNodes and Posts exist for endpoints of unexpanded segments
                 if seg.latitude and seg.longitude:
-                    # Update/Create BusNode for the 'to' bus with the provided coordinates
+                    # 1. Update/Create BusNode
                     bn = BusNode.query.filter_by(bus_id=to_bus).first()
                     if not bn:
                         bn = BusNode(bus_id=to_bus, lat=seg.latitude, lng=seg.longitude, feeder=seg.feeder)
                         db.session.add(bn)
                     else:
-                        bn.lat = seg.latitude
-                        bn.lng = seg.longitude
+                        bn.lat, bn.lng = seg.latitude, seg.longitude
                         if not bn.feeder: bn.feeder = seg.feeder
+                    
+                    # 2. Update/Create Post (Physical Pole)
+                    p = Post.query.filter_by(pole_number=to_bus).first()
+                    if not p:
+                        p = Post(pole_number=to_bus, name=f"Pole {to_bus}", lat=seg.latitude, lng=seg.longitude)
+                        p.upload_id = self.current_upload_id
+                        db.session.add(p)
+                    else:
+                        p.lat, p.lng = seg.latitude, seg.longitude
+                        if not p.feeder: p.feeder = seg.feeder
+                    
+                    # Link them
+                    db.session.flush()
+                    bn.pole_id = p.id
 
 class SecondaryLineImporter(BaseImporter):
     file_type = 'secondary_lines'
@@ -350,6 +356,8 @@ class SecondaryLineImporter(BaseImporter):
         'conductor_type': ['conductor_type', 'Conductor Type'],
         'conductor_size': ['Conductor Size', 'conductor_size'],
         'conductor_unit': ['Unit (C) ', 'Unit (C)', 'unit_c', 'conductor_unit'],
+        'lat': ['latitude', 'Latitude', 'lat', 'Lat'],
+        'lng': ['longitude', 'Longitude', 'lon', 'long', 'Long', 'lng', 'Lng']
     }
     
     def process_rows(self, reader):
@@ -382,9 +390,31 @@ class SecondaryLineImporter(BaseImporter):
             from_bus = TopologyService.normalize_secondary_id(from_bus_raw)
             to_bus = TopologyService.normalize_secondary_id(to_bus_raw)
             
-            # 2. ENRICHMENT: Apply 'Smart ID' Logic to find coordinates
+            # 2. ENRICHMENT: Apply coordinates if provided in file, else use 'Smart ID' Logic
+            lat_val = sanitize_float(self.get_val(row, 'lat'))
+            lng_val = sanitize_float(self.get_val(row, 'lng'))
+
             for b_id in [from_bus, to_bus]:
-                if b_id not in node_cache:
+                # If this specific row is for the 'to_bus', apply the coordinates from the file
+                target_coords = None
+                target_p_id = None
+                
+                # If coordinates are in the CSV, use them for the 'to_bus'
+                if b_id == to_bus and lat_val is not None and lng_val is not None:
+                    target_coords = (lat_val, lng_val)
+                    # Auto-create/update pole
+                    p = Post.query.filter_by(pole_number=b_id).first()
+                    if not p:
+                        p = Post(pole_number=b_id, name=f"Pole {b_id}", lat=lat_val, lng=lng_val)
+                        p.upload_id = self.current_upload_id
+                        db.session.add(p)
+                    else:
+                        p.lat, p.lng = lat_val, lng_val
+                    db.session.flush()
+                    target_p_id = p.id
+                
+                # Fallback to Smart ID logic if no direct coordinates
+                if not target_coords and b_id not in node_cache:
                     parsed = TopologyService.parse_secondary_bus_id(b_id)
                     if parsed:
                         # Search for physical pole candidates
@@ -393,39 +423,27 @@ class SecondaryLineImporter(BaseImporter):
                         
                         # BE STRICT: If there's a transformer/feeder part, don't fall back to simple numbers
                         if parsed['transformer_id']:
-                            search_keys = [
-                                phys_id, 
-                                f"P{phys_id}", 
-                                f"S{phys_id}"
-                            ]
+                            search_keys = [phys_id, f"P{phys_id}", f"S{phys_id}"]
                         else:
-                            # Only 1-part IDs (S000015) can match simple pole numbers
-                            search_keys = [
-                                pole_only, 
-                                f"P{pole_only}"
-                            ]
+                            search_keys = [pole_only, f"P{pole_only}"]
                         
-                        coords = None
-                        p_id = None
                         for k in search_keys:
                             if k.upper() in pole_str_map:
-                                coords_data = pole_str_map[k.upper()]
-                                lat, lng, p_id = coords_data
-                                coords = (lat, lng)
+                                lat, lng, p_id = pole_str_map[k.upper()]
+                                target_coords = (lat, lng)
+                                target_p_id = p_id
                                 break
                     
-                        if coords:
-                            lat, lng = coords
-                            bn = BusNode.query.filter_by(bus_id=b_id).first()
-                            if not bn:
-                                bn = BusNode(bus_id=b_id, lat=lat, lng=lng, pole_id=p_id)
-                                bn.pole_number = f"P{phys_id}"
-                                db.session.add(bn)
-                            else:
-                                bn.lat, bn.lng = lat, lng
-                                bn.pole_id = p_id
-                                bn.pole_number = f"P{phys_id}"
-                            node_cache[b_id] = (lat, lng)
+                if target_coords:
+                    lat, lng = target_coords
+                    bn = BusNode.query.filter_by(bus_id=b_id).first()
+                    if not bn:
+                        bn = BusNode(bus_id=b_id, lat=lat, lng=lng, pole_id=target_p_id)
+                        db.session.add(bn)
+                    else:
+                        bn.lat, bn.lng = lat, lng
+                        bn.pole_id = target_p_id
+                    node_cache[b_id] = (lat, lng)
 
             # 3. Create or update the segment
             seg_id = self.get_val(row, 'segment_id')

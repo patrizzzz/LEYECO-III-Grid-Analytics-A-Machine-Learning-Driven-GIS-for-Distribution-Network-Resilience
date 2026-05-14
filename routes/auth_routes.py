@@ -21,11 +21,12 @@ def get_current_user():
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     """Login for admins (username + password) and viewers (username + access_code)."""
+    admin_exists = User.query.filter_by(role='admin').first() is not None
     if request.method == 'GET':
         if get_current_user():
             # Adjust redirect to main.dashboard
             return redirect(url_for('main.dashboard'))
-        return render_template('login.html')
+        return render_template('login.html', admin_exists=admin_exists)
 
     data = request.get_json(silent=True) or request.form or {}
     username = (data.get('username') or '').strip()
@@ -77,21 +78,29 @@ def whoami():
 
 @auth_bp.route('/setup/create-admin', methods=['POST'])
 def setup_create_admin():
-    from flask import current_app
-    if not current_app.debug:
-        return jsonify({'error': 'not available'}), 403
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or request.form or {}
     username = (data.get('username') or '').strip()
     password = (data.get('password') or '').strip()
     if not username or not password:
+        if request.form:
+             return render_template('login.html', error='Username and password required', admin_exists=False), 400
         return jsonify({'error': 'username and password required'}), 400
     existing_admin = User.query.filter_by(role='admin').first()
     if existing_admin:
+        if request.form:
+             return render_template('login.html', error='Admin already exists', admin_exists=True), 400
         return jsonify({'error': 'admin already exists'}), 400
     pw_hash = generate_password_hash(password)
     u = User(username=username, role='admin', password_hash=pw_hash)
     db.session.add(u)
     db.session.commit()
+    
+    session.clear()
+    session['user_id'] = u.id
+    session['role'] = u.role
+
+    if request.form:
+        return redirect(url_for('main.dashboard'))
     return jsonify({'id': u.id, 'username': u.username, 'role': u.role}), 201
 
 
