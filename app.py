@@ -28,7 +28,7 @@ if not database_url:
     db_user = os.getenv('DB_USERNAME')
     db_pass = os.getenv('DB_PASSWORD')
     db_host = os.getenv('DB_HOST', '127.0.0.1')
-    db_port = os.getenv('DB_PORT', '3306')
+    db_port = os.getenv('DB_PORT', '5432')
     db_name = os.getenv('DB_DATABASE')
     if db_user and db_name is not None:
         if db_pass:
