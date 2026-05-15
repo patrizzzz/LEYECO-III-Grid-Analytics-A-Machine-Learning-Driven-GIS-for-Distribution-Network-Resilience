@@ -21,7 +21,7 @@ def upgrade():
     op.drop_table('connection_point')
     op.drop_table('connection')
     with op.batch_alter_table('bus_node', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_bus_node_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_bus_node_upload_id'))
         batch_op.create_index(batch_op.f('ix_bus_node_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('bus_post_mapping', schema=None) as batch_op:
@@ -30,55 +30,55 @@ def upgrade():
         batch_op.create_foreign_key(None, 'upload_history', ['upload_id'], ['id'])
 
     with op.batch_alter_table('customer', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_customer_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_customer_upload_id'))
         batch_op.create_index(batch_op.f('ix_customer_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('distribution_line_segment', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_distribution_line_segment_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_distribution_line_segment_upload_id'))
         batch_op.create_index(batch_op.f('ix_distribution_line_segment_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('distribution_transformer', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_distribution_transformer_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_distribution_transformer_upload_id'))
         batch_op.create_index(batch_op.f('ix_distribution_transformer_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('energy_consumption', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_energy_consumption_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_energy_consumption_upload_id'))
         batch_op.create_index(batch_op.f('ix_energy_consumption_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('line_connection', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_line_connection_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_line_connection_upload_id'))
         batch_op.create_index(batch_op.f('ix_line_connection_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('load_curve', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_load_curve_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_load_curve_upload_id'))
         batch_op.create_index(batch_op.f('ix_load_curve_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('post', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_post_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_post_upload_id'))
         batch_op.create_index(batch_op.f('ix_post_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('secondary_line_segment', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_secondary_line_segment_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_secondary_line_segment_upload_id'))
         batch_op.create_index(batch_op.f('ix_secondary_line_segment_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('secondary_service_drop', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_secondary_service_drop_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_secondary_service_drop_upload_id'))
         batch_op.create_index(batch_op.f('ix_secondary_service_drop_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('series_inductor', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_series_inductor_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_series_inductor_upload_id'))
         batch_op.create_index(batch_op.f('ix_series_inductor_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('shunt_capacitor', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_shunt_capacitor_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_shunt_capacitor_upload_id'))
         batch_op.create_index(batch_op.f('ix_shunt_capacitor_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('shunt_inductor', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_shunt_inductor_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_shunt_inductor_upload_id'))
         batch_op.create_index(batch_op.f('ix_shunt_inductor_upload_id'), ['upload_id'], unique=False)
 
     with op.batch_alter_table('voltage_regulator', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('idx_voltage_regulator_upload_id'))
+        # batch_op.drop_index(batch_op.f('idx_voltage_regulator_upload_id'))
         batch_op.create_index(batch_op.f('ix_voltage_regulator_upload_id'), ['upload_id'], unique=False)
 
     # ### end Alembic commands ###
