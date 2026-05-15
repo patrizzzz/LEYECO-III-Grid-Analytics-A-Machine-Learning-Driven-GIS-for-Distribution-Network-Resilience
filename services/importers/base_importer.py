@@ -27,24 +27,21 @@ class BaseImporter:
 
     def get_reader(self):
         try:
-            # Use io.TextIOWrapper to stream from the file-like object without loading all into memory
+            # Read the entire file into memory (safe for CSV sizes) and decode it.
+            # This avoids 'SpooledTemporaryFile' missing attribute errors with TextIOWrapper
             if hasattr(self.csv_file, 'stream'):
                 self.csv_file.stream.seek(0)
-                # Wrap the binary stream in a TextIOWrapper for line-by-line reading
-                stream = io.TextIOWrapper(self.csv_file.stream, encoding='utf-8-sig', errors='replace')
-            else:
+                content = self.csv_file.stream.read()
+            elif hasattr(self.csv_file, 'read'):
                 self.csv_file.seek(0)
-                # Handle cases where it's already a text stream or bytes
-                if hasattr(self.csv_file, 'read'):
-                    first_bits = self.csv_file.read(1024)
-                    self.csv_file.seek(0)
-                    if isinstance(first_bits, bytes):
-                        stream = io.TextIOWrapper(self.csv_file, encoding='utf-8-sig', errors='replace')
-                    else:
-                        stream = self.csv_file
-                else:
-                    return None
+                content = self.csv_file.read()
+            else:
+                return None
 
+            if isinstance(content, bytes):
+                content = content.decode('utf-8-sig', errors='replace')
+            
+            stream = io.StringIO(content)
             return csv.DictReader(stream)
         except Exception as e:
             current_app.logger.error(f"Failed to read CSV {self.filename}: {e}")
